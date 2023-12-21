@@ -1,0 +1,30 @@
+{
+    "files.associations": {
+        "stdio.h": "c",
+        "stdlib.h": "c",
+        "assert.h": "c",
+        "syslog.h": "c",
+        "fishhook.h": "c",
+        "util.h": "c",
+        "common.h": "c",
+        "unistd.h": "c",
+        "loader.h": "c",
+        "mach.h": "c",
+        "dyld.h": "c",
+        "syslimits.h": "c",
+        "*.cccc": "c",
+        "varargs.h": "c",
+        "vadefs.h": "c",
+        "fcntl.h": "c",
+        "stat.h": "c",
+        "dlfcn.h": "c",
+        "sandbox.h": "c",
+        "libbsd.h": "c",
+        "stdarg.h": "c",
+        "errno.h": "c",
+        "string.h": "c",
+        "spawn.h": "c",
+        "paths.h": "c",
+        "iosfwd": "cpp"
+    }
+}

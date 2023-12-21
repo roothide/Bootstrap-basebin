@@ -1,0 +1,3 @@
+#!/bin/sh
+
+# rm -f /basebin/bootstrap.dylib || true
