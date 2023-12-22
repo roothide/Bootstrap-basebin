@@ -1,5 +1,6 @@
 
 int bsd_enableJIT();
+int bsd_enableJIT2(pid_t pid);
 
 const char* bsd_getsbtoken();
 

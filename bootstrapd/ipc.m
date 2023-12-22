@@ -13,8 +13,13 @@
 #include <roothide.h>
 
 
+#ifndef BOOTSTRAPD
+#define printf(...)
+#define NSLog(...)
+#else
 #define printf(...)	NSLog(@ __VA_ARGS__)
 #define perror(x) NSLog(@"%s : %s", x, strerror(errno))
+#endif
 
 
 #define BSD_PORT_PATH jbroot("/basebin/.bootstrapd.port")
@@ -76,7 +81,7 @@ int recvbuf(int sd, void* buffer, int bufsize)
 
     int rlen = 0;
 	
-	while((rlen=recvmsg(sd, &msg, 0))<=0 && errno==EINTR); //may be interrupted by ptrace
+	while((rlen=recvmsg(sd, &msg, 0))<=0 && errno==EINTR){}; //may be interrupted by ptrace
 	
 	NSLog(@"recvbuf %p %d %d, %s", buffer, bufsize, rlen, rlen>0?"":strerror(errno));
 	
@@ -191,7 +196,7 @@ int set_stop_server()
     return 0;
 }
 
-int start_run_server(int (*callback)(int socket, pid_t pid, int reqId, NSDictionary* msg))
+int start_ipc_server(int (*callback)(int socket, pid_t pid, int reqId, NSDictionary* msg))
 {	
 	//unlink the old one
 	unlink(BSD_PORT_PATH);

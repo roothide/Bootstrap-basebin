@@ -13,6 +13,8 @@ extern char** environ;
 
 void fixsuid();
 
+EXPORT int jbdswDebugMe();
+
 
 extern struct mach_header_64* _dyld_get_prog_image_header();
 extern intptr_t _dyld_get_image_slide(struct mach_header_64* mh);

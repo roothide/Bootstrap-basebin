@@ -98,6 +98,21 @@ int handleRequest(int conn, pid_t pid, int reqId, NSDictionary* msg)
 			reply(conn, @{@"result": @(result)});
 		} break;
 
+		case BSD_REQ_ENABLE_JIT2:
+		{
+			int result = 0;
+			pid_t _pid = [msg[@"pid"] intValue];
+			NSLog(@"BSD_REQ_ENABLE_JIT2 %d -> %d", pid, _pid);
+			if(_pid > 0) {
+				int enableJIT(pid_t);
+				result = enableJIT(_pid);
+			} else {
+				result = -1;
+			}
+
+			reply(conn, @{@"result": @(result)});
+		} break;
+
 		case BSD_REQ_GET_SBTOKEN:
 		{
 			reply(conn, @{@"result": @(0), @"sbtoken":gSandboxExtensions});
@@ -214,6 +229,44 @@ _daemon(nochdir, noclose)
 }
 
 
+int stopServer(bool force)
+{
+	int result = -1;
+	FILE* fp = fopen(BSD_PID_PATH, "r");
+	if(fp) {
+		pid_t pid=0;
+		fscanf(fp, "%d", &pid);
+		NSLog(@"server pid=%d", pid);
+		if(pid > 0) {
+
+			result = bsd_stopServer();
+				
+			if(force) {
+				sleep(1);
+				kill(pid, SIGKILL);
+				NSLog(@"kill status=%d", result);
+				unlink(BSD_PID_PATH);
+			}
+		}
+		fclose(fp);
+	} else {
+		NSLog(@"server not running!");
+	}
+	return result;
+}
+
+int start_run_server()
+{
+	gSandboxExtensions = generateSandboxExtensions(NO);
+	gSandboxExtensionsExt = generateSandboxExtensions(YES);
+
+	int ret = start_ipc_server(handleRequest);
+	NSLog(@"server return");
+	unlink(BSD_PID_PATH);
+
+	return ret;
+}
+
 int main(int argc, char *argv[], char *envp[]) {
 	@autoreleasepool {
 		NSLog(@"Hello bootstrapd! pid=%d, uid=%d\n", getpid(), getuid());
@@ -221,17 +274,14 @@ int main(int argc, char *argv[], char *envp[]) {
 
 		if(argc >= 2) 
 		{
-			if(strcmp(argv[1], "server") == 0)
-			{
-				if(getpppid()==1) {
-    				return posix_spawn(NULL, argv[0], NULL, NULL, argv, envp);
-				}
-
+			if(strcmp(argv[1], "daemon") == 0) {
 				_daemon(0,0);
-
-				gSandboxExtensions = generateSandboxExtensions(NO);
-				gSandboxExtensionsExt = generateSandboxExtensions(YES);
-
+				argv[1] = "server";
+    			return posix_spawn(NULL, argv[0], NULL, NULL, argv, envp);
+			}
+			else if(strcmp(argv[1], "server") == 0)
+			{
+				bool force = argc>=3 && strcmp(argv[2],"-f")==0;
 
 				FILE* fp = fopen(BSD_PID_PATH, "r");
 				if(fp) {
@@ -241,7 +291,11 @@ int main(int argc, char *argv[], char *envp[]) {
 						int killed = kill(pid, 0);
 						if(killed==0) {
 							NSLog(@"server is running (%d)", pid);
-							return -1;
+							if(force) {
+								assert(stopServer(true)==0);
+							} else {
+								return -1;
+							}
 						}
 					}
 					fclose(fp);
@@ -252,9 +306,7 @@ int main(int argc, char *argv[], char *envp[]) {
 				fprintf(fp, "%d", getpid());
 				fclose(fp);
 
-				start_run_server(handleRequest);
-				NSLog(@"server return");
-				unlink(BSD_PID_PATH);
+				return start_run_server();
 			}
 			else if(strcmp(argv[1], "check") == 0)
 			{
@@ -275,25 +327,7 @@ int main(int argc, char *argv[], char *envp[]) {
 			else if(strcmp(argv[1], "stop") == 0)
 			{
 				bool force = argc>=3 && strcmp(argv[2],"-f")==0;
-				FILE* fp = fopen(BSD_PID_PATH, "r");
-				if(fp) {
-					pid_t pid=0;
-					fscanf(fp, "%d", &pid);
-					NSLog(@"server pid=%d", pid);
-					if(pid > 0) {
-		
-						if(force) {
-							int killed = kill(pid, SIGKILL);
-							NSLog(@"kill status=%d", killed);
-							unlink(BSD_PID_PATH);
-						} else {
-							bsd_stopServer();
-						}
-					}
-					fclose(fp);
-				} else {
-					NSLog(@"server not running!");
-				}
+				return stopServer(force);
 			}
 			else if(strcmp(argv[1], "jitest") == 0)
 			{
