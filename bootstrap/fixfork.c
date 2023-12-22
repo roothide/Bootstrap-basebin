@@ -162,15 +162,15 @@ int _snprintf(char* buffer, int bufsize, const char * __restrict format, ...) {
 }
 
 
-#define forklog(...)	do {\
-char buf[1024];\
-_snprintf(buf,sizeof(buf),__VA_ARGS__);\
-write(STDERR_FILENO,buf,strlen(buf));\
-write(STDERR_FILENO,"\n",1);\
-fsync(STDERR_FILENO);\
-} while(0)
+// #define forklog(...)	do {\
+// char buf[1024];\
+// _snprintf(buf,sizeof(buf),__VA_ARGS__);\
+// write(STDERR_FILENO,buf,strlen(buf));\
+// write(STDERR_FILENO,"\n",1);\
+// fsync(STDERR_FILENO);\
+// } while(0)
 
-
+#define forklog(...)
 
 void showvm(task_port_t task, uint64_t start, uint64_t size)
 {
@@ -203,8 +203,6 @@ void showvm(task_port_t task, uint64_t start, uint64_t size)
     } 
 }
 
-
-
 __attribute__((noinline, naked)) volatile kern_return_t _mach_vm_protect(mach_port_name_t target, mach_vm_address_t address, mach_vm_size_t size, boolean_t set_maximum, vm_prot_t new_protection)
 {
 #if __arm64__
@@ -223,10 +221,6 @@ __attribute__((noinline, naked)) volatile kern_return_t _mach_vm_protect(mach_po
 #include <sys/mman.h>
 #include <sys/syslimits.h>
 
-uint64_t textaddr=0;
-uint64_t textsize=0;
-uint64_t vmSpaceSize=0;
-
 void forkfix(const char* tag, bool flag, bool child)
 {
 	kern_return_t kr = -1;
@@ -235,7 +229,7 @@ void forkfix(const char* tag, bool flag, bool child)
     // if(flag) {
     //     int count=0;
     //     thread_act_array_t list;
-    //     assert(task_threads(mach_task_self(), &list, &count) == KERN_SUCCESS);
+    //     assert(task_threads(task, &list, &count) == KERN_SUCCESS);
     //     for(int i=0; i<count; i++) {
     //         if(list[i] != mach_thread_self()) { //mach_port_deallocate
     //             assert(thread_suspend(list[i]) == KERN_SUCCESS);
@@ -243,110 +237,39 @@ void forkfix(const char* tag, bool flag, bool child)
     //     }
     // }
 
-if(!textaddr) {
+
     struct mach_header_64* header = _dyld_get_prog_image_header(); //_NSGetMachExecuteHeader()
     struct load_command* lc = (struct load_command*)((uint64_t)header + sizeof(*header));
     for (uint32_t i = 0; i < header->ncmds; i++) {
         if (lc->cmd == LC_SEGMENT_64)
         {
             struct segment_command_64 * seg = (struct segment_command_64 *) lc;
-                forklog("%s-%d segment: %s file=%llx:%llx vm=%p:%llx\n", tag, flag, seg->segname, seg->fileoff, seg->filesize, (void*)seg->vmaddr, seg->vmsize);
-
-            if(strcmp(seg->segname, SEG_PAGEZERO) != 0) {
-
-				vmSpaceSize += seg->vmsize;
-			}
-
-
             if(strcmp(seg->segname, SEG_TEXT)==0)
             {
                 forklog("%s-%d segment: %s file=%llx:%llx vm=%p:%llx\n", tag, flag, seg->segname, seg->fileoff, seg->filesize, (void*)seg->vmaddr, seg->vmsize);
 
                 //According to dyld, the __TEXT address is always equal to the header address
 
-				textaddr = (uint64_t)header;
-				textsize = seg->vmsize;
+                //showvm(task, (uint64_t)textaddr, textsize); 
 
-                //break;
+				kr = _mach_vm_protect(task, (vm_address_t)header, seg->vmsize, false, flag ? VM_PROT_READ : VM_PROT_READ|VM_PROT_EXECUTE);
+				forklog("[%d] %s vm_protect.%d %d,%s\n", getpid(), tag, flag,  kr, mach_error_string(kr));
+				assert(kr == KERN_SUCCESS);
+
+				// assert(*(int*)textaddr);
+
+                //showvm(task, (uint64_t)textaddr, textsize); 
+
+                break;
             }
         }
         lc = (struct load_command *) ((char *)lc + lc->cmdsize);
     }
 
-	forklog("executable header=%p, textsize=%lx vmSpaceSize=%lx", header, textsize, vmSpaceSize);
-}
-
-				// 	char exepath[PATH_MAX]={0};
-				// 	uint32_t pathsize=sizeof(exepath);
-				// 	_NSGetExecutablePath(exepath, &pathsize);
-				// 	forklog("exepath=%s", exepath);
-
-
-				// {
-				// 	// int ret = munmap((void*)textaddr, textsize);
-				// 	// forklog("munmap=%d,%s", ret, strerror(errno));
-
-				// 	// kr = vm_deallocate(task, (vm_address_t)textaddr, textsize);
-				// 	// forklog("vm_deallocate=%d %s", kr, mach_error_string(kr));
-
-
-				// 	// showvm(task, (uint64_t)textaddr, textsize);
-
-
-
-				// 	vm_address_t loadAddress = (vm_address_t)textaddr;
-				// 	kr = vm_allocate(task, &loadAddress, (vm_size_t)textsize, VM_FLAGS_ANYWHERE);
-				// 	forklog("vm_allocate=%llx, %x %s", loadAddress, kr, mach_error_string(kr));
-
-
-				// 	int fd = open(exepath, O_RDONLY);
-				// 	forklog("fd=%d",fd);
-				// 	void* mapaddr = mmap((void*)loadAddress, (size_t)textsize, PROT_READ|PROT_EXEC, MAP_FIXED|MAP_PRIVATE, fd, 0);
-				// 	forklog("mmap=%p,%s", mapaddr, strerror(errno));
-
-				// 	int prot=0, maxprot=0;
-				// 	vm_address_t remapaddr = textaddr;
-				// 	kr = vm_remap(task, &remapaddr, textsize, 0, VM_FLAGS_FIXED|VM_FLAGS_OVERWRITE, task, loadAddress, false, &prot, &maxprot, VM_INHERIT_SHARE);
-				// 	forklog("vm_remap=%llx,%d/%d : %x %s", remapaddr, prot, maxprot, kr, mach_error_string(kr));
-
-				// 	close(fd);
-				// }
-
-
-
-				// kr = _mach_vm_protect(task, (vm_address_t)textaddr, textsize, false, flag ? VM_PROT_READ|VM_PROT_WRITE|VM_PROT_COPY : VM_PROT_READ|VM_PROT_EXECUTE);
-				// if(kr != KERN_SUCCESS) {
-				// 	forklog("[%d] %s[%d] vm_protect failed! %d,%s\n", getpid(), tag, flag,  kr, mach_error_string(kr));
-				// 	//abort();
-				// } else {
-				// 	forklog("[%d] %s[%d] vm_protect success @ %p,%llx\n", getpid(), tag, flag,  (void*)textaddr, textsize);
-				// }
-
-
-				if(flag) {
-					// kr = _mach_vm_protect(task, (vm_address_t)textaddr, textsize, false, VM_PROT_READ|VM_PROT_WRITE|VM_PROT_COPY);
-					// forklog("[%d] %s[%d] vm_protect %d,%s\n", getpid(), tag, flag,  kr, mach_error_string(kr));
-					// *(int*)(textaddr+0x1C) = 1;
-					kr = _mach_vm_protect(task, (vm_address_t)textaddr, textsize, false, VM_PROT_READ);
-					forklog("[%d] %s[%d] vm_protect %d,%s\n", getpid(), tag, flag,  kr, mach_error_string(kr));
-					
-				} else {
-					// kr = _mach_vm_protect(task, (vm_address_t)textaddr, textsize, false, VM_PROT_READ|VM_PROT_WRITE);
-					// forklog("[%d] %s[%d] vm_protect %d,%s\n", getpid(), tag, flag,  kr, mach_error_string(kr));
-					// *(int*)(textaddr+0x1C) = 2;
-					kr = _mach_vm_protect(task, (vm_address_t)textaddr, textsize, false, VM_PROT_READ|VM_PROT_EXECUTE);
-					forklog("[%d] %s[%d] vm_protect %d,%s\n", getpid(), tag, flag,  kr, mach_error_string(kr));
-				}
-
-
-				// assert(*(int*)textaddr);
-
-                //showvm(task_self_trap(), (uint64_t)textaddr, textsize); 
-
     // if(!flag) {
     //     int count=0;
     //     thread_act_array_t list;
-    //     assert(task_threads(mach_task_self(), &list, &count) == KERN_SUCCESS);
+    //     assert(task_threads(task, &list, &count) == KERN_SUCCESS);
     //     for(int i=0; i<count; i++) {
     //         if(list[i] != mach_thread_self()) { //mach_port_deallocate
     //             assert(thread_resume(list[i]) == KERN_SUCCESS);
