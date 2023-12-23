@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <dirent.h>
 #include <sys/stat.h>
-
+#include <libgen.h>
 
 
 #include <algorithm>
@@ -512,7 +512,7 @@ int reset_blob(CS_DecodedSuperBlob *decodedSuperblob, CS_DecodedBlob *realCodeDi
     return 0;
 }
 
-int apply_coretrust_bypass(const char *machoPath)
+int apply_coretrust_bypass(const char *machoPath, const char* extraEntitlements)
 {
     MachO *macho = macho_init_for_writing(machoPath);
     if (!macho) return -1;
@@ -641,18 +641,26 @@ int apply_coretrust_bypass(const char *machoPath)
     
     if(macho->machHeader.filetype == MH_EXECUTE) 
     {
-        int blobsize = csd_blob_get_size(entBlob);
-        CS_GenericBlob* blob = (CS_GenericBlob*)malloc(blobsize);
-        memset(blob, 0, blobsize);
-        memory_stream_read(entBlob->stream, 0, blobsize, blob);
-
         struct Baton {
             std::string entitlements_;
             std::string derformat_;
         } baton;
 
         std::string entitlements_;
-        auto combined = plist(entitlements_.assign(blob->data, blobsize-sizeof(CS_GenericBlob)));
+
+        if(entBlob) {
+
+            int blobsize = csd_blob_get_size(entBlob);
+            CS_GenericBlob* blob = (CS_GenericBlob*)malloc(blobsize);
+            memset(blob, 0, blobsize);
+            memory_stream_read(entBlob->stream, 0, blobsize, blob);
+
+            entitlements_.assign(blob->data, blobsize-sizeof(CS_GenericBlob));
+
+            free(blob);
+        }
+
+        auto combined = plist(entitlements_);
 
         _scope({ plist_free(combined); });
         if (plist_get_node_type(combined) != PLIST_DICT) {
@@ -660,14 +668,7 @@ int apply_coretrust_bypass(const char *machoPath)
             exit(1);
         };
 
-        auto merging(plist("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
-<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\
-<plist version=\"1.0\">\
-<dict>\
-<key>get-task-allow</key>\
-<true/>\
-</dict>\
-</plist>"));
+        auto merging(plist(extraEntitlements));
 
         _scope({ plist_free(merging); });
         if (plist_get_node_type(merging) != PLIST_DICT) {
@@ -697,8 +698,6 @@ int apply_coretrust_bypass(const char *machoPath)
         _scope({ free(xml); });
 
         baton.entitlements_.assign(xml, size);
-
-        free(blob);
 
 
         reset_blob(decodedSuperblob, realCodeDirBlob, CSSLOT_ENTITLEMENTS, (void*)baton.entitlements_.data(), baton.entitlements_.size());
@@ -768,44 +767,22 @@ char *extract_preferred_slice(const char *fatPath)
     return temp;
 }
 
-int apply_coretrust_bypass_wrapper(const char *inputPath, const char *outputPath)
+
+int realstore(const char* path, const char* extra_entitlements)
 {
-    char *machoPath = extract_preferred_slice(inputPath);
-    printf("extracted best slice to %s\n", machoPath);
-
-    int r = apply_coretrust_bypass(machoPath);
-    if (r != 0) {
-        free(machoPath);
-        return r;
-    }
-
-    r = copyfile(machoPath, outputPath, 0, COPYFILE_ALL | COPYFILE_MOVE | COPYFILE_UNLINK);
-    if (r == 0) {
-        chmod(outputPath, 0755);
-        printf("Signed file! CoreTrust bypass eta now!!\n");
-    }
-    else {
-        perror("copyfile");
-    }
-
-    free(machoPath);
-    return r;
-}
-
-
-int realstore(const char* path)
-{
+    // printf("extra_entitlements: %s\n", extra_entitlements);
+    char buf[PATH_MAX];
     const char *input = path;
 
     struct stat st;
     assert(stat(input, &st) == 0);
 
 	char *machoPath = extract_preferred_slice(input);
-	printf("Extracted best slice to %s\n", machoPath);
+	printf("Extracted %s best slice to %s\n", basename_r(input, buf), machoPath);
 
     printf("Applying CoreTrust bypass...\n");
 
-	if (apply_coretrust_bypass(machoPath) != 0) {
+	if (apply_coretrust_bypass(machoPath, extra_entitlements) != 0) {
 		printf("Failed applying CoreTrust bypass\n");
 		return -1;
 	}

@@ -95,7 +95,18 @@ BOOL LSApplicationWorkspace_registerApplicationDictionary_(Class self, SEL sel, 
     unlink([bundlePath stringByAppendingPathComponent:@".preload"].UTF8String);
     unlink([bundlePath stringByAppendingPathComponent:@".prelib"].UTF8String);
     
-    if(jbrootexists) {
+    if(jbrootexists) 
+    {
+        NSString* rebuildFile = [bundlePath stringByAppendingPathComponent:@".rebuild"];
+        if(![NSFileManager.defaultManager fileExistsAtPath:rebuildFile])
+        {
+            int execBinary(const char* path, const char** argv);
+            const char* argv[] = {"/basebin/rebuildapp", rootfs(bundlePath).UTF8String, NULL};
+            assert(execBinary(jbroot(argv[0]), argv) == 0);
+            
+            [[NSString new] writeToFile:rebuildFile atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        }
+
         NSString* newExecutableName = @".preload";
         appInfoPlist[@"CFBundleExecutable"] = newExecutableName;
         [appInfoPlist writeToFile:appInfoPath atomically:YES];

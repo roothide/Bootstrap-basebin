@@ -196,7 +196,7 @@ int set_stop_server()
     return 0;
 }
 
-int start_ipc_server(int (*callback)(int socket, pid_t pid, int reqId, NSDictionary* msg))
+int run_ipc_server(int (*callback)(int socket, pid_t pid, int reqId, NSDictionary* msg))
 {	
 	//unlink the old one
 	unlink(BSD_PORT_PATH);

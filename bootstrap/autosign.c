@@ -349,5 +349,9 @@ int dpkghook_new_rmdir(char* path)
     snprintf(prelib, sizeof(prelib), "%s/.prelib", path);
 	unlink(jbroot(prelib));
 
+    char rebuild[PATH_MAX];
+    snprintf(rebuild, sizeof(rebuild), "%s/.rebuild", path);
+	unlink(jbroot(rebuild));
+
     return dpkghook_orig_rmdir(path);
 }

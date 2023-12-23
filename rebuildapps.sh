@@ -14,5 +14,6 @@ ls -d /var/containers/Bundle/Application/*/*.app/.jbroot | while read file; do
     unlink "$bundle"/.jbroot
     ln -s /  "$bundle"/.jbroot
 
+    uicache -u "$bundle"
     uicache -s -p "$bundle"
 done

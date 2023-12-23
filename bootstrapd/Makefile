@@ -10,10 +10,9 @@ TOOL_NAME = bootstrapd
 
 #-fvisibility=hidden 
 
-bootstrapd_FILES = $(wildcard *.c *.m *.cpp)
-bootstrapd_CFLAGS = -DBOOTSTRAPD -fobjc-arc -Wno-unused-variable -Wno-unused-function -Wno-unneeded-internal-declaration -I./ $(shell pkg-config --cflags libcrypto) $(shell pkg-config --cflags libplist-2.0)
-bootstrapd_CCFLAGS = -std=c++11
-bootstrapd_LDFLAGS = -lbsm -L./ -lchoma -lcrypto -lplist-2.0
+bootstrapd_FILES = $(wildcard *.c *.m *.mm *.cpp)
+bootstrapd_CFLAGS = -DBOOTSTRAPD -fobjc-arc -Wno-deprecated-declarations -Wno-unused-variable -Wno-unused-function -Wno-unneeded-internal-declaration
+bootstrapd_LDFLAGS = -lbsm
 bootstrapd_CODESIGN_FLAGS = -Sentitlements.plist
 bootstrapd_INSTALL_PATH = /basebin/
 

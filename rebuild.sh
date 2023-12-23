@@ -14,6 +14,10 @@ cd fastPathSign
 make clean && make
 cd -
 
+cd rebuildapp
+make clean && make package
+cd -
+
 cd preload
 make clean && make package
 cd -
