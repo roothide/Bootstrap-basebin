@@ -3,7 +3,10 @@
 #include <unistd.h>
 #include <libgen.h>
 #include <errno.h>
+#include <spawn.h>
 #include <roothide.h>
+
+extern char*const* environ;
 
 #include "../bootstrapd/libbsd.h"
 
@@ -37,8 +40,16 @@ int main(int argc, char *argv[], char *envp[]) {
 		snprintf(executable, sizeof(executable), "%s/%s", dirname(argv[0]), executableName.UTF8String);
 
 		argv[0] = executable;
-		execv(argv[0], argv); //don't use envp
-		NSLog(@"exec failed %s for %s", strerror(errno), argv[0]);
+		
+		posix_spawnattr_t attr;
+		posix_spawnattr_init(&attr);
+
+		#define _POSIX_SPAWN_NANO_ALLOCATOR     0x0200
+		posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETEXEC|POSIX_SPAWN_CLOEXEC_DEFAULT|_POSIX_SPAWN_NANO_ALLOCATOR);
+
+		pid_t pid=0;
+		int ret = posix_spawn(&pid, argv[0], NULL, &attr, argv, environ);
+		NSLog(@"exec failed %s,%d for %s", strerror(ret), pid, argv[0]);
 		abort();
 	}
 }

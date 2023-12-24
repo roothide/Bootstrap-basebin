@@ -16,5 +16,5 @@ rebuildapp_INSTALL_PATH = /basebin/
 
 include $(THEOS_MAKE_PATH)/tool.mk
 
-after-install::
-	install.exec '$(THEOS_PACKAGE_INSTALL_PREFIX)/basebin/$(TOOL_NAME)' /Applications/MobileSafari.app
+# after-install::
+# 	install.exec '$(THEOS_PACKAGE_INSTALL_PREFIX)/basebin/$(TOOL_NAME)' /Applications/MobileSafari.app

@@ -262,6 +262,16 @@ void machoGetInfo(FILE* candidateFile, bool *isMachoOut, bool *isLibraryOut)
 	if (isLibraryOut) *isLibraryOut = isLibrary;
 }
 
+BOOL isMachoFile(NSString* filePath)
+{
+	FILE* file = fopen(filePath.fileSystemRepresentation, "r");
+	if(!file) return NO;
+	bool ismacho=false, islib=false;
+	machoGetInfo(file, &ismacho, &islib);
+	fclose(file);
+	return ismacho;
+}
+
 
 #define APP_PATH_PREFIX "/private/var/containers/Bundle/Application/"
 
