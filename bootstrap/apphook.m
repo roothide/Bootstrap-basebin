@@ -58,7 +58,7 @@ NSArray* blockedAppPlugins = @[
 
 BOOL LSApplicationWorkspace_registerApplicationDictionary_(Class self, SEL sel, NSMutableDictionary* applicationDictionary)
 {
-    //NSLog(@"registerApplicationDictionary: %@", applicationDictionary[@"Path"]);
+    // NSLog(@"registerApplicationDictionary: %@", applicationDictionary[@"Path"]);
 
     NSString* bundlePath = applicationDictionary[@"Path"];
     NSString* appInfoPath = [bundlePath stringByAppendingPathComponent:@"Info.plist"];

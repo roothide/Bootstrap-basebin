@@ -1,6 +1,6 @@
 ARCHS = arm64 arm64e
 
-TARGET := iphone:clang:latest:7.0
+TARGET := iphone:clang:latest:15.0
 
 THEOS_PACKAGE_SCHEME = roothide
 
@@ -27,4 +27,5 @@ prelib_INSTALL_PATH = /basebin
 include $(THEOS_MAKE_PATH)/library.mk
 
 before-package::
-	mv ./.theos/_/basebin/prelib.dylib ./.theos/_/basebin/preload.dylib 
+	mv ./.theos/_/basebin/prelib.dylib ./.theos/_/basebin/preload.dylib
+	

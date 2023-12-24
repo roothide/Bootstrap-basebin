@@ -208,20 +208,59 @@ BOOL isSameFile(NSString *path1, NSString *path2)
 	return sb1.st_ino == sb2.st_ino;
 }
 
-
-BOOL isMachoFile(NSString* filePath)
+void machoEnumerateArchs(FILE* machoFile, void (^archEnumBlock)(struct mach_header_64* header, uint32_t offset, bool* stop))
 {
-	FILE* file = fopen(filePath.fileSystemRepresentation, "r");
-	if(!file) return NO;
+	struct mach_header_64 mh={0};
+	if(fseek(machoFile,0,SEEK_SET)!=0)return;
+	if(fread(&mh,sizeof(mh),1,machoFile)!=1)return;
+	
+	if(mh.magic==FAT_MAGIC || mh.magic==FAT_CIGAM)//and || mh.magic==FAT_MAGIC_64 || mh.magic==FAT_CIGAM_64? with fat_arch_64
+	{
+		struct fat_header fh={0};
+		if(fseek(machoFile,0,SEEK_SET)!=0)return;
+		if(fread(&fh,sizeof(fh),1,machoFile)!=1)return;
+		
+		for(int i = 0; i < OSSwapBigToHostInt32(fh.nfat_arch); i++)
+		{
+			uint32_t archMetadataOffset = sizeof(fh) + sizeof(struct fat_arch) * i;
 
-	fseek(file, 0, SEEK_SET);
-	uint32_t magic;
-	fread(&magic, sizeof(uint32_t), 1, file);
-	fclose(file);
+			struct fat_arch fatArch={0};
+			if(fseek(machoFile, archMetadataOffset, SEEK_SET)!=0)break;
+			if(fread(&fatArch, sizeof(fatArch), 1, machoFile)!=1)break;
 
-	return magic == FAT_MAGIC || magic == FAT_CIGAM || magic == MH_MAGIC_64 || magic == MH_CIGAM_64;
+			if(fseek(machoFile, OSSwapBigToHostInt32(fatArch.offset), SEEK_SET)!=0)break;
+			if(fread(&mh, sizeof(mh), 1, machoFile)!=1)break;
+
+			if(mh.magic != MH_MAGIC_64 && mh.magic != MH_CIGAM_64) continue; //require Macho64
+			
+			bool stop = false;
+			archEnumBlock(&mh, OSSwapBigToHostInt32(fatArch.offset), &stop);
+			if(stop) break;
+		}
+	}
+	else if(mh.magic == MH_MAGIC_64 || mh.magic == MH_CIGAM_64) //require Macho64
+	{
+		bool stop=false;
+		archEnumBlock(&mh, 0, &stop);
+	}
 }
 
+void machoGetInfo(FILE* candidateFile, bool *isMachoOut, bool *isLibraryOut)
+{
+	if (!candidateFile) return;
+
+	__block bool isMacho=false;
+	__block bool isLibrary = false;
+	
+	machoEnumerateArchs(candidateFile, ^(struct mach_header_64* header, uint32_t offset, bool* stop) {
+		isMacho = true;
+		isLibrary = OSSwapLittleToHostInt32(header->filetype) != MH_EXECUTE;
+		*stop = true;
+	});
+
+	if (isMachoOut) *isMachoOut = isMacho;
+	if (isLibraryOut) *isLibraryOut = isLibrary;
+}
 
 
 #define APP_PATH_PREFIX "/private/var/containers/Bundle/Application/"
@@ -356,6 +395,7 @@ int signApp(NSString* appPath)
 			if (containerRequiredObj && [containerRequiredObj isKindOfClass:[NSNumber class]]) {
 				containerRequired = [(NSNumber *)containerRequiredObj boolValue];
 				if(containerRequired) {
+					NSLog(@"container %@ for %@", bundleId, filePath);
 					extraEntitlements[@"com.apple.private.security.container-required"] = bundleId;
 				}
 			}
@@ -375,6 +415,7 @@ int signApp(NSString* appPath)
 				}
 
 				if(!noContainer && !noSandbox) {
+					// NSLog(@"container %@ for %@", bundleId, filePath);
 					extraEntitlements[@"com.apple.private.security.container-required"] = bundleId;
 				}
 			}
