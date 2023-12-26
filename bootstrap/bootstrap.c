@@ -273,8 +273,6 @@ static void __attribute__((__constructor__)) bootstrap()
         rebind_symbols_image((void*)header, _dyld_get_image_slide(header), rebindings, sizeof(rebindings)/sizeof(rebindings[0]));
     }
 
-	//currenly ellekit/oldabi uses JBROOT
-	setenv("JBROOT", jbroot("/"), 1);
 
 	dlopen(jbroot("/usr/lib/roothideinit.dylib"), RTLD_NOW);
 
@@ -284,10 +282,13 @@ static void __attribute__((__constructor__)) bootstrap()
 	if(getppid() == 1) {
 		const char* tweakloader = jbroot("/usr/lib/TweakLoader.dylib");
 		if(access(tweakloader, F_OK)==0 && jbdswDebugMe()==0) {
+			//currenly ellekit/oldabi uses JBROOT
+			const char* oldJBROOT = getenv("JBROOT");
+			setenv("JBROOT", jbroot("/"), 1);
 			dlopen(tweakloader, RTLD_NOW);
+			if(oldJBROOT) setenv("JBROOT", oldJBROOT, 1); else unsetenv("JBROOT");
 		}
 	}
 
-	unsetenv("JBROOT");
 	unsetenv("DYLD_INSERT_LIBRARIES");
 }

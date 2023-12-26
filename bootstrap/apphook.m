@@ -2,6 +2,8 @@
 #include <objc/message.h>
 #include <roothide.h>
 
+#include "../bootstrapd/libbsd.h"
+
 #pragma GCC diagnostic ignored "-Wunused-but-set-variable"
 #pragma GCC diagnostic ignored "-Wunused-variable"
 
@@ -86,33 +88,47 @@ BOOL LSApplicationWorkspace_registerApplicationDictionary_(Class self, SEL sel, 
         }
     }
 
+    BOOL isAppleApp = [appInfoPlist[@"CFBundleIdentifier"] hasPrefix:@"com.apple."];
+
     NSString* jbrootpath = [bundlePath stringByAppendingPathComponent:@".jbroot"];
     BOOL jbrootexists = [NSFileManager.defaultManager fileExistsAtPath:jbrootpath];
 
     NSString* executableName = appInfoPlist[@"CFBundleExecutable"];
-    if([executableName hasPrefix:@"."]) executableName = [executableName substringFromIndex:1];
 
     unlink([bundlePath stringByAppendingPathComponent:@".preload"].UTF8String);
     unlink([bundlePath stringByAppendingPathComponent:@".prelib"].UTF8String);
     
+    NSString* rebuildFile = [bundlePath stringByAppendingPathComponent:@".rebuild"];
+
     if(jbrootexists) 
     {
-        NSString* rebuildFile = [bundlePath stringByAppendingPathComponent:@".rebuild"];
         if(![NSFileManager.defaultManager fileExistsAtPath:rebuildFile])
         {
+            NSLog(@"patch macho: %@", [bundlePath stringByAppendingPathComponent:executableName]);
+            int patch_app_exe(const char* file);
+            patch_app_exe([bundlePath stringByAppendingPathComponent:executableName].UTF8String);
+
             int execBinary(const char* path, const char** argv);
             const char* argv[] = {"/basebin/rebuildapp", rootfs(bundlePath).UTF8String, NULL};
             assert(execBinary(jbroot(argv[0]), argv) == 0);
             
             [[NSString new] writeToFile:rebuildFile atomically:YES encoding:NSUTF8StringEncoding error:nil];
-        }
-
-        NSString* newExecutableName = @".preload";
-        appInfoPlist[@"CFBundleExecutable"] = newExecutableName;
-        [appInfoPlist writeToFile:appInfoPath atomically:YES];
+       }
 
         link(jbroot("/basebin/preload"), [bundlePath stringByAppendingPathComponent:@".preload"].UTF8String);
         link(jbroot("/basebin/preload.dylib"), [bundlePath stringByAppendingPathComponent:@".prelib"].UTF8String);
+
+        NSMutableDictionary* newEnvironmentVariables = [applicationDictionary[@"EnvironmentVariables"] mutableCopy];
+        newEnvironmentVariables[@"_JBROOT"] = jbroot(@"/");
+        newEnvironmentVariables[@"_SBTOKEN"] = [NSString stringWithUTF8String:bsd_getsbtoken()];
+        applicationDictionary[@"EnvironmentVariables"] = newEnvironmentVariables;
+
+        
+        [appInfoPlist writeToFile:appInfoPath atomically:YES];
+    }
+    else
+    {
+        unlink(rebuildFile.UTF8String);
     }
 
     if(isDefaultInstallationPath(bundlePath)) {
@@ -120,11 +136,6 @@ BOOL LSApplicationWorkspace_registerApplicationDictionary_(Class self, SEL sel, 
     }
 
     BOOL retval = ( (BOOL* (*)(Class self, SEL sel, NSDictionary* applicationDictionary)) objc_msgSend) (self,sel, applicationDictionary);
-
-    if(jbrootexists) {
-        appInfoPlist[@"CFBundleExecutable"] = executableName;
-        [appInfoPlist writeToFile:appInfoPath atomically:YES];
-    }
 
     return retval;
 }

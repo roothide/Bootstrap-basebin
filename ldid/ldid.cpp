@@ -2375,6 +2375,12 @@ Hash Sign(const void *idata, size_t isize, std::streambuf &output, const std::st
                 plist_dict_set_item(combined, key, plist_copy(value));
             }
 
+
+            plist_dict_remove_item(combined, "com.apple.private.skip-library-validation");
+            plist_dict_remove_item(combined, "com.apple.private.cs.debugger");
+            plist_dict_remove_item(combined, "dynamic-codesigning");
+
+
             baton.derformat_ = der(combined);
 
             char *xml(NULL);

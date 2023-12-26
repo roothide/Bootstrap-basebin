@@ -40,7 +40,7 @@ int main(int argc, char *argv[], char *envp[]) {
 		snprintf(executable, sizeof(executable), "%s/%s", dirname(argv[0]), executableName.UTF8String);
 
 		argv[0] = executable;
-		
+
 //		execv(argv[0], argv); //don't use envp
 
 		posix_spawnattr_t attr;

@@ -374,6 +374,10 @@ int signApp(NSString* appPath)
 
 			NSString *packageType = infoDict[@"CFBundlePackageType"];
 
+			// //apple macho are always adhoc signed?
+			// if([bundleId hasPrefix:@"com.apple."] && ![packageType isEqualToString:@"APPL"])
+			// 	continue;
+
 			// We don't care about frameworks (yet)
 			if ([packageType isEqualToString:@"FMWK"]) continue;
 
@@ -456,9 +460,6 @@ int signApp(NSString* appPath)
 		if(signedFile) continue;
 
 		if(!isMachoFile(fileURL.path)) continue;
-
-		if([fileURL.path.lastPathComponent.pathExtension isEqualToString:@"machobackup"])
-			continue;
 
 		NSData *entitlementsXML = [NSPropertyListSerialization dataWithPropertyList:baseEntitlements format:NSPropertyListXMLFormat_v1_0 options:0 error:nil];
 		NSString* entitlementsString = [[NSString alloc] initWithData:entitlementsXML encoding:NSUTF8StringEncoding];

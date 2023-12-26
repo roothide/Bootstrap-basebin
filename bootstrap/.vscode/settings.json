@@ -28,6 +28,7 @@
         "iosfwd": "cpp",
         "machine.h": "c",
         "byte_order.h": "c",
-        "__config": "c"
+        "__config": "c",
+        "filesystem": "c"
     }
 }

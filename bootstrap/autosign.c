@@ -151,7 +151,10 @@ int execBinary(const char* path, char** argv)
 	return -1;
 }
 
-#define BOOTSTRAP_INSTALL_NAME	"@loader_path/.jbroot/basebin/bootstrap.dylib"
+
+
+// #define BOOTSTRAP_INSTALL_NAME	"@loader_path/.jbroot/basebin/bootstrap.dylib"
+#define BOOTSTRAP_INSTALL_NAME	"@loader_path/.prelib"
 
 int patch_macho(struct mach_header_64* header)
 {
@@ -224,7 +227,7 @@ int patch_macho(struct mach_header_64* header)
 	return 0;
 }
 
-int patch_executable(char* file, uint32_t offset)
+int patch_executable(const char* file, uint32_t offset)
 {
 	int fd = open(file, O_RDWR);
     if(fd < 0) {
@@ -240,7 +243,7 @@ int patch_executable(char* file, uint32_t offset)
     
     SYSLOG("file size = %lld\n", st.st_size);
     
-    void* macho = mmap(NULL, st.st_size, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);
+    void* macho = mmap(NULL, st.st_size, PROT_READ|PROT_WRITE, MAP_PRIVATE, fd, 0);
     if(macho == MAP_FAILED) {
         fprintf(stderr, "map %s error:%d,%s\n", file, errno, strerror(errno));
         return -1;
@@ -249,6 +252,11 @@ int patch_executable(char* file, uint32_t offset)
     struct mach_header_64* header = (struct mach_header_64*)((uint64_t)macho + offset);
 
 	int retval = patch_macho(header);
+	SYSLOG("patch macho @ %x : %d", offset, retval);
+
+	if(write(fd, macho, st.st_size) != st.st_size) {
+		fprintf(stderr, "write %lld error:%d,%s\n", st.st_size, errno, strerror(errno));
+	}
 
     munmap(macho, st.st_size);
 
@@ -256,6 +264,19 @@ int patch_executable(char* file, uint32_t offset)
 
     return retval;
 }
+
+int patch_app_exe(const char* file)
+{
+	FILE* fp = fopen(file, "rb");
+	if(!fp) return -1;
+	machoEnumerateArchs(fp, ^(struct mach_header_64* header, uint32_t offset, bool* stop) {
+		patch_executable(file, offset);
+	});
+	fclose(fp);
+	return 0;
+}
+
+
 
 int autosign(char* path)
 {
