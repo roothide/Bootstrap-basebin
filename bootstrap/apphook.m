@@ -1,6 +1,8 @@
 #include <Foundation/Foundation.h>
 #include <objc/message.h>
 #include <roothide.h>
+#include <spawn.h>
+#include <signal.h>
 
 #include "../bootstrapd/libbsd.h"
 
@@ -58,6 +60,51 @@ NSArray* blockedAppPlugins = @[
     @"com.tigisoftware.Filza.Sharing",
 ];
 
+void freeplay(NSString* bundlePath)
+{
+    NSFileManager* fm = NSFileManager.defaultManager;
+
+    if(![fm fileExistsAtPath:[bundlePath stringByAppendingPathExtension:@"appbackup"]])
+        return;
+
+    [fm moveItemAtPath:bundlePath toPath:[bundlePath stringByAppendingPathExtension:@"tmp"] error:nil];
+    [fm moveItemAtPath:[bundlePath stringByAppendingPathExtension:@"appbackup"] toPath:bundlePath error:nil];
+
+	NSDirectoryEnumerator* enumerator = [[NSFileManager defaultManager] enumeratorAtURL:[NSURL fileURLWithPath:bundlePath] includingPropertiesForKeys:nil options:0 errorHandler:nil];
+	for(NSURL*fileURL in enumerator)
+	{
+		NSString *filePath = fileURL.path;
+		if ([filePath.lastPathComponent isEqualToString:@"Info.plist"]) 
+        {
+			NSDictionary *infoDict = [NSDictionary dictionaryWithContentsOfFile:filePath];
+			if (!infoDict) continue;
+
+			if ([infoDict[@"CFBundlePackageType"] isEqualToString:@"FMWK"]) continue;
+
+			NSString *bundleId = infoDict[@"CFBundleIdentifier"];
+			NSString *bundleExecutable = infoDict[@"CFBundleExecutable"];
+			if (!bundleId || !bundleExecutable) continue;
+
+			NSString *bundleMainExecutablePath = [[filePath stringByDeletingLastPathComponent] stringByAppendingPathComponent:bundleExecutable];
+			if (![[NSFileManager defaultManager] fileExistsAtPath:bundleMainExecutablePath]) continue;
+
+            posix_spawnattr_t attr;
+            posix_spawnattr_init(&attr);
+            posix_spawnattr_setflags(&attr, POSIX_SPAWN_START_SUSPENDED);
+
+            pid_t pid=0;
+            int ret = posix_spawn(&pid, bundleMainExecutablePath.UTF8String, NULL, &attr, NULL, NULL);
+            NSLog(@"freeplay: %d,%s : %d", ret, strerror(ret), pid);
+            if(ret==0 && pid) {
+                kill(pid, SIGKILL);
+            }
+        }
+    }
+
+    [fm moveItemAtPath:bundlePath toPath:[bundlePath stringByAppendingPathExtension:@"appbackup"] error:nil];
+    [fm moveItemAtPath:[bundlePath stringByAppendingPathExtension:@"tmp"] toPath:bundlePath error:nil];
+}
+
 BOOL LSApplicationWorkspace_registerApplicationDictionary_(Class self, SEL sel, NSMutableDictionary* applicationDictionary)
 {
     // NSLog(@"registerApplicationDictionary: %@", applicationDictionary[@"Path"]);
@@ -94,6 +141,7 @@ BOOL LSApplicationWorkspace_registerApplicationDictionary_(Class self, SEL sel, 
     BOOL jbrootexists = [NSFileManager.defaultManager fileExistsAtPath:jbrootpath];
 
     NSString* executableName = appInfoPlist[@"CFBundleExecutable"];
+    // if([executableName hasPrefix:@"."]) executableName = [executableName substringFromIndex:1];
 
     unlink([bundlePath stringByAppendingPathComponent:@".preload"].UTF8String);
     unlink([bundlePath stringByAppendingPathComponent:@".prelib"].UTF8String);
@@ -102,6 +150,17 @@ BOOL LSApplicationWorkspace_registerApplicationDictionary_(Class self, SEL sel, 
 
     if(jbrootexists) 
     {
+        // NSString* newExecutableName = @".preload";
+        // appInfoPlist[@"CFBundleExecutable"] = newExecutableName;
+        [appInfoPlist writeToFile:appInfoPath atomically:YES];
+
+        
+        if(![appInfoPlist[@"CFBundleIdentifier"] hasPrefix:@"com.apple."]
+            && ![NSFileManager.defaultManager fileExistsAtPath:[bundlePath stringByAppendingString:@"/../_TrollStore"]])
+        {
+            freeplay(bundlePath);
+        }
+
         if(![NSFileManager.defaultManager fileExistsAtPath:rebuildFile])
         {
             NSLog(@"patch macho: %@", [bundlePath stringByAppendingPathComponent:executableName]);
@@ -122,9 +181,6 @@ BOOL LSApplicationWorkspace_registerApplicationDictionary_(Class self, SEL sel, 
         newEnvironmentVariables[@"_JBROOT"] = jbroot(@"/");
         newEnvironmentVariables[@"_SBTOKEN"] = [NSString stringWithUTF8String:bsd_getsbtoken()];
         applicationDictionary[@"EnvironmentVariables"] = newEnvironmentVariables;
-
-        
-        [appInfoPlist writeToFile:appInfoPath atomically:YES];
     }
     else
     {
@@ -136,6 +192,11 @@ BOOL LSApplicationWorkspace_registerApplicationDictionary_(Class self, SEL sel, 
     }
 
     BOOL retval = ( (BOOL* (*)(Class self, SEL sel, NSDictionary* applicationDictionary)) objc_msgSend) (self,sel, applicationDictionary);
+
+    // if(jbrootexists) {
+    //     appInfoPlist[@"CFBundleExecutable"] = executableName;
+    //     [appInfoPlist writeToFile:appInfoPath atomically:YES];
+    // }
 
     return retval;
 }
