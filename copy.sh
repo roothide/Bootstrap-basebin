@@ -22,7 +22,7 @@ cp ./preload/.theos/_/basebin/preload.dylib $TARGET
 cp ./bootstrap/.theos/_/basebin/bootstrap.dylib $TARGET
 cp ./bootstrapd/.theos/_/basebin/bootstrapd $TARGET
 cp ./rebuildapp/.theos/_/basebin/rebuildapp $TARGET
-cp ./rebuildapps.sh $TARGET
+cp ./rebuildapp/.theos/_/basebin/rebuildapps.sh $TARGET
 
 echo "***** copy finished *****"
 

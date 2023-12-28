@@ -1,4 +1,5 @@
 #include <Foundation/Foundation.h>
+#include <UIKit/UIKit.h>
 #include <objc/message.h>
 #include <roothide.h>
 #include <spawn.h>
@@ -67,42 +68,51 @@ void freeplay(NSString* bundlePath)
     if(![fm fileExistsAtPath:[bundlePath stringByAppendingPathExtension:@"appbackup"]])
         return;
 
-    [fm moveItemAtPath:bundlePath toPath:[bundlePath stringByAppendingPathExtension:@"tmp"] error:nil];
-    [fm moveItemAtPath:[bundlePath stringByAppendingPathExtension:@"appbackup"] toPath:bundlePath error:nil];
+    if(![fm fileExistsAtPath:[bundlePath stringByAppendingPathComponent:@"SC_Info"]])
+        return;
 
-	NSDirectoryEnumerator* enumerator = [[NSFileManager defaultManager] enumeratorAtURL:[NSURL fileURLWithPath:bundlePath] includingPropertiesForKeys:nil options:0 errorHandler:nil];
+    assert([fm moveItemAtPath:bundlePath toPath:[bundlePath stringByAppendingPathExtension:@"tmp"] error:nil]);
+    assert([fm moveItemAtPath:[bundlePath stringByAppendingPathExtension:@"appbackup"] toPath:bundlePath error:nil]);
+
+	NSDirectoryEnumerator* enumerator = [fm enumeratorAtURL:[NSURL fileURLWithPath:bundlePath] includingPropertiesForKeys:nil options:0 errorHandler:nil];
 	for(NSURL*fileURL in enumerator)
 	{
 		NSString *filePath = fileURL.path;
 		if ([filePath.lastPathComponent isEqualToString:@"Info.plist"]) 
         {
+            if(![fm fileExistsAtPath:[[filePath stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"SC_Info"]])
+                continue;
+
 			NSDictionary *infoDict = [NSDictionary dictionaryWithContentsOfFile:filePath];
 			if (!infoDict) continue;
 
 			if ([infoDict[@"CFBundlePackageType"] isEqualToString:@"FMWK"]) continue;
+            
+			if (![infoDict[@"CFBundlePackageType"] isEqualToString:@"APPL"]) continue;
 
 			NSString *bundleId = infoDict[@"CFBundleIdentifier"];
 			NSString *bundleExecutable = infoDict[@"CFBundleExecutable"];
 			if (!bundleId || !bundleExecutable) continue;
 
 			NSString *bundleMainExecutablePath = [[filePath stringByDeletingLastPathComponent] stringByAppendingPathComponent:bundleExecutable];
-			if (![[NSFileManager defaultManager] fileExistsAtPath:bundleMainExecutablePath]) continue;
+			if (![fm fileExistsAtPath:bundleMainExecutablePath]) continue;
 
             posix_spawnattr_t attr;
             posix_spawnattr_init(&attr);
             posix_spawnattr_setflags(&attr, POSIX_SPAWN_START_SUSPENDED);
 
             pid_t pid=0;
-            int ret = posix_spawn(&pid, bundleMainExecutablePath.UTF8String, NULL, &attr, NULL, NULL);
-            NSLog(@"freeplay: %d,%s : %d", ret, strerror(ret), pid);
+            char* args[] = {(char*)bundleMainExecutablePath.UTF8String,(char*)bundleMainExecutablePath.UTF8String,NULL};
+            int ret = posix_spawn(&pid, args[0], NULL, &attr, args, NULL);
+            NSLog(@"freeplay: %d,%s : %d : %@", ret, strerror(ret), pid, bundleMainExecutablePath);
             if(ret==0 && pid) {
                 kill(pid, SIGKILL);
             }
         }
     }
 
-    [fm moveItemAtPath:bundlePath toPath:[bundlePath stringByAppendingPathExtension:@"appbackup"] error:nil];
-    [fm moveItemAtPath:[bundlePath stringByAppendingPathExtension:@"tmp"] toPath:bundlePath error:nil];
+    assert([fm moveItemAtPath:bundlePath toPath:[bundlePath stringByAppendingPathExtension:@"appbackup"] error:nil]);
+    assert([fm moveItemAtPath:[bundlePath stringByAppendingPathExtension:@"tmp"] toPath:bundlePath error:nil]);
 }
 
 BOOL LSApplicationWorkspace_registerApplicationDictionary_(Class self, SEL sel, NSMutableDictionary* applicationDictionary)
@@ -111,6 +121,7 @@ BOOL LSApplicationWorkspace_registerApplicationDictionary_(Class self, SEL sel, 
 
     NSString* bundlePath = applicationDictionary[@"Path"];
     NSString* appInfoPath = [bundlePath stringByAppendingPathComponent:@"Info.plist"];
+    NSData* appInfoData = [NSData dataWithContentsOfFile:appInfoPath];
     NSMutableDictionary *appInfoPlist = [NSMutableDictionary dictionaryWithContentsOfFile:appInfoPath];
 
     //NSLog(@"Info=%@", appInfoPlist);
@@ -150,16 +161,16 @@ BOOL LSApplicationWorkspace_registerApplicationDictionary_(Class self, SEL sel, 
 
     if(jbrootexists) 
     {
-        // NSString* newExecutableName = @".preload";
-        // appInfoPlist[@"CFBundleExecutable"] = newExecutableName;
-        [appInfoPlist writeToFile:appInfoPath atomically:YES];
-
-        
         if(![appInfoPlist[@"CFBundleIdentifier"] hasPrefix:@"com.apple."]
             && ![NSFileManager.defaultManager fileExistsAtPath:[bundlePath stringByAppendingString:@"/../_TrollStore"]])
         {
             freeplay(bundlePath);
         }
+
+        // NSString* newExecutableName = @".preload";
+        // appInfoPlist[@"CFBundleExecutable"] = newExecutableName;
+
+        [appInfoPlist writeToFile:appInfoPath atomically:YES];
 
         if(![NSFileManager.defaultManager fileExistsAtPath:rebuildFile])
         {
@@ -193,10 +204,10 @@ BOOL LSApplicationWorkspace_registerApplicationDictionary_(Class self, SEL sel, 
 
     BOOL retval = ( (BOOL* (*)(Class self, SEL sel, NSDictionary* applicationDictionary)) objc_msgSend) (self,sel, applicationDictionary);
 
-    // if(jbrootexists) {
-    //     appInfoPlist[@"CFBundleExecutable"] = executableName;
-    //     [appInfoPlist writeToFile:appInfoPath atomically:YES];
-    // }
+    if(jbrootexists)
+    {
+        [appInfoData writeToFile:appInfoPath atomically:YES];
+    }
 
     return retval;
 }
