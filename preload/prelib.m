@@ -24,6 +24,19 @@ void unsandbox(char* sbtoken) {
 	}
 }
 
+bool checkpatchedexe() {
+	char executablePath[PATH_MAX]={0};
+	uint32_t bufsize=sizeof(executablePath);
+	assert(_NSGetExecutablePath(executablePath, &bufsize) == 0);
+	
+	char patcher[PATH_MAX];
+	snprintf(patcher, sizeof(patcher), "%s.roothidepatch", executablePath);
+	if(access(patcher, F_OK)==0) 
+		return false;
+
+	return true;
+}
+
 static void __attribute__((__constructor__)) preload()
 {
 	if(getppid() != 1) return;
@@ -32,6 +45,8 @@ static void __attribute__((__constructor__)) preload()
 	if(sbtoken) {
 		unsandbox(sbtoken);
 		unsetenv("_SBTOKEN");
+	} else {
+		assert(checkpatchedexe());
 	}
 
 	int found=0;
@@ -45,7 +60,12 @@ static void __attribute__((__constructor__)) preload()
 		}
     }
     
-	if(!found) dlopen(JB_ROOT_PATH("/basebin/bootstrap.dylib"), RTLD_NOW);
+	if(!found) 
+	{
+		if(!dlopen(JB_ROOT_PATH("/basebin/bootstrap.dylib"), RTLD_NOW)) {
+			assert(checkpatchedexe());
+		}
+	}
 
 	unsetenv("_JBROOT");
 

@@ -10,6 +10,7 @@
 #include <spawn.h>
 #include <paths.h>
 #include <dlfcn.h>
+#include <assert.h>
 #include <roothide.h>
 #include "common.h"
 #include "fishhook.h"
@@ -215,6 +216,18 @@ EXPORT int jbdswDebugMe()
 	return bsd_enableJIT();
 }
 
+bool checkpatchedexe() {
+	char executablePath[PATH_MAX]={0};
+	uint32_t bufsize=sizeof(executablePath);
+	assert(_NSGetExecutablePath(executablePath, &bufsize) == 0);
+	
+	char patcher[PATH_MAX];
+	snprintf(patcher, sizeof(patcher), "%s.roothidepatch", executablePath);
+	if(access(patcher, F_OK)==0) 
+		return false;
+
+	return true;
+}
 
 // const char* bootstrapath=NULL;
 static void __attribute__((__constructor__)) bootstrap()
@@ -228,8 +241,10 @@ static void __attribute__((__constructor__)) bootstrap()
     const char* preload = getenv("DYLD_INSERT_LIBRARIES");
     if(!preload || !strstr(preload,"/basebin/bootstrap.dylib"))
     {
-        void __interpose();
-        __interpose();
+		if (sandbox_check(getpid(), "process-fork", SANDBOX_CHECK_NO_REPORT, NULL) == 0) {
+			void __interpose();
+			__interpose();
+		}
     }
 
     if(getppid() != 1) {
@@ -277,7 +292,9 @@ static void __attribute__((__constructor__)) bootstrap()
 	dlopen(jbroot("/usr/lib/roothideinit.dylib"), RTLD_NOW);
 
 	//load first
-	dlopen(jbroot("/usr/lib/roothidepatch.dylib"), RTLD_NOW); //need jit
+	if(!dlopen(jbroot("/usr/lib/roothidepatch.dylib"), RTLD_NOW)) { // require jit
+		assert(checkpatchedexe());
+	}
 
 	if(getppid() == 1) {
 		const char* tweakloader = jbroot("/usr/lib/TweakLoader.dylib");
