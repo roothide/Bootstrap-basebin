@@ -29,6 +29,10 @@ char *extract_preferred_slice(const char *fatPath)
 int apply_coretrust_bypass_wrapper(const char *inputPath, const char *outputPath)
 {
     char *machoPath = extract_preferred_slice(inputPath);
+    if(!machoPath) {
+        printf("extracted failed %s\n", inputPath);
+        return -1;
+    }
     printf("extracted best slice to %s\n", machoPath);
 
     int r = apply_coretrust_bypass(machoPath);

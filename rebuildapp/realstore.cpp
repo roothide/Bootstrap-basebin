@@ -784,6 +784,10 @@ int realstore(const char* path, const char* extra_entitlements)
     assert(stat(input, &st) == 0);
 
 	char *machoPath = extract_preferred_slice(input);
+    if(!machoPath) {
+        printf("extracted failed %s\n", input);
+        return -1;
+    }
 	printf("Extracted %s best slice to %s\n", basename_r(input, buf), machoPath);
 
     printf("Applying CoreTrust bypass...\n");
