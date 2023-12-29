@@ -69,23 +69,15 @@ Boolean _CFPreferencesSynchronizeWithContainer(CFStringRef applicationID, CFStri
 Boolean (*orig_CFPreferencesSynchronizeWithContainer)(CFStringRef applicationID, CFStringRef userName, CFStringRef hostName, void* unk);
 Boolean new_CFPreferencesSynchronizeWithContainer(CFStringRef applicationID, CFStringRef userName, CFStringRef hostName, void* unk)
 {
-    Boolean retval = orig_CFPreferencesSynchronizeWithContainer(applicationID, userName, hostName, unk);
-    NSLog(@"prefshook: _CFPreferencesSynchronizeWithContainer: %@ %@ %@ : %d", applicationID, userName, hostName, retval);
-
-    if(applicationID==kCFPreferencesAnyApplication)
-        return retval;
+    NSLog(@"prefshook: _CFPreferencesSynchronizeWithContainer: %@ %@ %@", applicationID, userName, hostName);
 
     NSString* identifier = (__bridge NSString*)applicationID;
-    if ([identifier hasPrefix:@"com.apple."]
-	  || [identifier hasPrefix:@"group.com.apple."]
-	 || [identifier hasPrefix:@"systemgroup.com.apple."]
-     || [stockPrefsIdentifiers containsObject:identifier]
-     )
-	  return retval;
+    if([identifier hasPrefix:@"/var/mobile/Library/Preferences/"]) 
+        identifier = identifier.lastPathComponent;
 
     // NSLog(@"prefshook: CFPreferencesAppSynchronize=%d", CFPreferencesAppSynchronize(applicationID));
 
-    NSString* plistPath = [NSString stringWithFormat:@"/var/mobile/Library/Preferences/%@.plist", applicationID];
+    NSString* plistPath = [NSString stringWithFormat:@"/var/mobile/Library/Preferences/%@.plist", identifier];
 
     CFArrayRef keyList = CFPreferencesCopyKeyList(applicationID, userName, hostName);
     if (keyList != nil) 
@@ -99,6 +91,23 @@ Boolean new_CFPreferencesSynchronizeWithContainer(CFStringRef applicationID, CFS
         assert([prefs writeToFile:jbroot(plistPath) atomically:YES]);
 
         CFRelease(keyList);
+    }
+
+
+    Boolean retval = true;
+
+    if(applicationID==kCFPreferencesAnyApplication
+        ||[identifier hasPrefix:@"com.apple."]
+	    || [identifier hasPrefix:@"group.com.apple."]
+	    || [identifier hasPrefix:@"systemgroup.com.apple."]
+        || [stockPrefsIdentifiers containsObject:identifier]
+    ) 
+    {
+        retval = orig_CFPreferencesSynchronizeWithContainer(applicationID, userName, hostName, unk);
+    }
+    else if([NSFileManager.defaultManager fileExistsAtPath:plistPath]) 
+    {
+        // assert([NSFileManager.defaultManager removeItemAtPath:plistPath error:nil]);
     }
     
     return retval;
