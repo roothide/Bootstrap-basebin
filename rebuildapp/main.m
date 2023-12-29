@@ -441,7 +441,7 @@ int signApp(NSString* appPath)
 			assert(realstore(bundleMainExecutablePath.UTF8String, entitlementsString.UTF8String) == 0);
 			[signedMainExecutables addObject:bundleMainExecutablePath];
 
-			networkFix(bundleId);
+			// networkFix(bundleId);
 
 		}
 	}

@@ -17,6 +17,7 @@
 
 #include <roothide.h>
 #include "common.h"
+#include "fishhook.h"
 
 void ensure_jbroot_symlink(const char* dirpath)
 {
@@ -371,4 +372,14 @@ int dpkghook_new_rmdir(char* path)
 	unlink(jbroot(rebuild));
 
     return dpkghook_orig_rmdir(path);
+}
+
+void init_dpkg_hook()
+{
+	struct rebinding rebindings[] = {
+		{"close", dpkghook_new_close, (void**)&dpkghook_orig_close},
+		{"rmdir", dpkghook_new_rmdir, (void**)&dpkghook_orig_rmdir},
+	};
+	struct mach_header_64* header = _dyld_get_prog_image_header();
+	rebind_symbols_image((void*)header, _dyld_get_image_slide(header), rebindings, sizeof(rebindings)/sizeof(rebindings[0]));
 }

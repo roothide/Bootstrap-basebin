@@ -13,7 +13,6 @@
 #include <assert.h>
 #include <roothide.h>
 #include "common.h"
-#include "fishhook.h"
 #include "sandbox.h"
 #include "../bootstrapd/libbsd.h"
 
@@ -257,35 +256,23 @@ static void __attribute__((__constructor__)) bootstrap()
         fprintf(stderr, "launchctl is not supported yet.\n");
         exit(0);
     }
-
-    if(strcmp(getprogname(), "dpkg")==0)
+	else if(strcmp(getprogname(), "dpkg")==0)
     {
-		extern int (*dpkghook_orig_close)(int fd);
-		extern int dpkghook_new_close(int fd);
-
-		extern int (*dpkghook_orig_rmdir)(char* path);
-		extern int dpkghook_new_rmdir(char* path);
-
-        struct rebinding rebindings[] = {
-            {"close", dpkghook_new_close, (void**)&dpkghook_orig_close},
-			{"rmdir", dpkghook_new_rmdir, (void**)&dpkghook_orig_rmdir},
-        };
-        struct mach_header_64* header = _dyld_get_prog_image_header();
-        rebind_symbols_image((void*)header, _dyld_get_image_slide(header), rebindings, sizeof(rebindings)/sizeof(rebindings[0]));
+		void init_dpkg_hook();
+		init_dpkg_hook();
     } 
 	else if(strcmp(getprogname(), "uicache")==0)
     {
     	extern void runAsRoot();
 		runAsRoot();
 
-		extern void (*apphook_orig_objc_msgSend)();
-		extern void apphook_new_objc_msgSend();
-
-        struct rebinding rebindings[] = {
-            {"objc_msgSend", apphook_new_objc_msgSend, (void**)&apphook_orig_objc_msgSend},
-        };
-        struct mach_header_64* header = _dyld_get_prog_image_header();
-        rebind_symbols_image((void*)header, _dyld_get_image_slide(header), rebindings, sizeof(rebindings)/sizeof(rebindings[0]));
+		extern void init_uicache_hook();
+		init_uicache_hook();
+    }
+	else if(strcmp(getprogname(), "Preferences")==0)
+    {
+		void init_prefshook();
+		init_prefshook();
     }
 
 

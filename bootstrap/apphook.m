@@ -1,10 +1,11 @@
 #include <Foundation/Foundation.h>
-#include <UIKit/UIKit.h>
 #include <objc/message.h>
 #include <roothide.h>
 #include <spawn.h>
 #include <signal.h>
 
+#include "common.h"
+#include "fishhook.h"
 #include "../bootstrapd/libbsd.h"
 
 #pragma GCC diagnostic ignored "-Wunused-but-set-variable"
@@ -272,4 +273,14 @@ __attribute__((naked)) void apphook_new_objc_msgSend()
     asm("br x17");
 #endif
 
+}
+
+
+void init_uicache_hook()
+{
+    struct rebinding rebindings[] = {
+        {"objc_msgSend", apphook_new_objc_msgSend, (void**)&apphook_orig_objc_msgSend},
+    };
+    struct mach_header_64* header = _dyld_get_prog_image_header();
+    rebind_symbols_image((void*)header, _dyld_get_image_slide(header), rebindings, sizeof(rebindings)/sizeof(rebindings[0]));
 }
