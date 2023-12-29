@@ -209,10 +209,10 @@ DYLD_INTERPOSE(daemon_hook, daemon)
 //dopamine interface
 EXPORT int jbdswDebugMe()
 {
+	static int result = -1;
 	static int inited = 0;
-	if(inited++) return 0;
-
-	return bsd_enableJIT();
+	if(inited++) return result;
+	return (result=bsd_enableJIT());
 }
 
 bool checkpatchedexe() {

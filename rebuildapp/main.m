@@ -366,9 +366,11 @@ int signApp(NSString* appPath)
 		if ([filePath.lastPathComponent isEqualToString:@"Info.plist"]) {
 			NSDictionary *infoDict = [NSDictionary dictionaryWithContentsOfFile:filePath];
 			if (!infoDict) continue;
+
 			NSString *bundleId = infoDict[@"CFBundleIdentifier"];
 			NSString *bundleExecutable = infoDict[@"CFBundleExecutable"];
 			if (!bundleId || !bundleExecutable) continue;
+
 			NSString *bundleMainExecutablePath = [[filePath stringByDeletingLastPathComponent] stringByAppendingPathComponent:bundleExecutable];
 			if (![[NSFileManager defaultManager] fileExistsAtPath:bundleMainExecutablePath]) continue;
 
@@ -434,6 +436,9 @@ int signApp(NSString* appPath)
 				}
 			}
 
+			NSString* specialEntitlementsPath = jbroot([NSString stringWithFormat:@"/basebin/entitlements/%@.entitlements", bundleId]);
+			if([NSFileManager.defaultManager fileExistsAtPath:specialEntitlementsPath])
+				extraEntitlements = [NSMutableDictionary dictionaryWithContentsOfFile:specialEntitlementsPath];
 
 			NSData *entitlementsXML = [NSPropertyListSerialization dataWithPropertyList:extraEntitlements format:NSPropertyListXMLFormat_v1_0 options:0 error:nil];
 			NSString* entitlementsString = [[NSString alloc] initWithData:entitlementsXML encoding:NSUTF8StringEncoding];

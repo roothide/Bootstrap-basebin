@@ -16,6 +16,7 @@ mkdir $TARGET
 
 cp ./ldid/ldid $TARGET
 cp ./bootstrap.entitlements $TARGET
+cp -a ./entitlements $TARGET
 cp ./fastPathSign/fastPathSign $TARGET
 cp ./preload/.theos/_/basebin/preload $TARGET
 cp ./preload/.theos/_/basebin/preload.dylib $TARGET
