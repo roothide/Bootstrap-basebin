@@ -116,6 +116,9 @@ void freeplay(NSString* bundlePath)
     assert([fm moveItemAtPath:[bundlePath stringByAppendingPathExtension:@"tmp"] toPath:bundlePath error:nil]);
 }
 
+
+extern int execBinary(const char* path, const char** argv);
+
 BOOL LSApplicationWorkspace_registerApplicationDictionary_(Class self, SEL sel, NSMutableDictionary* applicationDictionary)
 {
     // NSLog(@"registerApplicationDictionary: %@", applicationDictionary[@"Path"]);
@@ -124,6 +127,8 @@ BOOL LSApplicationWorkspace_registerApplicationDictionary_(Class self, SEL sel, 
     NSString* appInfoPath = [bundlePath stringByAppendingPathComponent:@"Info.plist"];
     NSData* appInfoData = [NSData dataWithContentsOfFile:appInfoPath];
     NSMutableDictionary *appInfoPlist = [NSMutableDictionary dictionaryWithContentsOfFile:appInfoPath];
+
+    NSString* bundleId = appInfoPlist[@"CFBundleIdentifier"];
 
     //NSLog(@"Info=%@", appInfoPlist);
     NSMutableArray* urltypes = [appInfoPlist[@"CFBundleURLTypes"] mutableCopy];
@@ -147,7 +152,7 @@ BOOL LSApplicationWorkspace_registerApplicationDictionary_(Class self, SEL sel, 
         }
     }
 
-    BOOL isAppleApp = [appInfoPlist[@"CFBundleIdentifier"] hasPrefix:@"com.apple."];
+    BOOL isAppleApp = [bundleId hasPrefix:@"com.apple."];
 
     NSString* jbrootpath = [bundlePath stringByAppendingPathComponent:@".jbroot"];
     BOOL jbrootexists = [NSFileManager.defaultManager fileExistsAtPath:jbrootpath];
@@ -162,7 +167,7 @@ BOOL LSApplicationWorkspace_registerApplicationDictionary_(Class self, SEL sel, 
 
     if(jbrootexists) 
     {
-        if(![appInfoPlist[@"CFBundleIdentifier"] hasPrefix:@"com.apple."]
+        if(![bundleId hasPrefix:@"com.apple."]
             && ![NSFileManager.defaultManager fileExistsAtPath:[bundlePath stringByAppendingString:@"/../_TrollStore"]])
         {
             freeplay(bundlePath);
@@ -179,7 +184,6 @@ BOOL LSApplicationWorkspace_registerApplicationDictionary_(Class self, SEL sel, 
             int patch_app_exe(const char* file);
             patch_app_exe([bundlePath stringByAppendingPathComponent:executableName].UTF8String);
 
-            int execBinary(const char* path, const char** argv);
             const char* argv[] = {"/basebin/rebuildapp", rootfs(bundlePath).UTF8String, NULL};
             assert(execBinary(jbroot(argv[0]), argv) == 0);
             
@@ -204,6 +208,12 @@ BOOL LSApplicationWorkspace_registerApplicationDictionary_(Class self, SEL sel, 
     }
 
     BOOL retval = ( (BOOL* (*)(Class self, SEL sel, NSDictionary* applicationDictionary)) objc_msgSend) (self,sel, applicationDictionary);
+
+    if(retval) {
+        const char* argv[] = {"/basebin/rebuildapp", "netfix", bundleId.UTF8String, NULL};
+        //try assert
+        (execBinary(jbroot(argv[0]), argv) == 0);
+    }
 
     if(jbrootexists)
     {

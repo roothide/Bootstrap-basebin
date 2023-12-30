@@ -302,9 +302,9 @@ BOOL isDefaultInstallationPath(NSString* _path)
 void* _CTServerConnectionCreate(CFAllocatorRef, void *, void *);
 int64_t _CTServerConnectionSetCellularUsagePolicy(CFTypeRef* ct, NSString* identifier, NSDictionary* policies);
 
-void networkFix(NSString* bundleIdentifier)
+int networkFix(NSString* bundleIdentifier)
 {
-	_CTServerConnectionSetCellularUsagePolicy(
+	return _CTServerConnectionSetCellularUsagePolicy(
 		_CTServerConnectionCreate(kCFAllocatorDefault, NULL, NULL),
 		bundleIdentifier,
 		@{
@@ -445,9 +445,6 @@ int signApp(NSString* appPath)
 
 			assert(realstore(bundleMainExecutablePath.UTF8String, entitlementsString.UTF8String) == 0);
 			[signedMainExecutables addObject:bundleMainExecutablePath];
-
-			networkFix(bundleId);
-
 		}
 	}
 
@@ -478,6 +475,13 @@ int signApp(NSString* appPath)
 int main(int argc, char *argv[], char *envp[]) {
 	@autoreleasepool {
 		assert(argc >= 2);
+
+		if(strcmp(argv[1], "netfix")==0) {
+			assert(argc >= 3);
+
+			return networkFix(@(argv[2]));
+		}
+
 		return signApp([NSString stringWithUTF8String:jbroot(argv[1])]);
 	}
 }
