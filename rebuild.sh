@@ -30,6 +30,10 @@ cd bootstrapd
 make clean && make package
 cd -
 
+cd devtest
+make clean && make package
+cd -
+
 echo "**** rebuild successful ****"
 
 ./copy.sh

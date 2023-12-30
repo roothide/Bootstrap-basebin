@@ -18,6 +18,7 @@ cp ./ldid/ldid $TARGET
 cp ./bootstrap.entitlements $TARGET
 cp -a ./entitlements $TARGET
 cp ./fastPathSign/fastPathSign $TARGET
+cp ./devtest/.theos/_/basebin/devtest $TARGET
 cp ./preload/.theos/_/basebin/preload $TARGET
 cp ./preload/.theos/_/basebin/preload.dylib $TARGET
 cp ./bootstrap/.theos/_/basebin/bootstrap.dylib $TARGET
