@@ -3,12 +3,19 @@
 #import <MobileCoreServices/MobileCoreServices.h>
 #import <dlfcn.h>
 #import <getopt.h>
-#import <objc/runtime.h>
 #import <stdio.h>
-
+#include <spawn.h>
+#include <sys/stat.h>
+#include <mach-o/fat.h>
+#include <mach-o/loader.h>
+#include <objc/runtime.h>
 #include <roothide.h>
 
+#include "../bootstrapd/libbsd.h"
+
 #define APP_PATH	@"/Applications"
+
+#define SYSLOG(...)
 
 #if NLS
 #	include <libintl.h>
@@ -38,6 +45,7 @@
 - (_LSApplicationState *)appState;
 - (NSURL *)bundleURL;
 - (NSURL *)containerURL;
+- (NSURL *)dataContainerURL;
 - (NSString *)bundleExecutable;
 - (NSString *)bundleIdentifier;
 - (NSString *)vendorName;
@@ -276,6 +284,12 @@ BOOL constructContainerizationForEntitlements(NSString* path, NSDictionary *enti
 	NSNumber *noSandbox = entitlements[@"com.apple.private.security.no-sandbox"];
 	if (noSandbox && [noSandbox isKindOfClass:[NSNumber class]]) {
 		if (noSandbox.boolValue) {
+
+			NSNumber*AppDataContainers = entitlements[@"com.apple.private.security.storage.AppDataContainers"];
+			if (AppDataContainers && [AppDataContainers isKindOfClass:[NSNumber class]]) {
+				if (AppDataContainers.boolValue) return YES; //hack way
+			}
+
 			return NO;
 		}
 	}
@@ -302,13 +316,13 @@ NSString *constructTeamIdentifierForEntitlements(NSDictionary *entitlements) {
 }
 
 NSDictionary *constructEnvironmentVariablesForContainerPath(NSString *containerPath, BOOL isContainerized) {
-	NSString *homeDir = isContainerized ? containerPath : jbroot(@"/var/mobile");
-	NSString *tmpDir = isContainerized ? [containerPath stringByAppendingPathComponent:@"tmp"] : jbroot(@"/var/tmp");
+	NSString *homeDir = isContainerized ? containerPath : @"/var/mobile";
+	NSString *tmpDir = isContainerized ? [containerPath stringByAppendingPathComponent:@"tmp"] : @"/var/tmp";
 	return @{
 		@"CFFIXED_USER_HOME" : homeDir,
 		@"HOME" : homeDir,
 		@"TMPDIR" : tmpDir
-	};
+	}.mutableCopy;
 }
 
 
@@ -337,19 +351,387 @@ BOOL isDefaultInstallationPath(NSString* _path)
 	return YES;
 }
 
+
+void* _CTServerConnectionCreate(CFAllocatorRef, void *, void *);
+int64_t _CTServerConnectionSetCellularUsagePolicy(CFTypeRef* ct, NSString* identifier, NSDictionary* policies);
+
+int networkFix(NSString* bundleIdentifier)
+{
+	return _CTServerConnectionSetCellularUsagePolicy(
+		_CTServerConnectionCreate(kCFAllocatorDefault, NULL, NULL),
+		bundleIdentifier,
+		@{
+			@"kCTCellularDataUsagePolicy" : @"kCTCellularDataUsagePolicyAlwaysAllow",
+			@"kCTWiFiDataUsagePolicy" : @"kCTCellularDataUsagePolicyAlwaysAllow"
+		}
+	);
+}
+
+
+NSArray* blockedURLSchemes = @[
+    @"filza", 
+    @"db-lmvo0l08204d0a0",
+    @"boxsdk-810yk37nbrpwaee5907xc4iz8c1ay3my",
+    @"com.googleusercontent.apps.802910049260-0hf6uv6nsj21itl94v66tphcqnfl172r",
+    @"sileo",
+    @"zbra", 
+    @"santander", 
+    @"icleaner", 
+    @"xina", 
+    @"ssh",
+    @"apt-repo", 
+    @"cydia",
+    @"activator",
+    @"postbox",
+];
+
+NSArray* blockedAppPlugins = @[
+    @"com.tigisoftware.Filza.Sharing",
+];
+
+
+int execBinary(const char* path, char** argv)
+{
+	pid_t pid=0;
+	int ret = posix_spawn(&pid, path, NULL, NULL, (char* const*)argv, /*environ* ignore preload lib*/ NULL);
+	if(ret != 0) {
+		return -1;
+	}
+
+	int status=0;
+    while(waitpid(pid, &status, 0) != -1)
+    {
+        if (WIFSIGNALED(status)) {
+            return 128 + WTERMSIG(status);
+        } else if (WIFEXITED(status)) {
+            return WEXITSTATUS(status);
+        }
+        //keep waiting?return status;
+    };
+
+	return -1;
+}
+
+
+void freeplay(NSString* bundlePath)
+{
+    NSFileManager* fm = NSFileManager.defaultManager;
+
+    if(![fm fileExistsAtPath:[bundlePath stringByAppendingPathExtension:@"appbackup"]])
+        return;
+
+    if(![fm fileExistsAtPath:[bundlePath stringByAppendingPathComponent:@"SC_Info"]])
+        return;
+
+    assert([fm moveItemAtPath:bundlePath toPath:[bundlePath stringByAppendingPathExtension:@"tmp"] error:nil]);
+    assert([fm moveItemAtPath:[bundlePath stringByAppendingPathExtension:@"appbackup"] toPath:bundlePath error:nil]);
+
+	NSDirectoryEnumerator* enumerator = [fm enumeratorAtURL:[NSURL fileURLWithPath:bundlePath] includingPropertiesForKeys:nil options:0 errorHandler:nil];
+	for(NSURL*fileURL in enumerator)
+	{
+		NSString *filePath = fileURL.path;
+		if ([filePath.lastPathComponent isEqualToString:@"Info.plist"]) 
+        {
+            if(![fm fileExistsAtPath:[[filePath stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"SC_Info"]])
+                continue;
+
+			NSDictionary *infoDict = [NSDictionary dictionaryWithContentsOfFile:filePath];
+			if (!infoDict) continue;
+
+			if ([infoDict[@"CFBundlePackageType"] isEqualToString:@"FMWK"]) continue;
+            
+			if (![infoDict[@"CFBundlePackageType"] isEqualToString:@"APPL"]) continue;
+
+			NSString *bundleId = infoDict[@"CFBundleIdentifier"];
+			NSString *bundleExecutable = infoDict[@"CFBundleExecutable"];
+			if (!bundleId || !bundleExecutable) continue;
+
+			NSString *bundleMainExecutablePath = [[filePath stringByDeletingLastPathComponent] stringByAppendingPathComponent:bundleExecutable];
+			if (![fm fileExistsAtPath:bundleMainExecutablePath]) continue;
+
+            posix_spawnattr_t attr;
+            posix_spawnattr_init(&attr);
+            posix_spawnattr_setflags(&attr, POSIX_SPAWN_START_SUSPENDED);
+
+            pid_t pid=0;
+            char* args[] = {(char*)bundleMainExecutablePath.UTF8String,(char*)bundleMainExecutablePath.UTF8String,NULL};
+            int ret = posix_spawn(&pid, args[0], NULL, &attr, args, NULL);
+            NSLog(@"freeplay: %d,%s : %d : %@", ret, strerror(ret), pid, bundleMainExecutablePath);
+            if(ret==0 && pid) {
+                kill(pid, SIGKILL);
+            }
+        }
+    }
+
+    assert([fm moveItemAtPath:bundlePath toPath:[bundlePath stringByAppendingPathExtension:@"appbackup"] error:nil]);
+    assert([fm moveItemAtPath:[bundlePath stringByAppendingPathExtension:@"tmp"] toPath:bundlePath error:nil]);
+}
+
+
+
+
+// #define BOOTSTRAP_INSTALL_NAME	"@loader_path/.jbroot/basebin/bootstrap.dylib"
+#define BOOTSTRAP_INSTALL_NAME	"@loader_path/.prelib"
+
+int patch_macho(struct mach_header_64* header)
+{
+    int first_sec_off = 0;
+    
+    struct load_command* lc = (struct load_command*)((uint64_t)header + sizeof(*header));
+    for (int i = 0; i < header->ncmds; i++) {
+                
+        switch(lc->cmd) {
+                
+            case LC_LOAD_DYLIB:
+			{
+                struct dylib_command* idcmd = (struct dylib_command*)lc;
+                char* name = (char*)((uint64_t)idcmd + idcmd->dylib.name.offset);
+                
+                if(strcmp(name, BOOTSTRAP_INSTALL_NAME)==0) {
+                    SYSLOG("bootstrap library exists!\n");
+					return 0;
+                }
+                break;
+            }
+                
+            case LC_SEGMENT_64: {
+                struct segment_command_64 * seg = (struct segment_command_64 *) lc;
+                
+                SYSLOG("segment: %s file=%llx:%llx vm=%16llx:%16llx\n", seg->segname, seg->fileoff, seg->filesize, seg->vmaddr, seg->vmsize);
+                
+                struct section_64* sec = (struct section_64*)((uint64_t)seg+sizeof(*seg));
+                for(int j=0; j<seg->nsects; j++)
+                {
+                    SYSLOG("section[%d] = %s/%s offset=%x vm=%16llx:%16llx\n", j, sec[j].segname, sec[j].sectname,
+                          sec[j].offset, sec[j].addr, sec[j].size);
+                    
+                    if(sec[j].offset && (first_sec_off==0 || first_sec_off>sec[j].offset)) {
+                        SYSLOG("first_sec_off %x => %x\n", first_sec_off, sec[j].offset);
+                        first_sec_off = sec[j].offset;
+                    }
+                }
+                break;
+            }
+		}
+        
+        /////////
+        lc = (struct load_command *) ((char *)lc + lc->cmdsize);
+	}
+
+	int addsize = sizeof(struct dylib_command) + strlen(BOOTSTRAP_INSTALL_NAME) + 1;
+	if(addsize%sizeof(void*)) addsize = (addsize/sizeof(void*) + 1) * sizeof(void*); //align
+	if(first_sec_off < (sizeof(*header)+header->sizeofcmds+addsize))
+	{
+		fprintf(stderr, "mach-o header has no enough space!\n");
+		return -1;
+	}
+	
+	struct dylib_command* newlib = (struct dylib_command*)((uint64_t)header + sizeof(*header) + header->sizeofcmds);
+
+	//memmove((void*)((uint64_t)newlib + addsize), newlib, header->sizeofcmds);
+
+	newlib->cmd = LC_LOAD_DYLIB;
+	newlib->cmdsize = addsize;
+	newlib->dylib.timestamp = 0;
+	newlib->dylib.current_version = 0;
+	newlib->dylib.compatibility_version = 0;
+	newlib->dylib.name.offset = sizeof(*newlib);
+	strcpy((char*)newlib+sizeof(*newlib), BOOTSTRAP_INSTALL_NAME);
+	
+	header->sizeofcmds += addsize;
+	header->ncmds++;
+
+	return 0;
+}
+
+int patch_executable(const char* file, uint32_t offset)
+{
+	int fd = open(file, O_RDWR);
+    if(fd < 0) {
+        fprintf(stderr, "open %s error:%d,%s\n", file, errno, strerror(errno));
+        return -1;
+    }
+    
+    struct stat st;
+    if(stat(file, &st) < 0) {
+        fprintf(stderr, "stat %s error:%d,%s\n", file, errno, strerror(errno));
+        return -1;
+    }
+    
+    SYSLOG("file size = %lld\n", st.st_size);
+    
+    void* macho = mmap(NULL, st.st_size, PROT_READ|PROT_WRITE, MAP_PRIVATE, fd, 0);
+    if(macho == MAP_FAILED) {
+        fprintf(stderr, "map %s error:%d,%s\n", file, errno, strerror(errno));
+        return -1;
+    }
+
+    struct mach_header_64* header = (struct mach_header_64*)((uint64_t)macho + offset);
+
+	int retval = patch_macho(header);
+	SYSLOG("patch macho @ %x : %d", offset, retval);
+
+	if(write(fd, macho, st.st_size) != st.st_size) {
+		fprintf(stderr, "write %lld error:%d,%s\n", st.st_size, errno, strerror(errno));
+	}
+
+    munmap(macho, st.st_size);
+
+    close(fd);
+
+    return retval;
+}
+
+
+
+void machoEnumerateArchs(FILE* machoFile, void (^archEnumBlock)(struct mach_header_64* header, uint32_t offset, bool* stop))
+{
+	struct mach_header_64 mh={0};
+	if(fseek(machoFile,0,SEEK_SET)!=0)return;
+	if(fread(&mh,sizeof(mh),1,machoFile)!=1)return;
+	
+	if(mh.magic==FAT_MAGIC || mh.magic==FAT_CIGAM)//and || mh.magic==FAT_MAGIC_64 || mh.magic==FAT_CIGAM_64? with fat_arch_64
+	{
+		struct fat_header fh={0};
+		if(fseek(machoFile,0,SEEK_SET)!=0)return;
+		if(fread(&fh,sizeof(fh),1,machoFile)!=1)return;
+		
+		for(int i = 0; i < OSSwapBigToHostInt32(fh.nfat_arch); i++)
+		{
+			uint32_t archMetadataOffset = sizeof(fh) + sizeof(struct fat_arch) * i;
+
+			struct fat_arch fatArch={0};
+			if(fseek(machoFile, archMetadataOffset, SEEK_SET)!=0)break;
+			if(fread(&fatArch, sizeof(fatArch), 1, machoFile)!=1)break;
+
+			if(fseek(machoFile, OSSwapBigToHostInt32(fatArch.offset), SEEK_SET)!=0)break;
+			if(fread(&mh, sizeof(mh), 1, machoFile)!=1)break;
+
+			if(mh.magic != MH_MAGIC_64 && mh.magic != MH_CIGAM_64) continue; //require Macho64
+			
+			bool stop = false;
+			archEnumBlock(&mh, OSSwapBigToHostInt32(fatArch.offset), &stop);
+			if(stop) break;
+		}
+	}
+	else if(mh.magic == MH_MAGIC_64 || mh.magic == MH_CIGAM_64) //require Macho64
+	{
+		bool stop=false;
+		archEnumBlock(&mh, 0, &stop);
+	}
+}
+
+void machoGetInfo(FILE* candidateFile, bool *isMachoOut, bool *isLibraryOut)
+{
+	if (!candidateFile) return;
+
+	__block bool isMacho=false;
+	__block bool isLibrary = false;
+	
+	machoEnumerateArchs(candidateFile, ^(struct mach_header_64* header, uint32_t offset, bool* stop) {
+		isMacho = true;
+		isLibrary = OSSwapLittleToHostInt32(header->filetype) != MH_EXECUTE;
+		*stop = true;
+	});
+
+	if (isMachoOut) *isMachoOut = isMacho;
+	if (isLibraryOut) *isLibraryOut = isLibrary;
+}
+
+int patch_app_exe(const char* file)
+{
+	FILE* fp = fopen(file, "rb");
+	if(!fp) return -1;
+	machoEnumerateArchs(fp, ^(struct mach_header_64* header, uint32_t offset, bool* stop) {
+		patch_executable(file, offset);
+	});
+	fclose(fp);
+	return 0;
+}
+
+
 void registerPath(NSString *path, BOOL forceSystem)
 {
+	const char* sbtoken = bsd_getsbtoken();
+	assert(sbtoken != NULL);
+
 	LSApplicationWorkspace *workspace = [LSApplicationWorkspace defaultWorkspace];
 
 	path = path.stringByResolvingSymlinksInPath.stringByStandardizingPath;
 
-	NSDictionary *appInfoPlist = [NSDictionary dictionaryWithContentsOfFile:[path stringByAppendingPathComponent:@"Info.plist"]];
+	NSString* appInfoPath = [path stringByAppendingPathComponent:@"Info.plist"];
+	NSMutableDictionary *appInfoPlist = [NSMutableDictionary dictionaryWithContentsOfFile:appInfoPath];
+	NSData* appInfoData = [NSData dataWithContentsOfFile:appInfoPath];
+
 	NSString *appBundleID = [appInfoPlist objectForKey:@"CFBundleIdentifier"];
 
 	if(!appBundleID) {
 		fprintf(stderr, _("Error: Unable to parse app %s\n"), path.fileSystemRepresentation);
 		return;
 	}
+
+
+	//NSLog(@"Info=%@", appInfoPlist);
+    NSMutableArray* urltypes = [appInfoPlist[@"CFBundleURLTypes"] mutableCopy];
+    for(int i=0; i<urltypes.count; i++) {
+       //NSLog(@"schemes=%@", urltypes[i][@"CFBundleURLSchemes"]);
+        
+        NSMutableArray* schemes = [urltypes[i][@"CFBundleURLSchemes"] mutableCopy];
+        [schemes removeObjectsInArray:blockedURLSchemes];
+        //NSLog(@"new schemes=%@", schemes);
+
+        urltypes[i][@"CFBundleURLSchemes"] = schemes.copy;
+    }
+    appInfoPlist[@"CFBundleURLTypes"] = urltypes.copy;
+
+
+    BOOL isAppleBundle = [appBundleID hasPrefix:@"com.apple."];
+	
+	NSString* executableName = appInfoPlist[@"CFBundleExecutable"];
+    // if([executableName hasPrefix:@"."]) executableName = [executableName substringFromIndex:1];
+
+    NSString* jbrootpath = [path stringByAppendingPathComponent:@".jbroot"];
+    BOOL jbrootexists = [NSFileManager.defaultManager fileExistsAtPath:jbrootpath];
+
+    //try
+    unlink([path stringByAppendingPathComponent:@".preload"].UTF8String);
+    unlink([path stringByAppendingPathComponent:@".prelib"].UTF8String);
+    
+    NSString* rebuildFile = [path stringByAppendingPathComponent:@".rebuild"];
+
+    if(jbrootexists)
+    {
+        if(!isAppleBundle && ![NSFileManager.defaultManager fileExistsAtPath:[path stringByAppendingString:@"/../_TrollStore"]])
+        {
+            freeplay(path);
+        }
+
+        if(![NSFileManager.defaultManager fileExistsAtPath:rebuildFile])
+        {
+            //NSLog(@"patch macho: %@", [path stringByAppendingPathComponent:executableName]);
+            int patch_app_exe(const char* file);
+            patch_app_exe([path stringByAppendingPathComponent:executableName].UTF8String);
+
+             char* argv[] = {"/basebin/rebuildapp", (char*)rootfs(path).UTF8String, NULL};
+            assert(execBinary(jbroot(argv[0]), argv) == 0);
+            
+            [[NSString new] writeToFile:rebuildFile atomically:YES encoding:NSUTF8StringEncoding error:nil];
+       }
+
+        // NSString* newExecutableName = @".preload";
+        // appInfoPlist[@"CFBundleExecutable"] = newExecutableName;
+
+        link(jbroot("/basebin/preload"), [path stringByAppendingPathComponent:@".preload"].UTF8String);
+        link(jbroot("/basebin/preload.dylib"), [path stringByAppendingPathComponent:@".prelib"].UTF8String);
+    }
+    else
+    {
+        unlink(rebuildFile.UTF8String);
+    }
+
+    if(!isAppleBundle) {
+        [appInfoPlist writeToFile:appInfoPath atomically:YES];
+    }
 
 	BOOL isRemovableSystemApp = [[NSFileManager defaultManager] fileExistsAtPath:[@"/System/Library/AppSignatures" stringByAppendingPathComponent:appBundleID]];
 	BOOL registerAsUser = isDefaultInstallationPath(path) && !isRemovableSystemApp && !forceSystem;
@@ -387,7 +769,13 @@ void registerPath(NSString *path, BOOL forceSystem)
 		dictToRegister[@"EnvironmentVariables"] = constructEnvironmentVariablesForContainerPath(nil, NO);
 	}
 
-	dictToRegister[@"IsDeletable"] = @(registerAsUser || isRemovableSystemApp);
+	if(jbrootexists) 
+    {
+        dictToRegister[@"EnvironmentVariables"][@"_JBROOT"] = jbroot(@"/");
+        dictToRegister[@"EnvironmentVariables"][@"_SBTOKEN"] = @(sbtoken);
+	}
+
+	dictToRegister[@"IsDeletable"] = @(registerAsUser || isRemovableSystemApp || isDefaultInstallationPath(path));
 	dictToRegister[@"Path"] = path;
 	
 	dictToRegister[@"SignerOrganization"] = @"Apple Inc.";
@@ -434,6 +822,8 @@ void registerPath(NSString *path, BOOL forceSystem)
 
 		if (!pluginBundleID) continue;
 
+		if([blockedAppPlugins containsObject:pluginBundleID]) continue;
+
 		NSMutableDictionary *pluginDict = [NSMutableDictionary dictionary];
 
 		// Add entitlements
@@ -463,6 +853,12 @@ void registerPath(NSString *path, BOOL forceSystem)
 			pluginDict[@"EnvironmentVariables"] = constructEnvironmentVariablesForContainerPath(pluginContainerPath, pluginContainerized);
 		} else {
 			pluginDict[@"EnvironmentVariables"] = constructEnvironmentVariablesForContainerPath(nil, pluginContainerized);
+		}
+
+		if(jbrootexists) 
+		{
+			pluginDict[@"EnvironmentVariables"][@"_JBROOT"] = jbroot(@"/");
+			pluginDict[@"EnvironmentVariables"][@"_SBTOKEN"] = @(sbtoken);
 		}
 
 		pluginDict[@"Path"] = pluginPath;
@@ -499,9 +895,24 @@ void registerPath(NSString *path, BOOL forceSystem)
 		printf("Registering dictionary: %s\n", dictToRegister.description.UTF8String);
 	}
 
-	if (![workspace registerApplicationDictionary:dictToRegister]) {
+	if ([workspace registerApplicationDictionary:dictToRegister])
+	{
+		networkFix(appBundleID);
+		for(NSString* pluginId in dictToRegister[@"_LSBundlePlugins"])
+		{
+			NSDictionary* pluginDict = dictToRegister[@"_LSBundlePlugins"][pluginId];
+			networkFix(pluginDict[@"CFBundleIdentifier"]);
+		}
+	}
+	else
+	{
 		fprintf(stderr, _("Error: Unable to register %s\n"), path.fileSystemRepresentation);
 	}
+
+
+    if(!isAppleBundle) {
+        [appInfoData writeToFile:appInfoPath atomically:YES];
+    }
 }
 
 void unregisterApp(NSString* arg)
@@ -527,77 +938,6 @@ void unregisterApp(NSString* arg)
 	if (![workspace unregisterApplication:url]) {
 		fprintf(stderr, _("Error: Unable to unregister"));
 	}
-
-	return;
-
-	// char jbrootpath[PATH_MAX];
-	// assert(realpath(jbroot("/"), jbrootpath) != NULL);
-
-	// //if arg is a path, it should be a jbroot-based path and starts with /
-	// NSString* path = [NSString stringWithFormat:@"%s%@", jbrootpath, arg];
-
-	// bool usingPath = [arg containsString:@"/"];
-	// if(usingPath) {
-	// 	NSString* path = jbroot(arg);
-	// 	targetApp = [LSApplicationProxy applicationProxyForIdentifier:path];
-	// }
-
-	// LSApplicationProxy* targetApp = nil;
-	// LSApplicationWorkspace *workspace = [LSApplicationWorkspace defaultWorkspace];
-	// for (LSApplicationProxy *app in [workspace allApplications]) {
-	// 	//app.bundleURL is always *real-path*
-	// 	if( [app.bundleURL.path isEqualToString:path] || [app.bundleIdentifier isEqualToString:arg] )
-	// 	{
-	// 		targetApp = app;
-	// 		break;
-	// 	}
-	// }
-
-	// if(!targetApp) {
-	// 	fprintf(stderr, _("Error: Unable to find app %s\n"), arg.UTF8String);
-	// 	return;
-	// }
-
-	/* clean up the app's data containers, 
-	including group data containers and plug-in data containers, 
-	but don't use container-path directly, it may be /var/mobile */
-
-	// MCMContainer *appContainer = [NSClassFromString(@"MCMAppDataContainer") containerWithIdentifier:targetApp.bundleIdentifier createIfNecessary:NO existed:YES? error:nil];
-	// if(appContainer) {
-	// 	NSError *error;
-	// 	destroyContainerWithCompletion  //[NSFileManager.defaultManager removeItemAtPath:appContainer.url.path  error:nil];
-	// }
-
-	// // delete group container paths
-	// [[targetApp groupContainerURLs] enumerateKeysAndObjectsUsingBlock:^(NSString* groupId, NSURL* groupURL, BOOL* stop)
-	// {
-	// 	// If another app still has this group, don't delete it
-	// 	NSArray<LSApplicationProxy*>* appsWithGroup = applicationsWithGroupId(groupId);
-	// 	if(appsWithGroup.count > 1)
-	// 	{
-	// 		NSLog(@"[uninstallApp] not deleting %@, appsWithGroup.count:%lu", groupURL, appsWithGroup.count);
-	// 		return;
-	// 	}
-
-	// 	NSLog(@"[uninstallApp] deleting %@", groupURL);
-	// 	[[NSFileManager defaultManager] removeItemAtURL:groupURL error:nil];
-	// }];
-
-	// // delete app plugin paths
-	// for(LSPlugInKitProxy* pluginProxy in targetApp.plugInKitPlugins)
-	// {
-	// 	NSURL* pluginURL = pluginProxy.dataContainerURL;
-	// 	if(pluginURL)?????container????
-	// 	{
-	// 		NSLog(@"[uninstallApp] deleting %@", pluginURL);
-	// 		destroyContainerWithCompletion  //[[NSFileManager defaultManager] removeItemAtURL:pluginURL error:nil];
-	// 	}
-	// }
-
-	// //there is a bug in unregisterApplication:, if path does exists but its realpath changed, it fault.
-	// if (![workspace unregisterApplication:targetApp.bundleURL]) {
-	// 	fprintf(stderr, _("Error: Unable to unregister %s : %s\n"), targetApp.bundleIdentifier.UTF8String, targetApp.bundleURL.path.UTF8String);
-	// }
 }
 
 void listBundleID(void) {
@@ -630,7 +970,7 @@ void printfNSObject(id obj)
 
 void infoForBundleID(NSString *bundleID) {
 	LSApplicationProxy *app = [LSApplicationProxy applicationProxyForIdentifier:bundleID];
-	// printfNSObject(app.correspondingApplicationRecord);
+	//printfNSObject(app);
 
 	if ([[app appState] isValid]) {
 		printf(_("Name: %s\n"), [[app localizedNameForContext:nil] UTF8String]);
@@ -638,6 +978,7 @@ void infoForBundleID(NSString *bundleID) {
 		printf(_("Executable Name: %s\n"), [[app bundleExecutable] UTF8String]);
 		printf(_("Path: %s\n"), [[app bundleURL] fileSystemRepresentation]);
 		printf(_("Container Path: %s\n"), [[app containerURL] fileSystemRepresentation]);
+		printf(_("Data Container Path: %s\n"), [[app dataContainerURL] fileSystemRepresentation]);
 		printf(_("Vendor Name: %s\n"), [[app vendorName] UTF8String]);
 		printf(_("Team ID: %s\n"), [[app teamID] UTF8String]);
 		printf(_("Type: %s\n"), [[app applicationType] UTF8String]);

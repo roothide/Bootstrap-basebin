@@ -81,9 +81,6 @@ extern int posix_spawnattr_set_persona_np(const posix_spawnattr_t* attr, uid_t p
 extern int posix_spawnattr_set_persona_uid_np(const posix_spawnattr_t* __restrict, uid_t);
 extern int posix_spawnattr_set_persona_gid_np(const posix_spawnattr_t* __restrict, uid_t);
 
-extern char** NXArgv; // __NSGetArgv() not working on ctor
-extern int    NXArgc;
-
 #include <sys/stat.h>
 
 void fixsuid()
@@ -152,15 +149,8 @@ void fixsuid()
     exit(-1);
 }
 
-void runAsRoot()
+void runAsRoot(const char* path, char* argv[])
 {
-    if(getuid()==0)
-        return;
-
-    char path[PATH_MAX]={0};
-    uint32_t bufsize=sizeof(path);
-    assert(_NSGetExecutablePath(path, &bufsize) == 0);
-
     posix_spawnattr_t attr;
 	posix_spawnattr_init(&attr);
 
@@ -175,7 +165,7 @@ void runAsRoot()
 	posix_spawn_file_actions_init(&action);
 
 	pid_t pid=0;
-	int ret = posix_spawn_hook(&pid, path, &action, &attr, NXArgv, environ);
+	int ret = posix_spawn_hook(&pid, path, &action, &attr, argv, environ);
 
     assert(ret==0 && pid>0);
 

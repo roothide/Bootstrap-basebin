@@ -10,10 +10,5 @@
 	<true/>
 	<key>com.apple.private.security.storage.AppDataContainers</key>
 	<true/>
-    
-    <key>com.apple.CommCenter.fine-grained</key>
-	<array>
-		<string>data-allowed-write</string>
-	</array>
 </dict>
 </plist>

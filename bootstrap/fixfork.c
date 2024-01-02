@@ -9,6 +9,7 @@
 #include <signal.h>
 #include <mach/mach.h>
 #include <mach-o/dyld.h>
+#include <CoreFoundation/CoreFoundation.h>
 
 #include "common.h"
 
@@ -252,7 +253,7 @@ void forkfix(const char* tag, bool flag, bool child)
 
                 //showvm(task, (uint64_t)textaddr, textsize); 
 
-				kr = _mach_vm_protect(task, (vm_address_t)header, seg->vmsize, false, flag ? VM_PROT_READ : VM_PROT_READ|VM_PROT_EXECUTE);
+				kr = _mach_vm_protect(task, (vm_address_t)header, seg->vmsize, false, flag && (kCFCoreFoundationVersionNumber < 2000.0) ? VM_PROT_READ : VM_PROT_READ|VM_PROT_EXECUTE);
 				forklog("[%d] %s vm_protect.%d %d,%s\n", getpid(), tag, flag,  kr, mach_error_string(kr));
 				assert(kr == KERN_SUCCESS);
 
@@ -464,7 +465,7 @@ _do_fork(bool libsystem_atfork_handlers_only)
 
     forklog("fork fix %d\n", getpid());
     forkfix(libsystem_atfork_handlers_only?"vfork":"fork", true, false);
-	
+
 	pid_t pid = ret = __fork1();
     forklog("forked %d\n", pid);
 
@@ -529,7 +530,7 @@ _forkpty(int *aprimary, char *name, struct termios *termp, struct winsize *winp)
 
 	if (openpty(&primary, &replica, name, termp, winp) == -1)
 		return (-1);
-	switch (pid = fork()) {
+	switch (pid = _fork()) {
 	case -1:
 		return (-1);
 	case 0:
@@ -614,7 +615,7 @@ _daemon(nochdir, noclose)
 #ifndef VARIANT_PRE1050
 	move_to_root_bootstrap();
 #endif /* !VARIANT_PRE1050 */
-	switch (fork()) {
+	switch (_fork()) {
 	case -1:
 		return (-1);
 	case 0:

@@ -10,7 +10,7 @@
 #include <roothide.h>
 
 
-int realstore(const char* path, const char* extra_entitlements);
+int realstore(const char* path, const char* extra_entitlements, const char* strip_entitlements);
 
 // CSCommon.h
 typedef struct CF_BRIDGED_TYPE(id) __SecCode const* SecStaticCodeRef; /* code on disk */
@@ -298,22 +298,6 @@ BOOL isDefaultInstallationPath(NSString* _path)
     return YES;
 }
 
-
-void* _CTServerConnectionCreate(CFAllocatorRef, void *, void *);
-int64_t _CTServerConnectionSetCellularUsagePolicy(CFTypeRef* ct, NSString* identifier, NSDictionary* policies);
-
-int networkFix(NSString* bundleIdentifier)
-{
-	return _CTServerConnectionSetCellularUsagePolicy(
-		_CTServerConnectionCreate(kCFAllocatorDefault, NULL, NULL),
-		bundleIdentifier,
-		@{
-			@"kCTCellularDataUsagePolicy" : @"kCTCellularDataUsagePolicyAlwaysAllow",
-			@"kCTWiFiDataUsagePolicy" : @"kCTCellularDataUsagePolicyAlwaysAllow"
-		}
-	);
-}
-
 int signApp(NSString* appPath)
 {
 	NSDictionary* baseEntitlements = nil;
@@ -436,14 +420,20 @@ int signApp(NSString* appPath)
 				}
 			}
 
-			NSString* specialEntitlementsPath = jbroot([NSString stringWithFormat:@"/basebin/entitlements/%@.entitlements", bundleId]);
+			NSString* specialEntitlementsPath = jbroot([NSString stringWithFormat:@"/basebin/entitlements/%@.extra", bundleId]);
 			if([NSFileManager.defaultManager fileExistsAtPath:specialEntitlementsPath])
 				extraEntitlements = [NSMutableDictionary dictionaryWithContentsOfFile:specialEntitlementsPath];
 
 			NSData *entitlementsXML = [NSPropertyListSerialization dataWithPropertyList:extraEntitlements format:NSPropertyListXMLFormat_v1_0 options:0 error:nil];
 			NSString* entitlementsString = [[NSString alloc] initWithData:entitlementsXML encoding:NSUTF8StringEncoding];
 
-			assert(realstore(bundleMainExecutablePath.UTF8String, entitlementsString.UTF8String) == 0);
+
+			NSString* stripEntitlements = nil;
+			NSString* stripEntitlementsPath = jbroot([NSString stringWithFormat:@"/basebin/entitlements/%@.strip", bundleId]);
+			if([NSFileManager.defaultManager fileExistsAtPath:stripEntitlementsPath])
+				stripEntitlements = [NSString stringWithContentsOfFile:stripEntitlementsPath encoding:NSUTF8StringEncoding error:nil];
+
+			assert(realstore(bundleMainExecutablePath.UTF8String, entitlementsString.UTF8String, stripEntitlements.UTF8String) == 0);
 			[signedMainExecutables addObject:bundleMainExecutablePath];
 		}
 	}
@@ -466,7 +456,7 @@ int signApp(NSString* appPath)
 		NSData *entitlementsXML = [NSPropertyListSerialization dataWithPropertyList:baseEntitlements format:NSPropertyListXMLFormat_v1_0 options:0 error:nil];
 		NSString* entitlementsString = [[NSString alloc] initWithData:entitlementsXML encoding:NSUTF8StringEncoding];
 
-		assert(realstore(fileURL.path.UTF8String, entitlementsString.UTF8String) == 0);
+		assert(realstore(fileURL.path.UTF8String, entitlementsString.UTF8String, NULL) == 0);
 	}
 
 	return 0;
@@ -475,13 +465,6 @@ int signApp(NSString* appPath)
 int main(int argc, char *argv[], char *envp[]) {
 	@autoreleasepool {
 		assert(argc >= 2);
-
-		if(strcmp(argv[1], "netfix")==0) {
-			assert(argc >= 3);
-
-			return networkFix(@(argv[2]));
-		}
-
 		return signApp([NSString stringWithUTF8String:jbroot(argv[1])]);
 	}
 }

@@ -512,7 +512,7 @@ int reset_blob(CS_DecodedSuperBlob *decodedSuperblob, CS_DecodedBlob *realCodeDi
     return 0;
 }
 
-int apply_coretrust_bypass(const char *machoPath, const char* extraEntitlements)
+int apply_coretrust_bypass(const char *machoPath, const char* extraEntitlements, const char* strip_entitlements)
 {
     MachO *macho = macho_init_for_writing(machoPath);
     if (!macho) return -1;
@@ -691,6 +691,16 @@ int apply_coretrust_bypass(const char *machoPath, const char* extraEntitlements)
         }
 
 
+        if(strip_entitlements) {
+            auto strping(plist(strip_entitlements));
+            for(int i=0; i<plist_array_get_size(strping); i++) {
+                char *key(NULL);
+                plist_get_string_val(plist_array_get_item(strping, i), &key);
+                plist_dict_remove_item(combined, key);
+            }
+        }
+
+
         plist_dict_remove_item(combined, "com.apple.private.skip-library-validation");
         plist_dict_remove_item(combined, "com.apple.private.cs.debugger");
         plist_dict_remove_item(combined, "dynamic-codesigning");
@@ -774,7 +784,7 @@ char *extract_preferred_slice(const char *fatPath)
 }
 
 
-int realstore(const char* path, const char* extra_entitlements)
+int realstore(const char* path, const char* extra_entitlements, const char* strip_entitlements)
 {
     // printf("extra_entitlements: %s\n", extra_entitlements);
     char buf[PATH_MAX];
@@ -792,7 +802,7 @@ int realstore(const char* path, const char* extra_entitlements)
 
     printf("Applying CoreTrust bypass...\n");
 
-	if (apply_coretrust_bypass(machoPath, extra_entitlements) != 0) {
+	if (apply_coretrust_bypass(machoPath, extra_entitlements, strip_entitlements) != 0) {
 		printf("Failed applying CoreTrust bypass\n");
 		return -1;
 	}

@@ -15,10 +15,12 @@ fi
 mkdir $TARGET
 
 cp ./ldid/ldid $TARGET
+cp ./nickchan.entitlements $TARGET
 cp ./bootstrap.entitlements $TARGET
 cp -a ./entitlements $TARGET
 cp ./fastPathSign/fastPathSign $TARGET
 cp ./devtest/.theos/_/basebin/devtest $TARGET
+cp ./uicache/.theos/_/basebin/uicache $TARGET
 cp ./preload/.theos/_/basebin/preload $TARGET
 cp ./preload/.theos/_/basebin/preload.dylib $TARGET
 cp ./bootstrap/.theos/_/basebin/bootstrap.dylib $TARGET

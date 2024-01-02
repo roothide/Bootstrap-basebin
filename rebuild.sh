@@ -14,6 +14,10 @@ cd fastPathSign
 make clean && make
 cd -
 
+cd uicache
+make clean && make package
+cd -
+
 cd rebuildapp
 make clean && make package
 cd -

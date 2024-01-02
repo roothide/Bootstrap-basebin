@@ -5,6 +5,9 @@
 
 extern char** environ;
 
+extern char** NXArgv; // __NSGetArgv() not working on ctor
+extern int    NXArgc;
+
 #define EXPORT __attribute__ ((visibility ("default")))
 
 

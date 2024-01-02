@@ -6,12 +6,16 @@
 
 #include "sandbox.h"
 
-#define JB_ROOT_PATH(path) ({ \
-	char *outPath = alloca(PATH_MAX); \
-	strlcpy(outPath, getenv("_JBROOT"), PATH_MAX); \
-	strlcat(outPath, path, PATH_MAX); \
-	(outPath); \
-})
+extern char*const* environ;
+
+
+//an unsandboxed app may lose EnvironmentVariables which from lsd when launching from "Search" on home screen
+// #define JB_ROOT_PATH(path) ({ \
+// 	char *outPath = alloca(PATH_MAX); \
+// 	strlcpy(outPath, getenv("_JBROOT"), PATH_MAX); \
+// 	strlcat(outPath, path, PATH_MAX); \
+// 	(outPath); \
+// })
 
 
 void unsandbox(char* sbtoken) {
@@ -45,8 +49,6 @@ static void __attribute__((__constructor__)) preload()
 	if(sbtoken) {
 		unsandbox(sbtoken);
 		unsetenv("_SBTOKEN");
-	} else {
-		assert(checkpatchedexe());
 	}
 
 	int found=0;
@@ -62,7 +64,7 @@ static void __attribute__((__constructor__)) preload()
     
 	if(!found) 
 	{
-		if(!dlopen(JB_ROOT_PATH("/basebin/bootstrap.dylib"), RTLD_NOW)) {
+		if(!dlopen("@executable_path/.jbroot/basebin/bootstrap.dylib", RTLD_NOW)) {
 			assert(checkpatchedexe());
 		}
 	}

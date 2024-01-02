@@ -228,10 +228,18 @@ bool checkpatchedexe() {
 	return true;
 }
 
+extern void runAsRoot(const char* path, char* argv[]);
+
 // const char* bootstrapath=NULL;
 static void __attribute__((__constructor__)) bootstrap()
 {
-    SYSLOG("bootstrap....%s\n", getprogname());
+    char executablePath[PATH_MAX]={0};
+    uint32_t bufsize=sizeof(executablePath);
+    assert(_NSGetExecutablePath(executablePath, &bufsize) == 0);
+
+	const char* exepath = rootfs(executablePath);
+
+    SYSLOG("bootstrap....%s\n", exepath);
 
 	// struct dl_info di={0};
     // dladdr((void*)bootstrap, &di);
@@ -251,25 +259,27 @@ static void __attribute__((__constructor__)) bootstrap()
         fixsuid();
     }
 
-    if(strcmp(getprogname(), "launchctl")==0)
+    if(strcmp(exepath, "/usr/bin/launchctl")==0)
     {
+		if(NXArgc >= 3 && strcmp(NXArgv[1],"reboot")==0 && strcmp(NXArgv[2],"userspace")==0) 
+		{
+			char* args[] = {"/usr/bin/killall", "-9", "backboardd", NULL};
+			runAsRoot(jbroot(args[0]), args);
+		}
+
         fprintf(stderr, "launchctl is not supported yet.\n");
         exit(0);
     }
-	else if(strcmp(getprogname(), "dpkg")==0)
+	else if(strcmp(exepath, "/usr/bin/dpkg")==0)
     {
 		void init_dpkg_hook();
 		init_dpkg_hook();
     } 
-	else if(strcmp(getprogname(), "uicache")==0)
+	else if(strcmp(exepath, "/usr/bin/uicache")==0)
     {
-    	extern void runAsRoot();
-		runAsRoot();
-
-		extern void init_uicache_hook();
-		init_uicache_hook();
+		runAsRoot(jbroot("/basebin/uicache"), NXArgv);
     }
-	else if(strcmp(getprogname(), "Preferences")==0)
+	else if(strcmp(exepath, "/Applications/Preferences.app/Preferences")==0)
     {
 		void init_prefshook();
 		init_prefshook();
