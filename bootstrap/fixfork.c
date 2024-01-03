@@ -7,13 +7,17 @@
 #include <assert.h>
 #include <util.h>
 #include <signal.h>
+#import <sys/sysctl.h>
+#include <sys/utsname.h>
 #include <mach/mach.h>
 #include <mach-o/dyld.h>
 #include <CoreFoundation/CoreFoundation.h>
 
 #include "common.h"
 
-
+#ifndef CPUFAMILY_ARM_PCORE_ECORE_COLL
+#define CPUFAMILY_ARM_PCORE_ECORE_COLL 0x2876f5b5
+#endif
 
 
 #define printf_putchar(x) do{int l=strlen(buffer);if(l<bufsize)buffer[l]=x;}while(0)
@@ -173,6 +177,59 @@ int _snprintf(char* buffer, int bufsize, const char * __restrict format, ...) {
 
 #define forklog(...)
 
+
+
+bool ios17_A15Above=false;
+
+extern pid_t __fork(void);
+extern pid_t __vfork(void);
+
+static void (**_libSystem_atfork_prepare)(void) = 0;
+static void (**_libSystem_atfork_parent)(void) = 0;
+static void (**_libSystem_atfork_child)(void) = 0;
+static void (**_libSystem_atfork_prepare_v2)(unsigned int flags, ...) = 0;
+static void (**_libSystem_atfork_parent_v2)(unsigned int flags, ...) = 0;
+static void (**_libSystem_atfork_child_v2)(unsigned int flags, ...) = 0;
+
+#define RESOVLE_ATFORK(n)  {\
+*(void**)&n = DobbySymbolResolver("/usr/lib/system/libsystem_c.dylib", #n);\
+  SYSLOG("forkfunc %s = %p:%p", #n, n, n?*n:NULL);\
+  }
+
+#include "dobby.h"
+static void 
+//__attribute__((__constructor__)) 
+atforkinit()
+{
+    if((int)kCFCoreFoundationVersionNumber >= 2000) {
+        cpu_subtype_t cpuFamily = 0;
+        size_t cpuFamilySize = sizeof(cpuFamily);
+        sysctlbyname("hw.cpufamily", &cpuFamily, &cpuFamilySize, NULL, 0);
+        if (cpuFamily==CPUFAMILY_ARM_BLIZZARD_AVALANCHE
+         || cpuFamily==CPUFAMILY_ARM_EVEREST_SAWTOOTH
+          || cpuFamily==CPUFAMILY_ARM_PCORE_ECORE_COLL) {
+            ios17_A15Above = true;
+        }
+    }
+    
+    RESOVLE_ATFORK(_libSystem_atfork_prepare);
+    RESOVLE_ATFORK(_libSystem_atfork_parent);
+    RESOVLE_ATFORK(_libSystem_atfork_child);
+    RESOVLE_ATFORK(_libSystem_atfork_prepare_v2);
+    RESOVLE_ATFORK(_libSystem_atfork_parent_v2);
+    RESOVLE_ATFORK(_libSystem_atfork_child_v2);
+}
+
+//redefine for pointers
+#define _libSystem_atfork_prepare		(*_libSystem_atfork_prepare)
+#define _libSystem_atfork_parent  		(*_libSystem_atfork_parent)
+#define _libSystem_atfork_child  		(*_libSystem_atfork_child)
+#define _libSystem_atfork_prepare_v2  	(*_libSystem_atfork_prepare_v2)
+#define _libSystem_atfork_parent_v2  	(*_libSystem_atfork_parent_v2)
+#define _libSystem_atfork_child_v2  	(*_libSystem_atfork_child_v2)
+
+
+
 void showvm(task_port_t task, uint64_t start, uint64_t size)
 {
     vm_size_t region_size=0;
@@ -253,7 +310,7 @@ void forkfix(const char* tag, bool flag, bool child)
 
                 //showvm(task, (uint64_t)textaddr, textsize); 
 
-				kr = _mach_vm_protect(task, (vm_address_t)header, seg->vmsize, false, flag && (kCFCoreFoundationVersionNumber < 2000.0) ? VM_PROT_READ : VM_PROT_READ|VM_PROT_EXECUTE);
+				kr = _mach_vm_protect(task, (vm_address_t)header, seg->vmsize, false, flag && !ios17_A15Above ? VM_PROT_READ : VM_PROT_READ|VM_PROT_EXECUTE);
 				forklog("[%d] %s vm_protect.%d %d,%s\n", getpid(), tag, flag,  kr, mach_error_string(kr));
 				assert(kr == KERN_SUCCESS);
 
@@ -278,44 +335,6 @@ void forkfix(const char* tag, bool flag, bool child)
     //     }
     // }   
 }
-
-
-
-extern pid_t __fork(void);
-extern pid_t __vfork(void);
-
-static void (**_libSystem_atfork_prepare)(void) = 0;
-static void (**_libSystem_atfork_parent)(void) = 0;
-static void (**_libSystem_atfork_child)(void) = 0;
-static void (**_libSystem_atfork_prepare_v2)(unsigned int flags, ...) = 0;
-static void (**_libSystem_atfork_parent_v2)(unsigned int flags, ...) = 0;
-static void (**_libSystem_atfork_child_v2)(unsigned int flags, ...) = 0;
-
-#define RESOVLE_ATFORK(n)  {\
-*(void**)&n = DobbySymbolResolver("/usr/lib/system/libsystem_c.dylib", #n);\
-  SYSLOG("forkfunc %s = %p:%p", #n, n, n?*n:NULL);\
-  }
-
-#include "dobby.h"
-static void 
-//__attribute__((__constructor__)) 
-atforkinit()
-{
-    RESOVLE_ATFORK(_libSystem_atfork_prepare);
-    RESOVLE_ATFORK(_libSystem_atfork_parent);
-    RESOVLE_ATFORK(_libSystem_atfork_child);
-    RESOVLE_ATFORK(_libSystem_atfork_prepare_v2);
-    RESOVLE_ATFORK(_libSystem_atfork_parent_v2);
-    RESOVLE_ATFORK(_libSystem_atfork_child_v2);
-}
-
-//redefine for pointers
-#define _libSystem_atfork_prepare		(*_libSystem_atfork_prepare)
-#define _libSystem_atfork_parent  		(*_libSystem_atfork_parent)
-#define _libSystem_atfork_child  		(*_libSystem_atfork_child)
-#define _libSystem_atfork_prepare_v2  	(*_libSystem_atfork_prepare_v2)
-#define _libSystem_atfork_parent_v2  	(*_libSystem_atfork_parent_v2)
-#define _libSystem_atfork_child_v2  	(*_libSystem_atfork_child_v2)
 
 // struct sigaction fork_oldact = {0};
 // void forksig(int signo, siginfo_t *info, void *context)
