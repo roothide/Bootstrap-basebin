@@ -1,0 +1,37 @@
+# Ignore all
+*
+
+# Unignore all with extensions
+!*.*
+
+# Unignore Makefile
+!Makefile
+
+# Unignore all dirs
+!*/
+
+# Ignore build/
+build/
+output/
+data/
+
+# Ignore .DS_Store
+.DS_Store
+
+# Ignore .vscode/
+.vscode/*
+!.vscode/settings.json
+
+# Ignore nocommit-* files and dirs
+nocommit-*
+
+# Ignore Python scripts
+*.py
+
+# Miscellaneous
+ca.key
+*.tipa
+*.zip
+*.ipa
+*.app
+Payload/
