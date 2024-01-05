@@ -348,9 +348,7 @@ int signApp(NSString* appPath)
 	enumerator = [[NSFileManager defaultManager] enumeratorAtURL:[NSURL fileURLWithPath:appPath] includingPropertiesForKeys:nil options:0 errorHandler:nil];
 	while(fileURL = [enumerator nextObject])
 	{
-
 		NSMutableDictionary* extraEntitlements = baseEntitlements.mutableCopy;
-		
 
 		NSString *filePath = fileURL.path;
 		if ([filePath.lastPathComponent isEqualToString:@"Info.plist"]) {
@@ -365,10 +363,6 @@ int signApp(NSString* appPath)
 			if (![[NSFileManager defaultManager] fileExistsAtPath:bundleMainExecutablePath]) continue;
 
 			NSString *packageType = infoDict[@"CFBundlePackageType"];
-
-			// //apple macho are always adhoc signed?
-			// if([bundleId hasPrefix:@"com.apple."] && ![packageType isEqualToString:@"APPL"])
-			// 	continue;
 
 			// We don't care about frameworks (yet)
 			if ([packageType isEqualToString:@"FMWK"]) continue;
@@ -451,10 +445,11 @@ int signApp(NSString* appPath)
 		BOOL signedFile=NO;
 		for(NSString* signedExecutable in signedMainExecutables) {
 			if(isSameFile(signedExecutable, fileURL.path)) {
+				NSLog(@"skip signed %@", fileURL);
 				signedFile=YES;
+				break;
 			}
 		}
-
 		if(signedFile) continue;
 
 		if(!isMachoFile(fileURL.path)) continue;

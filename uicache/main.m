@@ -459,45 +459,6 @@ void freeplay(NSString* bundlePath)
         }
     }
 
-	{
-			NSDirectoryEnumerator* enumerator = [fm enumeratorAtURL:[NSURL fileURLWithPath:bundlePath] includingPropertiesForKeys:nil options:0 errorHandler:nil];
-	for(NSURL*fileURL in enumerator)
-	{
-		NSString *filePath = fileURL.path;
-		if ([filePath.lastPathComponent isEqualToString:@"Info.plist"]) 
-        {
-            if(![fm fileExistsAtPath:[[filePath stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"SC_Info"]])
-                continue;
-
-			NSDictionary *infoDict = [NSDictionary dictionaryWithContentsOfFile:filePath];
-			if (!infoDict) continue;
-
-			if ([infoDict[@"CFBundlePackageType"] isEqualToString:@"FMWK"]) continue;
-            
-			if ([infoDict[@"CFBundlePackageType"] isEqualToString:@"APPL"]) continue;
-
-			NSString *bundleId = infoDict[@"CFBundleIdentifier"];
-			NSString *bundleExecutable = infoDict[@"CFBundleExecutable"];
-			if (!bundleId || !bundleExecutable) continue;
-
-			NSString *bundleMainExecutablePath = [[filePath stringByDeletingLastPathComponent] stringByAppendingPathComponent:bundleExecutable];
-			if (![fm fileExistsAtPath:bundleMainExecutablePath]) continue;
-
-            posix_spawnattr_t attr;
-            posix_spawnattr_init(&attr);
-            posix_spawnattr_setflags(&attr, 0x460c);
-
-            pid_t pid=0;
-            char* args[] = {(char*)bundleMainExecutablePath.UTF8String,(char*)bundleMainExecutablePath.UTF8String,NULL};
-            int ret = posix_spawn(&pid, args[0], NULL, &attr, args, NULL);
-            NSLog(@"freeplay: %@:%@\n%d,%s : %d : %@", infoDict[@"CFBundlePackageType"], bundleId, ret, strerror(ret), pid, bundleMainExecutablePath);
-            if(ret==0 && pid) {
-                kill(pid, SIGKILL);
-            }
-        }
-    }
-	}
-
     assert([fm moveItemAtPath:bundlePath toPath:[bundlePath stringByAppendingPathExtension:@"appbackup"] error:nil]);
     assert([fm moveItemAtPath:[bundlePath stringByAppendingPathExtension:@"tmp"] toPath:bundlePath error:nil]);
 }
@@ -569,7 +530,7 @@ void registerPath(NSString *path, BOOL forceSystem)
 			requiredRebuild = YES;
 
 			if(rebuildStatus 
-				&& [rebuildStatus[@"st_dev"] longValue]==st.st_dev
+				//dev may change after reboot// && [rebuildStatus[@"st_dev"] longValue]==st.st_dev
 				&& [rebuildStatus[@"st_ino"] unsignedLongLongValue]==st.st_ino
 				&& [rebuildStatus[@"st_mtime"] longValue]==st.st_mtimespec.tv_sec 
 				&& [rebuildStatus[@"st_mtimensec"] longValue]==st.st_mtimespec.tv_nsec) {
