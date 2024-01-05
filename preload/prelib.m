@@ -18,7 +18,7 @@ extern char*const* environ;
 // })
 
 
-void unsandbox(char* sbtoken) {
+void unsandbox(const char* sbtoken) {
 	char extensionsCopy[strlen(sbtoken)];
 	strcpy(extensionsCopy, sbtoken);
 	char *extensionToken = strtok(extensionsCopy, "|");
@@ -45,10 +45,12 @@ static void __attribute__((__constructor__)) preload()
 {
 	if(getppid() != 1) return;
 
-	char* sbtoken = getenv("_SBTOKEN");
+    NSString* rebuildFile = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@".rebuild"];
+	NSDictionary* rebuildStatus = [NSDictionary dictionaryWithContentsOfFile:rebuildFile];
+
+	const char* sbtoken = [rebuildStatus[@"sb_token"] UTF8String];
 	if(sbtoken) {
 		unsandbox(sbtoken);
-		unsetenv("_SBTOKEN");
 	}
 
 	int found=0;
@@ -68,8 +70,6 @@ static void __attribute__((__constructor__)) preload()
 			assert(checkpatchedexe());
 		}
 	}
-
-	unsetenv("_JBROOT");
 
     return;
 }

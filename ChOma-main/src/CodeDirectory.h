@@ -62,5 +62,6 @@ uint8_t csd_code_directory_get_hash_type(CS_DecodedBlob *codeDirBlob);
 void csd_code_directory_set_hash_type(CS_DecodedBlob *codeDirBlob, uint8_t hashType);
 int csd_code_directory_print_content(CS_DecodedSuperBlob *decodedSuperblob, CS_DecodedBlob *codeDirBlob, MachO *macho, bool printSlots, bool verifySlots);
 void csd_code_directory_update(CS_DecodedBlob *codeDirBlob, MachO *macho);
+void csd_code_directory_alloc(CS_DecodedBlob *codeDirBlob, MachO *macho);
 
 #endif // CODE_DIRECTORY_H

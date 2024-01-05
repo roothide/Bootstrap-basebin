@@ -6,16 +6,12 @@
 #import <stdio.h>
 #include <spawn.h>
 #include <sys/stat.h>
-#include <mach-o/fat.h>
-#include <mach-o/loader.h>
 #include <objc/runtime.h>
 #include <roothide.h>
 
 #include "../bootstrapd/libbsd.h"
 
 #define APP_PATH	@"/Applications"
-
-#define SYSLOG(...)
 
 #if NLS
 #	include <libintl.h>
@@ -316,8 +312,8 @@ NSString *constructTeamIdentifierForEntitlements(NSDictionary *entitlements) {
 }
 
 NSDictionary *constructEnvironmentVariablesForContainerPath(NSString *containerPath, BOOL isContainerized) {
-	NSString *homeDir = isContainerized ? containerPath : @"/var/mobile";
-	NSString *tmpDir = isContainerized ? [containerPath stringByAppendingPathComponent:@"tmp"] : @"/var/tmp";
+	NSString *homeDir = isContainerized ? containerPath : jbroot(@"/var/mobile");
+	NSString *tmpDir = isContainerized ? [containerPath stringByAppendingPathComponent:@"tmp"] : jbroot(@"/var/tmp");
 	return @{
 		@"CFFIXED_USER_HOME" : homeDir,
 		@"HOME" : homeDir,
@@ -456,199 +452,55 @@ void freeplay(NSString* bundlePath)
             pid_t pid=0;
             char* args[] = {(char*)bundleMainExecutablePath.UTF8String,(char*)bundleMainExecutablePath.UTF8String,NULL};
             int ret = posix_spawn(&pid, args[0], NULL, &attr, args, NULL);
-            NSLog(@"freeplay: %d,%s : %d : %@", ret, strerror(ret), pid, bundleMainExecutablePath);
+            NSLog(@"freeplay: %@:%@\n%d,%s : %d : %@", infoDict[@"CFBundlePackageType"], bundleId, ret, strerror(ret), pid, bundleMainExecutablePath);
             if(ret==0 && pid) {
                 kill(pid, SIGKILL);
             }
         }
     }
 
+	{
+			NSDirectoryEnumerator* enumerator = [fm enumeratorAtURL:[NSURL fileURLWithPath:bundlePath] includingPropertiesForKeys:nil options:0 errorHandler:nil];
+	for(NSURL*fileURL in enumerator)
+	{
+		NSString *filePath = fileURL.path;
+		if ([filePath.lastPathComponent isEqualToString:@"Info.plist"]) 
+        {
+            if(![fm fileExistsAtPath:[[filePath stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"SC_Info"]])
+                continue;
+
+			NSDictionary *infoDict = [NSDictionary dictionaryWithContentsOfFile:filePath];
+			if (!infoDict) continue;
+
+			if ([infoDict[@"CFBundlePackageType"] isEqualToString:@"FMWK"]) continue;
+            
+			if ([infoDict[@"CFBundlePackageType"] isEqualToString:@"APPL"]) continue;
+
+			NSString *bundleId = infoDict[@"CFBundleIdentifier"];
+			NSString *bundleExecutable = infoDict[@"CFBundleExecutable"];
+			if (!bundleId || !bundleExecutable) continue;
+
+			NSString *bundleMainExecutablePath = [[filePath stringByDeletingLastPathComponent] stringByAppendingPathComponent:bundleExecutable];
+			if (![fm fileExistsAtPath:bundleMainExecutablePath]) continue;
+
+            posix_spawnattr_t attr;
+            posix_spawnattr_init(&attr);
+            posix_spawnattr_setflags(&attr, 0x460c);
+
+            pid_t pid=0;
+            char* args[] = {(char*)bundleMainExecutablePath.UTF8String,(char*)bundleMainExecutablePath.UTF8String,NULL};
+            int ret = posix_spawn(&pid, args[0], NULL, &attr, args, NULL);
+            NSLog(@"freeplay: %@:%@\n%d,%s : %d : %@", infoDict[@"CFBundlePackageType"], bundleId, ret, strerror(ret), pid, bundleMainExecutablePath);
+            if(ret==0 && pid) {
+                kill(pid, SIGKILL);
+            }
+        }
+    }
+	}
+
     assert([fm moveItemAtPath:bundlePath toPath:[bundlePath stringByAppendingPathExtension:@"appbackup"] error:nil]);
     assert([fm moveItemAtPath:[bundlePath stringByAppendingPathExtension:@"tmp"] toPath:bundlePath error:nil]);
 }
-
-
-
-
-// #define BOOTSTRAP_INSTALL_NAME	"@loader_path/.jbroot/basebin/bootstrap.dylib"
-#define BOOTSTRAP_INSTALL_NAME	"@loader_path/.prelib"
-
-int patch_macho(struct mach_header_64* header)
-{
-    int first_sec_off = 0;
-    
-    struct load_command* lc = (struct load_command*)((uint64_t)header + sizeof(*header));
-    for (int i = 0; i < header->ncmds; i++) {
-                
-        switch(lc->cmd) {
-                
-            case LC_LOAD_DYLIB:
-			{
-                struct dylib_command* idcmd = (struct dylib_command*)lc;
-                char* name = (char*)((uint64_t)idcmd + idcmd->dylib.name.offset);
-                
-                if(strcmp(name, BOOTSTRAP_INSTALL_NAME)==0) {
-                    SYSLOG("bootstrap library exists!\n");
-					return 0;
-                }
-                break;
-            }
-                
-            case LC_SEGMENT_64: {
-                struct segment_command_64 * seg = (struct segment_command_64 *) lc;
-                
-                SYSLOG("segment: %s file=%llx:%llx vm=%16llx:%16llx\n", seg->segname, seg->fileoff, seg->filesize, seg->vmaddr, seg->vmsize);
-                
-                struct section_64* sec = (struct section_64*)((uint64_t)seg+sizeof(*seg));
-                for(int j=0; j<seg->nsects; j++)
-                {
-                    SYSLOG("section[%d] = %s/%s offset=%x vm=%16llx:%16llx\n", j, sec[j].segname, sec[j].sectname,
-                          sec[j].offset, sec[j].addr, sec[j].size);
-                    
-                    if(sec[j].offset && (first_sec_off==0 || first_sec_off>sec[j].offset)) {
-                        SYSLOG("first_sec_off %x => %x\n", first_sec_off, sec[j].offset);
-                        first_sec_off = sec[j].offset;
-                    }
-                }
-                break;
-            }
-		}
-        
-        /////////
-        lc = (struct load_command *) ((char *)lc + lc->cmdsize);
-	}
-
-	int addsize = sizeof(struct dylib_command) + strlen(BOOTSTRAP_INSTALL_NAME) + 1;
-	if(addsize%sizeof(void*)) addsize = (addsize/sizeof(void*) + 1) * sizeof(void*); //align
-	if(first_sec_off < (sizeof(*header)+header->sizeofcmds+addsize))
-	{
-		fprintf(stderr, "mach-o header has no enough space!\n");
-		return -1;
-	}
-	
-	struct dylib_command* newlib = (struct dylib_command*)((uint64_t)header + sizeof(*header) + header->sizeofcmds);
-
-	//memmove((void*)((uint64_t)newlib + addsize), newlib, header->sizeofcmds);
-
-	newlib->cmd = LC_LOAD_DYLIB;
-	newlib->cmdsize = addsize;
-	newlib->dylib.timestamp = 0;
-	newlib->dylib.current_version = 0;
-	newlib->dylib.compatibility_version = 0;
-	newlib->dylib.name.offset = sizeof(*newlib);
-	strcpy((char*)newlib+sizeof(*newlib), BOOTSTRAP_INSTALL_NAME);
-	
-	header->sizeofcmds += addsize;
-	header->ncmds++;
-
-	return 0;
-}
-
-int patch_executable(const char* file, uint32_t offset)
-{
-	int fd = open(file, O_RDWR);
-    if(fd < 0) {
-        fprintf(stderr, "open %s error:%d,%s\n", file, errno, strerror(errno));
-        return -1;
-    }
-    
-    struct stat st;
-    if(stat(file, &st) < 0) {
-        fprintf(stderr, "stat %s error:%d,%s\n", file, errno, strerror(errno));
-        return -1;
-    }
-    
-    SYSLOG("file size = %lld\n", st.st_size);
-    
-    void* macho = mmap(NULL, st.st_size, PROT_READ|PROT_WRITE, MAP_PRIVATE, fd, 0);
-    if(macho == MAP_FAILED) {
-        fprintf(stderr, "map %s error:%d,%s\n", file, errno, strerror(errno));
-        return -1;
-    }
-
-    struct mach_header_64* header = (struct mach_header_64*)((uint64_t)macho + offset);
-
-	int retval = patch_macho(header);
-	SYSLOG("patch macho @ %x : %d", offset, retval);
-
-	if(write(fd, macho, st.st_size) != st.st_size) {
-		fprintf(stderr, "write %lld error:%d,%s\n", st.st_size, errno, strerror(errno));
-	}
-
-    munmap(macho, st.st_size);
-
-    close(fd);
-
-    return retval;
-}
-
-
-
-void machoEnumerateArchs(FILE* machoFile, void (^archEnumBlock)(struct mach_header_64* header, uint32_t offset, bool* stop))
-{
-	struct mach_header_64 mh={0};
-	if(fseek(machoFile,0,SEEK_SET)!=0)return;
-	if(fread(&mh,sizeof(mh),1,machoFile)!=1)return;
-	
-	if(mh.magic==FAT_MAGIC || mh.magic==FAT_CIGAM)//and || mh.magic==FAT_MAGIC_64 || mh.magic==FAT_CIGAM_64? with fat_arch_64
-	{
-		struct fat_header fh={0};
-		if(fseek(machoFile,0,SEEK_SET)!=0)return;
-		if(fread(&fh,sizeof(fh),1,machoFile)!=1)return;
-		
-		for(int i = 0; i < OSSwapBigToHostInt32(fh.nfat_arch); i++)
-		{
-			uint32_t archMetadataOffset = sizeof(fh) + sizeof(struct fat_arch) * i;
-
-			struct fat_arch fatArch={0};
-			if(fseek(machoFile, archMetadataOffset, SEEK_SET)!=0)break;
-			if(fread(&fatArch, sizeof(fatArch), 1, machoFile)!=1)break;
-
-			if(fseek(machoFile, OSSwapBigToHostInt32(fatArch.offset), SEEK_SET)!=0)break;
-			if(fread(&mh, sizeof(mh), 1, machoFile)!=1)break;
-
-			if(mh.magic != MH_MAGIC_64 && mh.magic != MH_CIGAM_64) continue; //require Macho64
-			
-			bool stop = false;
-			archEnumBlock(&mh, OSSwapBigToHostInt32(fatArch.offset), &stop);
-			if(stop) break;
-		}
-	}
-	else if(mh.magic == MH_MAGIC_64 || mh.magic == MH_CIGAM_64) //require Macho64
-	{
-		bool stop=false;
-		archEnumBlock(&mh, 0, &stop);
-	}
-}
-
-void machoGetInfo(FILE* candidateFile, bool *isMachoOut, bool *isLibraryOut)
-{
-	if (!candidateFile) return;
-
-	__block bool isMacho=false;
-	__block bool isLibrary = false;
-	
-	machoEnumerateArchs(candidateFile, ^(struct mach_header_64* header, uint32_t offset, bool* stop) {
-		isMacho = true;
-		isLibrary = OSSwapLittleToHostInt32(header->filetype) != MH_EXECUTE;
-		*stop = true;
-	});
-
-	if (isMachoOut) *isMachoOut = isMacho;
-	if (isLibraryOut) *isLibraryOut = isLibrary;
-}
-
-int patch_app_exe(const char* file)
-{
-	FILE* fp = fopen(file, "rb");
-	if(!fp) return -1;
-	machoEnumerateArchs(fp, ^(struct mach_header_64* header, uint32_t offset, bool* stop) {
-		patch_executable(file, offset);
-	});
-	fclose(fp);
-	return 0;
-}
-
 
 void registerPath(NSString *path, BOOL forceSystem)
 {
@@ -670,6 +522,7 @@ void registerPath(NSString *path, BOOL forceSystem)
 		return;
 	}
 
+	NSString *appExecutablePath = [path stringByAppendingPathComponent:appInfoPlist[@"CFBundleExecutable"]];
 
 	//NSLog(@"Info=%@", appInfoPlist);
     NSMutableArray* urltypes = [appInfoPlist[@"CFBundleURLTypes"] mutableCopy];
@@ -706,17 +559,54 @@ void registerPath(NSString *path, BOOL forceSystem)
             freeplay(path);
         }
 
-        if(![NSFileManager.defaultManager fileExistsAtPath:rebuildFile])
+		BOOL requiredRebuild = NO;
+
+		NSMutableDictionary* rebuildStatus = [NSMutableDictionary dictionaryWithContentsOfFile:rebuildFile];
+
+		struct stat st={0};
+		if(stat(appExecutablePath.fileSystemRepresentation, &st) == 0)
+		{
+			requiredRebuild = YES;
+
+			if(rebuildStatus 
+				&& [rebuildStatus[@"st_dev"] longValue]==st.st_dev
+				&& [rebuildStatus[@"st_ino"] unsignedLongLongValue]==st.st_ino
+				&& [rebuildStatus[@"st_mtime"] longValue]==st.st_mtimespec.tv_sec 
+				&& [rebuildStatus[@"st_mtimensec"] longValue]==st.st_mtimespec.tv_nsec) {
+				requiredRebuild = NO;
+			} else {
+				NSLog(@"rebuild %ld,%d,%llu,%llu / %ld:%ld %ld:%ld", 
+				[rebuildStatus[@"st_dev"] longValue], st.st_dev
+				, [rebuildStatus[@"st_ino"] unsignedLongLongValue], st.st_ino
+				, [rebuildStatus[@"st_mtime"] longValue], st.st_mtimespec.tv_sec 
+				, [rebuildStatus[@"st_mtimensec"] longValue], st.st_mtimespec.tv_nsec);
+			}
+		}
+
+		if(!rebuildStatus) rebuildStatus = [NSMutableDictionary new];
+
+        if(requiredRebuild)
         {
             //NSLog(@"patch macho: %@", [path stringByAppendingPathComponent:executableName]);
             int patch_app_exe(const char* file);
-            patch_app_exe([path stringByAppendingPathComponent:executableName].UTF8String);
+            assert(patch_app_exe([path stringByAppendingPathComponent:executableName].UTF8String)==0);
 
-             char* argv[] = {"/basebin/rebuildapp", (char*)rootfs(path).UTF8String, NULL};
+            char* argv[] = {"/basebin/rebuildapp", (char*)rootfs(path).UTF8String, NULL};
             assert(execBinary(jbroot(argv[0]), argv) == 0);
             
-            [[NSString new] writeToFile:rebuildFile atomically:YES encoding:NSUTF8StringEncoding error:nil];
-       }
+			assert(stat(appExecutablePath.fileSystemRepresentation, &st) == 0); //update mtime
+
+			[rebuildStatus addEntriesFromDictionary:@{
+				@"st_dev":@(st.st_dev), 
+				@"st_ino":@(st.st_ino), 
+				@"st_mtime":@(st.st_mtimespec.tv_sec), 
+				@"st_mtimensec":@(st.st_mtimespec.tv_nsec),
+				@"sb_token":@(sbtoken)
+			}];
+    	}
+
+		[rebuildStatus addEntriesFromDictionary:@{@"sb_token":@(sbtoken)}];
+		assert([rebuildStatus writeToFile:rebuildFile atomically:YES]);
 
         // NSString* newExecutableName = @".preload";
         // appInfoPlist[@"CFBundleExecutable"] = newExecutableName;
@@ -739,8 +629,6 @@ void registerPath(NSString *path, BOOL forceSystem)
 	NSMutableDictionary *dictToRegister = [NSMutableDictionary dictionary];
 
 	// Add entitlements
-
-	NSString *appExecutablePath = [path stringByAppendingPathComponent:appInfoPlist[@"CFBundleExecutable"]];
 	NSDictionary *entitlements = dumpEntitlementsFromBinaryAtPath(appExecutablePath);
 	if (entitlements) {
 		dictToRegister[@"Entitlements"] = entitlements;
@@ -767,12 +655,6 @@ void registerPath(NSString *path, BOOL forceSystem)
 		dictToRegister[@"EnvironmentVariables"] = constructEnvironmentVariablesForContainerPath(containerPath, YES);
 	} else {
 		dictToRegister[@"EnvironmentVariables"] = constructEnvironmentVariablesForContainerPath(nil, NO);
-	}
-
-	if(jbrootexists) 
-    {
-        dictToRegister[@"EnvironmentVariables"][@"_JBROOT"] = jbroot(@"/");
-        dictToRegister[@"EnvironmentVariables"][@"_SBTOKEN"] = @(sbtoken);
 	}
 
 	dictToRegister[@"IsDeletable"] = @(registerAsUser || isRemovableSystemApp || isDefaultInstallationPath(path));
@@ -853,12 +735,6 @@ void registerPath(NSString *path, BOOL forceSystem)
 			pluginDict[@"EnvironmentVariables"] = constructEnvironmentVariablesForContainerPath(pluginContainerPath, pluginContainerized);
 		} else {
 			pluginDict[@"EnvironmentVariables"] = constructEnvironmentVariablesForContainerPath(nil, pluginContainerized);
-		}
-
-		if(jbrootexists) 
-		{
-			pluginDict[@"EnvironmentVariables"][@"_JBROOT"] = jbroot(@"/");
-			pluginDict[@"EnvironmentVariables"][@"_SBTOKEN"] = @(sbtoken);
 		}
 
 		pluginDict[@"Path"] = pluginPath;
@@ -944,6 +820,9 @@ void listBundleID(void) {
 	LSApplicationWorkspace *workspace = [LSApplicationWorkspace defaultWorkspace];
 	for (LSApplicationProxy *app in [workspace allApplications]) {
 		printf("%s : %s\n", [[app bundleIdentifier] UTF8String], [[app bundleURL] fileSystemRepresentation]);
+
+		// id obj = [app performSelector:@selector(_managedPersonas)];
+		// NSLog(@"persona=%@, %@", NSStringFromClass(object_getClass(obj)), obj);
 	}
 }
 

@@ -14,6 +14,7 @@ fi
 
 mkdir $TARGET
 
+cp ./test.sh $TARGET
 cp ./ldid/ldid $TARGET
 cp ./nickchan.entitlements $TARGET
 cp ./bootstrap.entitlements $TARGET

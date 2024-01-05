@@ -10,7 +10,6 @@
 #include <choma/MemoryStream.h>
 #include <choma/FileStream.h>
 #include <choma/BufferedStream.h>
-#include <choma/Signing.h>
 #include <choma/SignOSSL.h>
 #include <choma/CodeDirectory.h>
 #include <choma/Base64.h>
@@ -211,6 +210,9 @@ int apply_coretrust_bypass(const char *machoPath)
 
     // Set flags to 0 to remove any problematic flags (such as the 'adhoc' flag in bit 2)
     csd_code_directory_set_flags(realCodeDirBlob, 0);
+
+    printf("Updating code slot hashes...\n");
+    csd_code_directory_alloc(realCodeDirBlob, macho);
 
     printf("Encoding unsigned superblob...\n");
     CS_SuperBlob *encodedSuperblobUnsigned = csd_superblob_encode(decodedSuperblob);

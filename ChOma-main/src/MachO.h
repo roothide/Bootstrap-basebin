@@ -17,7 +17,7 @@ typedef struct FilesetMachO {
     char *entry_id;
     uint64_t vmaddr;
     uint64_t fileoff;
-	FAT *underlyingMachO;
+	struct FAT *underlyingMachO;
 } FilesetMachO;
 
 typedef struct MachO {

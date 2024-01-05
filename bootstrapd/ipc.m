@@ -111,6 +111,7 @@ int sendbuf(int sd, void* buffer, int bufsize)
     msg.msg_controllen     = 0;
 
     int slen = sendmsg(sd, &msg, 0);
+	if(slen != bufsize) perror("sendmsg");
 	
 	//slen=0 if server close unexcept //assert(slen == bufsize);
 
@@ -301,6 +302,37 @@ int run_ipc_server(int (*callback)(int socket, pid_t pid, int reqId, NSDictionar
 	return 0;
 }
 
+#include <poll.h>
+int check_conn(int sock)
+{
+    struct pollfd fd;
+
+    fd.fd = sock;
+    fd.events = POLLOUT;
+
+    while ( poll (&fd, 1, -1) == -1 ) {
+        if( errno != EINTR ){
+            perror("poll");
+            return -1;
+        }
+    }
+
+    int err = 0;
+    socklen_t len = sizeof(err);
+    if ( getsockopt (sock, SOL_SOCKET, SO_ERROR,
+                     &err,
+                     &len) == -1 ) {
+                perror("getsockopt");
+        return -1;
+    }
+
+    if(err != 0) {
+		perror("SO_ERROR");
+        return -1;
+    }
+
+    return 0;
+}
 
 int connect_to_server()
 {
@@ -334,7 +366,8 @@ int connect_to_server()
 	close(pd);
 
 	int ret = connect(sd, (struct sockaddr*)&addr, sizeof(addr));
-	if(ret < 0) {
+	//may be interrupted by signal
+	if(ret<0 && (errno!=EINTR || check_conn(sd)!=0)) {
 		perror("connect");
 		close(sd);
 		return -1;

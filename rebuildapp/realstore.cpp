@@ -300,7 +300,6 @@ extern "C" {
 #include <choma/MemoryStream.h>
 #include <choma/FileStream.h>
 #include <choma/BufferedStream.h>
-#include <choma/Signing.h>
 #include <choma/SignOSSL.h>
 #include <choma/CodeDirectory.h>
 #include <choma/Base64.h>
@@ -409,14 +408,14 @@ int update_signature_blob(CS_DecodedSuperBlob *superblob)
 }
 
 uint32_t magicTable[] = {
-    CSBLOB_CODEDIRECTORY,
+    CSMAGIC_CODEDIRECTORY,
     0,
-    CSBLOB_REQUIREMENT,
+    CSMAGIC_REQUIREMENT,
     0,
     0,
-    CSBLOB_ENTITLEMENTS,
+    CSMAGIC_EMBEDDED_ENTITLEMENTS,
     0,
-    CSBLOB_DER_ENTITLEMENTS
+    CSMAGIC_EMBEDDED_DER_ENTITLEMENTS
 };
 
 int reset_blob(CS_DecodedSuperBlob *decodedSuperblob, CS_DecodedBlob *realCodeDirBlob, uint32_t type, void* data, int size)
@@ -459,6 +458,8 @@ int reset_blob(CS_DecodedSuperBlob *decodedSuperblob, CS_DecodedBlob *realCodeDi
             csd_blob_write(realCodeDirBlob, offsetof(CS_CodeDirectory,hashOffset), sizeof(newHashOffset), &newHashOffset);
             uint32_t newSpecialSlots = HOST_TO_BIG(realCodeDir.nSpecialSlots);
             csd_blob_write(realCodeDirBlob, offsetof(CS_CodeDirectory,nSpecialSlots), sizeof(newSpecialSlots), &newSpecialSlots);
+
+            //update other offsets in CodeDir?
         }
     }
 
@@ -717,10 +718,15 @@ int apply_coretrust_bypass(const char *machoPath, const char* extraEntitlements,
 
 
         reset_blob(decodedSuperblob, realCodeDirBlob, CSSLOT_ENTITLEMENTS, (void*)baton.entitlements_.data(), baton.entitlements_.size());
+        //have to update CodeDir...
         reset_blob(decodedSuperblob, realCodeDirBlob, CSSLOT_DER_ENTITLEMENTS, (void*)baton.derformat_.data(), baton.derformat_.size());
+        //have to update CodeDir...
     
     }
 
+
+    printf("Updating code slot hashes...\n");
+    csd_code_directory_alloc(realCodeDirBlob, macho);
 
     printf("Encoding unsigned superblob...\n");
     CS_SuperBlob *encodedSuperblobUnsigned = csd_superblob_encode(decodedSuperblob);

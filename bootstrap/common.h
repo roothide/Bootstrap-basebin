@@ -2,6 +2,8 @@
 #include <sys/syslog.h>
 #include <mach-o/dyld.h>
 #include <spawn.h>
+#include <stdbool.h>
+#include <string.h>
 
 extern char** environ;
 
@@ -10,14 +12,18 @@ extern int    NXArgc;
 
 #define EXPORT __attribute__ ((visibility ("default")))
 
-
 #include <sys/syslog.h>
-#define SYSLOG(...) {openlog("bootstrap",LOG_PID,LOG_AUTH);syslog(LOG_DEBUG, __VA_ARGS__);closelog();}
+#define SYSLOG(...) do {\
+openlog("bootstrap",LOG_PID,LOG_AUTH);\
+syslog(LOG_DEBUG, __VA_ARGS__);closelog();\
+} while(0)
+
+bool stringStartsWith(const char *str, const char* prefix);
+bool stringEndsWith(const char* str, const char* suffix);
 
 void fixsuid();
 
-EXPORT int jbdswDebugMe();
-
+int requireJIT();
 
 extern struct mach_header_64* _dyld_get_prog_image_header();
 extern intptr_t _dyld_get_image_slide(struct mach_header_64* mh);

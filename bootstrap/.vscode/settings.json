@@ -29,6 +29,7 @@
         "machine.h": "c",
         "byte_order.h": "c",
         "__config": "c",
-        "filesystem": "c"
+        "filesystem": "c",
+        "stdbool.h": "c"
     }
 }

@@ -118,8 +118,7 @@ void init_prefshook()
 {
     NSLog(@"init_prefshook %d", getpid());
 
-    extern int jbdswDebugMe();
-    if(jbdswDebugMe()!=0) return;
+    if(requireJIT()!=0) return;
 
     // struct rebinding rebindings[] = {
     //     {"CFPreferencesSynchronize", new_CFPreferencesSynchronize, (void**)&orig_CFPreferencesSynchronize},

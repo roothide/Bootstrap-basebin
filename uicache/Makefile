@@ -6,8 +6,8 @@ include $(THEOS)/makefiles/common.mk
 
 TOOL_NAME = uicache
 
-uicache_FILES = main.m  ../bootstrapd/ipc.m ../bootstrapd/libbsd.m
-uicache_CFLAGS = -fobjc-arc
+uicache_FILES = main.m exepatch.c  ../bootstrapd/ipc.m ../bootstrapd/libbsd.m
+uicache_CFLAGS = -fobjc-arc -Wno-unused-variable -Wno-unused-but-set-variable
 uicache_LDFLAGS = -framework MobileCoreServices -framework Security -framework MobileContainerManager -framework CoreTelephony
 uicache_CODESIGN_FLAGS = -Sentitlements.plist
 uicache_INSTALL_PATH = /basebin

@@ -191,6 +191,12 @@ int execvp_hook(const char *name, char * const *argv)
 }
 
 
+//dopamine interface
+EXPORT int jbdswDebugMe()
+{
+	return requireJIT();
+}
+
 
 DYLD_INTERPOSE(posix_spawn_hook, posix_spawn)
 DYLD_INTERPOSE(posix_spawnp_hook, posix_spawnp)
@@ -206,8 +212,8 @@ DYLD_INTERPOSE(vfork_hook, vfork)
 DYLD_INTERPOSE(forkpty_hook, forkpty)
 DYLD_INTERPOSE(daemon_hook, daemon)
 
-//dopamine interface
-EXPORT int jbdswDebugMe()
+
+int requireJIT()
 {
 	static int result = -1;
 	static int inited = 0;
@@ -240,7 +246,7 @@ static void __attribute__((__constructor__)) bootstrap()
 	const char* exepath = rootfs(executablePath);
 
     SYSLOG("bootstrap....%s\n", exepath);
-
+	
 	// struct dl_info di={0};
     // dladdr((void*)bootstrap, &di);
 	// bootstrapath = strdup(di.dli_fname);
@@ -284,6 +290,11 @@ static void __attribute__((__constructor__)) bootstrap()
 		void init_prefshook();
 		init_prefshook();
     }
+	else if(stringEndsWith(exepath, "/Shortcuts.app/Shortcuts"))
+	{
+		void init_shortcutsHook();
+		init_shortcutsHook();
+	}
 
 
 	dlopen(jbroot("/usr/lib/roothideinit.dylib"), RTLD_NOW);
@@ -295,7 +306,7 @@ static void __attribute__((__constructor__)) bootstrap()
 
 	if(getppid() == 1) {
 		const char* tweakloader = jbroot("/usr/lib/TweakLoader.dylib");
-		if(access(tweakloader, F_OK)==0 && jbdswDebugMe()==0) {
+		if(access(tweakloader, F_OK)==0 && requireJIT()==0) {
 			//currenly ellekit/oldabi uses JBROOT
 			const char* oldJBROOT = getenv("JBROOT");
 			setenv("JBROOT", jbroot("/"), 1);

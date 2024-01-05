@@ -15,10 +15,11 @@
 
 #include "common.h"
 
+// #define FORK_DEBUG
+
 #ifndef CPUFAMILY_ARM_PCORE_ECORE_COLL
 #define CPUFAMILY_ARM_PCORE_ECORE_COLL 0x2876f5b5
 #endif
-
 
 #define printf_putchar(x) do{int l=strlen(buffer);if(l<bufsize)buffer[l]=x;}while(0)
 
@@ -166,24 +167,26 @@ int _snprintf(char* buffer, int bufsize, const char * __restrict format, ...) {
     return res;
 }
 
-
-// #define forklog(...)	do {\
-// char buf[1024];\
-// _snprintf(buf,sizeof(buf),__VA_ARGS__);\
-// write(STDERR_FILENO,buf,strlen(buf));\
-// write(STDERR_FILENO,"\n",1);\
-// fsync(STDERR_FILENO);\
-// } while(0)
-
+#ifdef FORK_DEBUG
+#define forklog(...)	do {\
+char buf[1024];\
+_snprintf(buf,sizeof(buf),__VA_ARGS__);\
+write(STDERR_FILENO,buf,strlen(buf));\
+write(STDERR_FILENO,"\n",1);\
+fsync(STDERR_FILENO);\
+} while(0)
+#else
 #define forklog(...)
+#endif
 
 
 
-bool ios17_A15Above=false;
+bool forkfix_method_2=false;
 
 extern pid_t __fork(void);
 extern pid_t __vfork(void);
 
+bool* _DisableInitializeForkSafety = NULL;
 static void (**_libSystem_atfork_prepare)(void) = 0;
 static void (**_libSystem_atfork_parent)(void) = 0;
 static void (**_libSystem_atfork_child)(void) = 0;
@@ -201,16 +204,25 @@ static void
 //__attribute__((__constructor__)) 
 atforkinit()
 {
-    if((int)kCFCoreFoundationVersionNumber >= 2000) {
+    if((int)kCFCoreFoundationVersionNumber >= 2000) 
+    {
         cpu_subtype_t cpuFamily = 0;
         size_t cpuFamilySize = sizeof(cpuFamily);
         sysctlbyname("hw.cpufamily", &cpuFamily, &cpuFamilySize, NULL, 0);
-        if (cpuFamily==CPUFAMILY_ARM_BLIZZARD_AVALANCHE
+
+        struct utsname systemInfo;
+        uname(&systemInfo);
+
+        if (strncmp(systemInfo.machine, "iPhone", 6)==0
+        && (cpuFamily==CPUFAMILY_ARM_BLIZZARD_AVALANCHE
          || cpuFamily==CPUFAMILY_ARM_EVEREST_SAWTOOTH
-          || cpuFamily==CPUFAMILY_ARM_PCORE_ECORE_COLL) {
-            ios17_A15Above = true;
+          || cpuFamily==CPUFAMILY_ARM_PCORE_ECORE_COLL )) {
+            forkfix_method_2 = true;
         }
     }
+
+    static_assert(sizeof(bool) == 1, "bool size mismatch");
+    _DisableInitializeForkSafety = (bool*)DobbySymbolResolver("/usr/lib/libobjc.A.dylib", "DisableInitializeForkSafety");
     
     RESOVLE_ATFORK(_libSystem_atfork_prepare);
     RESOVLE_ATFORK(_libSystem_atfork_parent);
@@ -308,15 +320,21 @@ void forkfix(const char* tag, bool flag, bool child)
 
                 //According to dyld, the __TEXT address is always equal to the header address
 
-                //showvm(task, (uint64_t)textaddr, textsize); 
-
-				kr = _mach_vm_protect(task, (vm_address_t)header, seg->vmsize, false, flag && !ios17_A15Above ? VM_PROT_READ : VM_PROT_READ|VM_PROT_EXECUTE);
-				forklog("[%d] %s vm_protect.%d %d,%s\n", getpid(), tag, flag,  kr, mach_error_string(kr));
-				assert(kr == KERN_SUCCESS);
+#ifdef FORK_DEBUG
+                showvm(task, (uint64_t)header, seg->vmsize); 
+#endif
+                if(!forkfix_method_2)
+                {
+                    kr = _mach_vm_protect(task, (vm_address_t)header, seg->vmsize, false, flag ? VM_PROT_READ : VM_PROT_READ|VM_PROT_EXECUTE);
+                    forklog("[%d] %s vm_protect.%d %d,%s\n", getpid(), tag, flag,  kr, mach_error_string(kr));
+                    assert(kr == KERN_SUCCESS);
+                }
 
 				// assert(*(int*)textaddr);
 
-                //showvm(task, (uint64_t)textaddr, textsize); 
+#ifdef FORK_DEBUG
+                // showvm(task, (uint64_t)header, seg->vmsize); //stack overflow by mig_get_reply_port infinite reucrsion on child process
+#endif
 
                 break;
             }
@@ -347,7 +365,6 @@ void forkfix(const char* tag, bool flag, bool child)
 //         fork_oldact.sa_sigaction(signo, info, context);
 //     }
 // }
-
 
 
 extern void _malloc_fork_prepare(void);
@@ -442,7 +459,7 @@ static inline __attribute__((always_inline))
 pid_t
 _do_fork(bool libsystem_atfork_handlers_only)
 {
-	// assert(jbdswDebugMe()==0);
+	// assert(requireJIT()==0);
 
 	static int atforkinited=0;
 	if(atforkinited++==0) atforkinit();
@@ -506,12 +523,17 @@ _do_fork(bool libsystem_atfork_handlers_only)
 
 	if (0 == ret)
 	{
+        bool _old=*_DisableInitializeForkSafety;
+        *_DisableInitializeForkSafety = true;
+
 		// We're the child in this part.
 		if (_libSystem_atfork_child_v2) {
 			_libSystem_atfork_child_v2(flags);
 		} else {
 			_libSystem_atfork_child();
 		}
+
+        *_DisableInitializeForkSafety = _old;
 		return 0;
 	}
 

@@ -5,6 +5,8 @@
 #include <sys/sysctl.h>
 #include <mach/machine.h>
 
+#include "MachO.h"
+
 #define CPU_SUBTYPE_ARM64E_ABI_V2 0x80000000
 
 int host_get_cpu_information(cpu_type_t *cputype, cpu_subtype_t *cpusubtype)
@@ -39,6 +41,11 @@ MachO *fat_find_preferred_slice(FAT *fat)
             if (!preferredMacho) {
                 // If that's not found, try to find an old ABI arm64e slice
                 preferredMacho = fat_find_slice(fat, cputype, CPU_SUBTYPE_ARM64E);
+
+                //the new kernel cannot execute an old ABI arm64e executable
+                if(preferredMacho && preferredMacho->machHeader.filetype == MH_EXECUTE) {
+                    preferredMacho = NULL;
+                }
             }
         }
 

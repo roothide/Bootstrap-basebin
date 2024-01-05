@@ -2,6 +2,7 @@
 #include "CSBlob.h"
 #include "Util.h"
 #include <stddef.h>
+#include <assert.h>
 
 void csd_code_directory_read_slot_hash(CS_DecodedBlob *codeDirBlob, MachO *macho, int slot, uint8_t *slotHashOut)
 {
@@ -12,20 +13,32 @@ void csd_code_directory_read_slot_hash(CS_DecodedBlob *codeDirBlob, MachO *macho
     csd_blob_read(codeDirBlob, codeDir.hashOffset + (slot * codeDir.hashSize), codeDir.hashSize, slotHashOut);
 }
 
-bool csd_code_directory_calculate_page_hash(CS_DecodedBlob *codeDirBlob, MachO *macho, int slot, uint8_t *pageHashOut)
+bool csd_code_directory_calculate_page_hash(CS_CodeDirectory* codeDir, MachO *macho, int slot, uint8_t *pageHashOut)
 {
-    CS_CodeDirectory codeDir;
-    csd_blob_read(codeDirBlob, 0, sizeof(codeDir), &codeDir);
-    CODE_DIRECTORY_APPLY_BYTE_ORDER(&codeDir, BIG_TO_HOST_APPLIER);
+    // printf("csd_code_directory_calculate_page_hash %p %p %d %p\n", codeDirBlob, macho, slot, pageHashOut);
+    // CS_CodeDirectory codeDir;
+    // csd_blob_read(codeDirBlob, 0, sizeof(codeDir), &codeDir);
+    // CODE_DIRECTORY_APPLY_BYTE_ORDER(&codeDir, BIG_TO_HOST_APPLIER);
 
-    uint32_t pageToReadSize = (uint32_t)(pow(2.0, (double)(codeDir.pageSize)));
+    uint32_t pageSize = (uint32_t)(pow(2.0, (double)(codeDir->pageSize)));
+    uint32_t pageToReadSize = pageSize;
     uint32_t pageToReadOffset = slot * pageToReadSize;
+    // printf("%x %x\n", pageToReadSize, pageToReadOffset);
+
+    uint32_t csOffset = 0, csSize = 0;
+    macho_find_code_signature_bounds(macho, &csOffset, &csSize);
+
+    if (pageToReadOffset > csOffset) {
+        printf("hash page overflow code_signature!\n");
+        return false;
+    }
 
     // Special case for reading the code signature itself
-    if (slot == codeDir.nCodeSlots - 1) {
-        uint32_t csOffset = 0, csSize = 0;
-        macho_find_code_signature_bounds(macho, &csOffset, &csSize);
-        if (pageToReadOffset > csOffset) return false;
+    if((pageToReadOffset + pageToReadSize) > csOffset) {
+        if(slot != (codeDir->nCodeSlots - 1)) {
+            printf("nCodeSlots mismatch!\n");
+            return false;
+        }
         pageToReadSize = csOffset - pageToReadOffset;
     }
 
@@ -34,7 +47,7 @@ bool csd_code_directory_calculate_page_hash(CS_DecodedBlob *codeDirBlob, MachO *
 
     uint8_t page[pageToReadSize];
     if (macho_read_at_offset(macho, pageToReadOffset, pageToReadSize, page) != 0) return false;
-    switch (codeDir.hashType) {
+    switch (codeDir->hashType) {
         case CS_HASHTYPE_SHA160_160: {
             CC_SHA1(page, (CC_LONG)pageToReadSize, pageHashOut);
             break;
@@ -44,14 +57,14 @@ bool csd_code_directory_calculate_page_hash(CS_DecodedBlob *codeDirBlob, MachO *
         case CS_HASHTYPE_SHA256_160: {
             uint8_t fullHash[CC_SHA256_DIGEST_LENGTH];
             CC_SHA256(page, (CC_LONG)pageToReadSize, fullHash);
-            memcpy(pageHashOut, fullHash, codeDir.hashSize);
+            memcpy(pageHashOut, fullHash, codeDir->hashSize);
             break;
         }
 
         case CS_HASHTYPE_SHA384_384: {
             uint8_t fullHash[CC_SHA384_DIGEST_LENGTH];
-            CC_SHA256(page, (CC_LONG)pageToReadSize, fullHash);
-            memcpy(pageHashOut, fullHash, codeDir.hashSize);
+            CC_SHA384(page, (CC_LONG)pageToReadSize, fullHash);
+            memcpy(pageHashOut, fullHash, codeDir->hashSize);
             break;
         }
 
@@ -59,7 +72,6 @@ bool csd_code_directory_calculate_page_hash(CS_DecodedBlob *codeDirBlob, MachO *
             return false;
         }
     }
-
     return true;
 }
 
@@ -73,7 +85,7 @@ bool csd_code_directory_verify_code_slot(CS_DecodedBlob *codeDirBlob, MachO *mac
     csd_code_directory_read_slot_hash(codeDirBlob, macho, slot, slotHash);
 
     uint8_t pageHash[codeDir.hashSize];
-    if (!csd_code_directory_calculate_page_hash(codeDirBlob, macho, slot, slotHash)) return false;
+    if (!csd_code_directory_calculate_page_hash(&codeDir, macho, slot, slotHash)) return false;
 
     return (memcmp(slotHash, pageHash, codeDir.hashSize) == 0);
 }
@@ -262,6 +274,7 @@ int csd_code_directory_print_content(CS_DecodedSuperBlob *decodedSuperblob, CS_D
     printf("\tHash size: 0x%x\n", codeDir.hashSize);
     printf("\tHash type: %s\n", cs_hash_type_to_string(codeDir.hashType));
     printf("\tPage size: 0x%x\n", codeDir.pageSize);
+    printf("\tspare2: 0x%x\n", codeDir.spare2);
     printf("\tScatter offset: 0x%x\n", codeDir.scatterOffset);
     printf("\tTeam offset: 0x%x\n", codeDir.teamOffset);
 
@@ -294,7 +307,7 @@ int csd_code_directory_print_content(CS_DecodedSuperBlob *decodedSuperblob, CS_D
             // Don't print the slot name if the hash is just zeroes
             if (!isZero) {
                 // Print the special slot name (if applicable)
-                printf(" (%s)", cs_slot_to_string(i));
+                printf(" (%s%s)", i==(codeDir.nCodeSlots-1)?"Special ":"", cs_slot_to_string(i));
             }
             printf("\n");
         }
@@ -332,7 +345,7 @@ int csd_code_directory_print_content(CS_DecodedSuperBlob *decodedSuperblob, CS_D
 
                 case CS_HASHTYPE_SHA384_384: {
                     uint8_t fullHash[CC_SHA384_DIGEST_LENGTH];
-                    CC_SHA256(data, (CC_LONG)size, fullHash);
+                    CC_SHA384(data, (CC_LONG)size, fullHash);
                     memcpy(hash, fullHash, codeDir.hashSize);
                     calcWorked = true;
                     break;
@@ -363,7 +376,7 @@ int csd_code_directory_print_content(CS_DecodedSuperBlob *decodedSuperblob, CS_D
         if (verifySlots && i >= 0) {
             uint8_t pageHash[codeDir.hashSize];
             bool correct = false;
-            bool calcWorked = csd_code_directory_calculate_page_hash(codeDirBlob, macho, i, pageHash);
+            bool calcWorked = csd_code_directory_calculate_page_hash(&codeDir, macho, i, pageHash);
             if (calcWorked) {
                 correct = (memcmp(slotHash, pageHash, codeDir.hashSize) == 0);
             }
@@ -385,6 +398,17 @@ int csd_code_directory_print_content(CS_DecodedSuperBlob *decodedSuperblob, CS_D
             printf("\n");
         }
     }
+    
+    uint32_t codeSignatureOffset = 0;
+    macho_find_code_signature_bounds(macho, &codeSignatureOffset, NULL);
+    
+    uint32_t pageSize = (uint32_t)(pow(2.0, (double)(codeDir.pageSize)));
+    int pageCount = align_to_size(codeSignatureOffset, pageSize) / pageSize;
+    if(pageCount != codeDir.nCodeSlots) {
+        codeSlotsCorrect = false;
+        printf(" ❌  page count mismatch: %d, should be %d\n", codeDir.nCodeSlots, pageCount);
+    }
+
     if (verifySlots) {
         if (codeSlotsCorrect) {
             printf("All page hashes are valid!\n");
@@ -397,6 +421,49 @@ int csd_code_directory_print_content(CS_DecodedSuperBlob *decodedSuperblob, CS_D
     return 0;
 }
 
+void csd_code_directory_alloc(CS_DecodedBlob *codeDirBlob, MachO *macho)
+{
+    CS_CodeDirectory codeDir;
+    csd_blob_read(codeDirBlob, 0, sizeof(CS_CodeDirectory), &codeDir);
+    CODE_DIRECTORY_APPLY_BYTE_ORDER(&codeDir, BIG_TO_HOST_APPLIER);
+
+    uint32_t codeSignatureOffset = 0;
+    // There is an edge case where random hashes end up incorrect, so we rehash every page (except the final one) to be sure
+    macho_find_code_signature_bounds(macho, &codeSignatureOffset, NULL);
+    // printf("codeSignatureOffset=%x\n", codeSignatureOffset);
+    
+    uint32_t pageSize = (uint32_t)(pow(2.0, (double)(codeDir.pageSize)));
+    uint64_t finalPageBoundary = align_to_size(codeSignatureOffset, pageSize);
+    int pageCount = (finalPageBoundary / pageSize);
+    assert(pageCount >= codeDir.nCodeSlots);
+    for(int i=codeDir.nCodeSlots; i<pageCount; i++)
+    {
+        codeDir.nCodeSlots++;
+
+        uint32_t offsetOfBlobToReplace = codeDir.hashOffset + (i * codeDir.hashSize);
+
+        uint8_t pageHash[codeDir.hashSize];
+        memset(pageHash, 0, codeDir.hashSize);
+        // printf("new page hash [%d] @ %x\n",i,i*pageSize);
+        csd_blob_insert(codeDirBlob, offsetOfBlobToReplace, codeDir.hashSize, pageHash);
+
+        // Shift other offsets as needed (Since we inserted data in the middle)
+        if (codeDir.identOffset != 0 && codeDir.identOffset >= offsetOfBlobToReplace) {
+            codeDir.identOffset += codeDir.hashSize;
+        }
+        if (codeDir.scatterOffset != 0 && codeDir.scatterOffset >= offsetOfBlobToReplace) {
+            codeDir.scatterOffset += codeDir.hashSize;
+        }
+        if (codeDir.teamOffset != 0 && codeDir.teamOffset >= offsetOfBlobToReplace) {
+            codeDir.teamOffset += codeDir.hashSize;
+        }
+    }
+
+    // Write changes to codeDir struct
+    CODE_DIRECTORY_APPLY_BYTE_ORDER(&codeDir, HOST_TO_BIG_APPLIER);
+    csd_blob_write(codeDirBlob, 0, sizeof(codeDir), &codeDir);
+}
+
 void csd_code_directory_update(CS_DecodedBlob *codeDirBlob, MachO *macho)
 {
     CS_CodeDirectory codeDir;
@@ -406,28 +473,20 @@ void csd_code_directory_update(CS_DecodedBlob *codeDirBlob, MachO *macho)
     uint32_t codeSignatureOffset = 0;
     // There is an edge case where random hashes end up incorrect, so we rehash every page (except the final one) to be sure
     macho_find_code_signature_bounds(macho, &codeSignatureOffset, NULL);
-    uint64_t finalPageBoundary = align_to_size(codeSignatureOffset, 0x1000);
-    int numberOfPagesToHash = (finalPageBoundary / 0x1000) - 1;
-
-    for (int pageNumber = 0; pageNumber < numberOfPagesToHash; pageNumber++) {
-        uint64_t pageOffset = pageNumber * 0x1000;
-        uint64_t pageEndOffset = pageOffset + 0x1000;
-        uint64_t pageLength = 0x1000;
-        if (pageEndOffset > finalPageBoundary) {
-            pageLength = finalPageBoundary - pageOffset;
-        }
-
-        // Read page
-        uint8_t pageData[pageLength];
-        memset(pageData, 0, pageLength);
-        macho_read_at_offset(macho, pageOffset, pageLength, pageData);
-
-        // Calculate hash
-        uint8_t pageHash[CC_SHA256_DIGEST_LENGTH];
-        CC_SHA256(pageData, (CC_LONG)pageLength, pageHash);
+    // printf("codeSignatureOffset=%x\n", codeSignatureOffset);
     
-        // Write hash to CodeDirectory
-        uint32_t offsetOfBlobToReplace = codeDir.hashOffset + (pageNumber * codeDir.hashSize);
+    uint32_t pageSize = (uint32_t)(pow(2.0, (double)(codeDir.pageSize)));
+    uint64_t finalPageBoundary = align_to_size(codeSignatureOffset, pageSize);
+    int pageCount = (finalPageBoundary / pageSize);
+
+    assert(pageCount == codeDir.nCodeSlots);
+    for(int i=0; i<pageCount; i++)
+    {
+        uint32_t offsetOfBlobToReplace = codeDir.hashOffset + (i * codeDir.hashSize);
+
+        uint8_t pageHash[codeDir.hashSize];
+        assert(csd_code_directory_calculate_page_hash(&codeDir, macho, i, pageHash));
+        // printf("page hash [%d] @ %x : ",i, i*pageSize); print_hash(pageHash, codeDir.hashSize);printf("\n");
         csd_blob_write(codeDirBlob, offsetOfBlobToReplace, codeDir.hashSize, pageHash);
     }
 }

@@ -1,0 +1,7 @@
+{
+    "files.associations": {
+        "fat.h": "c",
+        "fixup-chains.h": "c",
+        "vm_page_size.h": "c"
+    }
+}
