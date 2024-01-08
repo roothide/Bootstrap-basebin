@@ -1,8 +1,8 @@
 #include <unistd.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <dlfcn.h>
 #include <string.h>
-#include <assert.h>
 #include <mach-o/loader.h>
 #include "common.h"
 
@@ -218,7 +218,7 @@ void __interpose()
     
     load_interpose(header);
 
-    assert(dyld_interpose_count>0 && dyld_interpose_array);
+    ASSERT(dyld_interpose_count>0 && dyld_interpose_array);
 
     _dyld_register_func_for_add_image(interpose_bind);
 

@@ -3,7 +3,6 @@
 #include <stdlib.h>
 #include <spawn.h>
 #include <signal.h>
-#include <assert.h>
 #include <mach-o/dyld.h>
 #include <sys/param.h>
 #include <sys/syslimits.h>
@@ -54,7 +53,7 @@ extern int kpersona_alloc(struct kpersona_info *info, uid_t *id);
 int available_persona_id()
 {
     struct kpersona_info info={PERSONA_INFO_V1};
-    assert(kpersona_pidinfo(getpid(), &info) == 0);
+    ASSERT(kpersona_pidinfo(getpid(), &info) == 0);
 
     int current_persona_id = info.persona_id;
 
@@ -98,10 +97,10 @@ void fixsuid()
 
     char path[PATH_MAX]={0};
     uint32_t bufsize=sizeof(path);
-    assert(_NSGetExecutablePath(path, &bufsize) == 0);
+    ASSERT(_NSGetExecutablePath(path, &bufsize) == 0);
 
     struct stat st;
-	assert(stat(path, &st) == 0);
+	ASSERT(stat(path, &st) == 0);
 
     if (!S_ISREG(st.st_mode) || !(st.st_mode & (S_ISUID | S_ISGID)))
         return;
@@ -121,7 +120,7 @@ void fixsuid()
 	posix_spawnattr_init(&attr);
 
     int persona_id = available_persona_id();
-    assert(persona_id != 0);
+    ASSERT(persona_id != 0);
 
     posix_spawnattr_set_persona_np(&attr, persona_id, POSIX_SPAWN_PERSONA_FLAGS_OVERRIDE);
 	if(st.st_mode & S_ISUID) posix_spawnattr_set_persona_uid_np(&attr, st.st_uid);
@@ -133,7 +132,7 @@ void fixsuid()
 	pid_t pid=0;
 	int ret = posix_spawn_hook(&pid, path, &action, &attr, NXArgv, environ);
 
-    assert(ret==0 && pid>0);
+    ASSERT(ret==0 && pid>0);
 
     int status=0;
     while(waitpid(pid, &status, 0) != -1)
@@ -155,7 +154,7 @@ void runAsRoot(const char* path, char* argv[])
 	posix_spawnattr_init(&attr);
 
     int persona_id = available_persona_id();
-    assert(persona_id != 0);
+    ASSERT(persona_id != 0);
 
     posix_spawnattr_set_persona_np(&attr, persona_id, POSIX_SPAWN_PERSONA_FLAGS_OVERRIDE);
 	posix_spawnattr_set_persona_uid_np(&attr, 0);
@@ -167,7 +166,7 @@ void runAsRoot(const char* path, char* argv[])
 	pid_t pid=0;
 	int ret = posix_spawn_hook(&pid, path, &action, &attr, argv, environ);
 
-    assert(ret==0 && pid>0);
+    ASSERT(ret==0 && pid>0);
 
     int status=0;
     while(waitpid(pid, &status, 0) != -1)

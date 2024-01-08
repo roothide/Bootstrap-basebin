@@ -434,13 +434,15 @@ void freeplay(NSString* bundlePath)
 			NSDictionary *infoDict = [NSDictionary dictionaryWithContentsOfFile:filePath];
 			if (!infoDict) continue;
 
-			if ([infoDict[@"CFBundlePackageType"] isEqualToString:@"FMWK"]) continue;
-            
-			if (![infoDict[@"CFBundlePackageType"] isEqualToString:@"APPL"]) continue;
-
 			NSString *bundleId = infoDict[@"CFBundleIdentifier"];
 			NSString *bundleExecutable = infoDict[@"CFBundleExecutable"];
 			if (!bundleId || !bundleExecutable) continue;
+
+			if ([infoDict[@"CFBundlePackageType"] isEqualToString:@"FMWK"]) continue;
+
+			// if ([infoDict[@"NSExtension"][@"NSExtensionPointIdentifier"] isEqualToString:@"com.apple.widget-extension"]) continue;
+            
+			if (![infoDict[@"CFBundlePackageType"] isEqualToString:@"APPL"]) continue;
 
 			NSString *bundleMainExecutablePath = [[filePath stringByDeletingLastPathComponent] stringByAppendingPathComponent:bundleExecutable];
 			if (![fm fileExistsAtPath:bundleMainExecutablePath]) continue;
@@ -536,11 +538,11 @@ void registerPath(NSString *path, BOOL forceSystem)
 				&& [rebuildStatus[@"st_mtimensec"] longValue]==st.st_mtimespec.tv_nsec) {
 				requiredRebuild = NO;
 			} else {
-				NSLog(@"rebuild %ld,%d,%llu,%llu / %ld:%ld %ld:%ld", 
-				[rebuildStatus[@"st_dev"] longValue], st.st_dev
-				, [rebuildStatus[@"st_ino"] unsignedLongLongValue], st.st_ino
-				, [rebuildStatus[@"st_mtime"] longValue], st.st_mtimespec.tv_sec 
-				, [rebuildStatus[@"st_mtimensec"] longValue], st.st_mtimespec.tv_nsec);
+				// NSLog(@"rebuild %ld,%d,%llu,%llu / %ld:%ld %ld:%ld", 
+				// [rebuildStatus[@"st_dev"] longValue], st.st_dev
+				// , [rebuildStatus[@"st_ino"] unsignedLongLongValue], st.st_ino
+				// , [rebuildStatus[@"st_mtime"] longValue], st.st_mtimespec.tv_sec 
+				// , [rebuildStatus[@"st_mtimensec"] longValue], st.st_mtimespec.tv_nsec);
 			}
 		}
 
@@ -781,9 +783,6 @@ void listBundleID(void) {
 	LSApplicationWorkspace *workspace = [LSApplicationWorkspace defaultWorkspace];
 	for (LSApplicationProxy *app in [workspace allApplications]) {
 		printf("%s : %s\n", [[app bundleIdentifier] UTF8String], [[app bundleURL] fileSystemRepresentation]);
-
-		// id obj = [app performSelector:@selector(_managedPersonas)];
-		// NSLog(@"persona=%@, %@", NSStringFromClass(object_getClass(obj)), obj);
 	}
 }
 

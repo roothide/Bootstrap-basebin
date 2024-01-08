@@ -9,7 +9,6 @@
 #include <sys/syslimits.h>
 #include <fcntl.h>
 #include <libgen.h>
-#include <assert.h>
 #include <spawn.h>
 #include <errno.h>
 #include <mach-o/fat.h>
@@ -27,7 +26,7 @@ void ensure_jbroot_symlink(const char* dirpath)
 		return;
 
 	char realdirpath[PATH_MAX];
-	assert(realpath(dirpath, realdirpath) != NULL);
+	ASSERT(realpath(dirpath, realdirpath) != NULL);
 	if(realdirpath[strlen(realdirpath)] != '/') strcat(realdirpath, "/");
 
 	char jbrootpath[PATH_MAX];
@@ -42,7 +41,7 @@ void ensure_jbroot_symlink(const char* dirpath)
 		return;
 
 	struct stat jbrootst;
-	assert(stat(jbrootpath, &jbrootst) == 0);
+	ASSERT(stat(jbrootpath, &jbrootst) == 0);
 	
 	char sympath[PATH_MAX];
 	snprintf(sympath,sizeof(sympath),"%s/.jbroot", dirpath);
@@ -59,7 +58,7 @@ void ensure_jbroot_symlink(const char* dirpath)
 					return;
 			}
 
-			assert(unlink(sympath) == 0);
+			ASSERT(unlink(sympath) == 0);
 			
 		} else {
 			//not a symlink? just let it go
@@ -171,28 +170,24 @@ int autosign(char* path)
 
             if(!islib)
             {
-				// if(strstr(path, "/Applications/"))
-				// {
-				// 	machoEnumerateArchs(fp, ^(struct fat_arch* arch, uint32_t archMetadataOffset, uint32_t archOffset, bool* stop) {
-				// 		patch_executable(path, archOffset);
-				// 	});
-				// }
-
                 char sent[PATH_MAX];
                 snprintf(sent,sizeof(sent),"-S%s", jbroot("/basebin/bootstrap.entitlements"));
 
                 char* args[] = {"ldid", "-M", sent, path, NULL};
-				assert(execBinary(jbroot("/basebin/ldid"), args) == 0);
+				ASSERT(execBinary(jbroot("/basebin/ldid"), args) == 0);
             }
 			else
 			{
 				//since RootHidePatcher always re-sign with entitlements for all mach-o files....
                 char* args[] = {"ldid", "-S", path, NULL};
-				assert(execBinary(jbroot("/basebin/ldid"), args) == 0);
+				ASSERT(execBinary(jbroot("/basebin/ldid"), args) == 0);
 			}
-
-            char* args[] = {"fastPathSign", path, NULL};
-			assert(execBinary(jbroot("/basebin/fastPathSign"), args) == 0);
+			
+			if(strncmp(rootfs(path), "/Applications/", sizeof("/Applications/")-1) != 0)
+			{
+				char* args[] = {"fastPathSign", path, NULL};
+				ASSERT(execBinary(jbroot("/basebin/fastPathSign"), args) == 0);
+			}
 
             char dpath[PATH_MAX];
             ensure_jbroot_symlink(dirname_r(path,dpath));

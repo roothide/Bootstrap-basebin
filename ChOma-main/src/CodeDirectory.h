@@ -31,19 +31,6 @@ typedef struct __CodeDirectory {
 	uint32_t spare2;
 	uint32_t scatterOffset;
 	uint32_t teamOffset;
-
-#if 1 // version = 0x20500
-    uint32_t runtime;
-    uint32_t preEncryptOffset;
-#endif
-#if 0 // version = 0x20600
-    uint8_t linkageHashType;
-    uint8_t linkageTruncated;
-    uint16_t spare4;
-    uint32_t linkageOffset;
-    uint32_t linkageSize;
-#endif
-
 } CS_CodeDirectory;
 
 enum CS_HashType {

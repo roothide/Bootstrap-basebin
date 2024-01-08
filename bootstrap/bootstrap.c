@@ -10,12 +10,12 @@
 #include <spawn.h>
 #include <paths.h>
 #include <dlfcn.h>
-#include <assert.h>
 #include <roothide.h>
 #include "common.h"
 #include "sandbox.h"
 #include "../bootstrapd/libbsd.h"
 
+#include <CoreFoundation/CoreFoundation.h>
 
 #define DYLD_INTERPOSE(_replacement,_replacee) \
    __attribute__((used)) static struct{ const void* replacement; const void* replacee; } _interpose_##_replacee \
@@ -224,7 +224,7 @@ int requireJIT()
 bool checkpatchedexe() {
 	char executablePath[PATH_MAX]={0};
 	uint32_t bufsize=sizeof(executablePath);
-	assert(_NSGetExecutablePath(executablePath, &bufsize) == 0);
+	ASSERT(_NSGetExecutablePath(executablePath, &bufsize) == 0);
 	
 	char patcher[PATH_MAX];
 	snprintf(patcher, sizeof(patcher), "%s.roothidepatch", executablePath);
@@ -236,12 +236,20 @@ bool checkpatchedexe() {
 
 extern void runAsRoot(const char* path, char* argv[]);
 
+char* excludeProcesses[] = {
+	"/usr/sbin/dropbear",
+	"/usr/sbin/sshd",
+	"/usr/bin/dash",
+	"/usr/bin/bash",
+	"/usr/bin/zsh",
+};
+
 // const char* bootstrapath=NULL;
 static void __attribute__((__constructor__)) bootstrap()
 {
     char executablePath[PATH_MAX]={0};
     uint32_t bufsize=sizeof(executablePath);
-    assert(_NSGetExecutablePath(executablePath, &bufsize) == 0);
+    ASSERT(_NSGetExecutablePath(executablePath, &bufsize) == 0);
 
 	const char* exepath = rootfs(executablePath);
 
@@ -267,14 +275,17 @@ static void __attribute__((__constructor__)) bootstrap()
 
     if(strcmp(exepath, "/usr/bin/launchctl")==0)
     {
-		if(NXArgc >= 3 && strcmp(NXArgv[1],"reboot")==0 && strcmp(NXArgv[2],"userspace")==0) 
+		if(access(jbroot("/basebin/.launchctl_support"), F_OK) != 0) 
 		{
-			char* args[] = {"/usr/bin/killall", "-9", "backboardd", NULL};
-			runAsRoot(jbroot(args[0]), args);
-		}
+			if(NXArgc >= 3 && strcmp(NXArgv[1],"reboot")==0 && strcmp(NXArgv[2],"userspace")==0) 
+			{
+				char* args[] = {"/usr/bin/killall", "-9", "backboardd", NULL};
+				runAsRoot(jbroot(args[0]), args);
+			}
 
-        fprintf(stderr, "launchctl is not supported yet.\n");
-        exit(0);
+			fprintf(stderr, "launchctl is not supported.\n");
+			exit(0);
+		}
     }
 	else if(strcmp(exepath, "/usr/bin/dpkg")==0)
     {
@@ -301,12 +312,29 @@ static void __attribute__((__constructor__)) bootstrap()
 
 	//load first
 	if(!dlopen(jbroot("/usr/lib/roothidepatch.dylib"), RTLD_NOW)) { // require jit
-		assert(checkpatchedexe());
+		ASSERT(checkpatchedexe());
 	}
 
-	if(getppid() == 1) {
+	if(getppid() == 1) 
+	{
+		bool excluded = false;
+		for(int i=0; i<sizeof(excludeProcesses)/sizeof(excludeProcesses[0]); i++)
+		{
+			if(strcmp(exepath, excludeProcesses[i])==0) {
+				excluded=true;
+				break;
+			}
+		}
+
+		if(stringStartsWith(exepath, "/Applications/")) {
+			const char* bundleIdentifier = CFStringGetCStringPtr(CFBundleGetIdentifier(CFBundleGetMainBundle()), kCFStringEncodingASCII);
+			if(strncmp(bundleIdentifier, "com.apple.", sizeof("com.apple.")-1) != 0) {
+				ASSERT(bsd_checkServer()==0);
+			}
+		}
+
 		const char* tweakloader = jbroot("/usr/lib/TweakLoader.dylib");
-		if(access(tweakloader, F_OK)==0 && requireJIT()==0) {
+		if(!excluded && access(tweakloader, F_OK)==0 && requireJIT()==0) {
 			//currenly ellekit/oldabi uses JBROOT
 			const char* oldJBROOT = getenv("JBROOT");
 			setenv("JBROOT", jbroot("/"), 1);

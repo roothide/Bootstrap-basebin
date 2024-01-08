@@ -445,7 +445,7 @@ int signApp(NSString* appPath)
 		BOOL signedFile=NO;
 		for(NSString* signedExecutable in signedMainExecutables) {
 			if(isSameFile(signedExecutable, fileURL.path)) {
-				NSLog(@"skip signed %@", fileURL);
+				//NSLog(@"skip signed %@", fileURL);
 				signedFile=YES;
 				break;
 			}

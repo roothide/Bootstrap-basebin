@@ -57,7 +57,7 @@ NSArray* stockPrefsIdentifiers = @[
 
 //         NSLog(@"prefshook: dict %@", prefs);
 
-//         assert([prefs writeToFile:jbroot(plistPath) atomically:YES]);
+//         ASSERT([prefs writeToFile:jbroot(plistPath) atomically:YES]);
 
 //         CFRelease(keyList);
 //     }
@@ -88,7 +88,7 @@ Boolean new_CFPreferencesSynchronizeWithContainer(CFStringRef applicationID, CFS
 
         NSLog(@"prefshook: dict %@", prefs);
 
-        assert([prefs writeToFile:jbroot(plistPath) atomically:YES]);
+        ASSERT([prefs writeToFile:jbroot(plistPath) atomically:YES]);
 
         CFRelease(keyList);
     }
@@ -107,7 +107,7 @@ Boolean new_CFPreferencesSynchronizeWithContainer(CFStringRef applicationID, CFS
     }
     else if([NSFileManager.defaultManager fileExistsAtPath:plistPath]) 
     {
-        // assert([NSFileManager.defaultManager removeItemAtPath:plistPath error:nil]);
+        // ASSERT([NSFileManager.defaultManager removeItemAtPath:plistPath error:nil]);
     }
     
     return retval;

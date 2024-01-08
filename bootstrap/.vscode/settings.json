@@ -2,7 +2,7 @@
     "files.associations": {
         "stdio.h": "c",
         "stdlib.h": "c",
-        "assert.h": "c",
+        "ASSERT.h": "c",
         "syslog.h": "c",
         "fishhook.h": "c",
         "util.h": "c",
@@ -30,6 +30,10 @@
         "byte_order.h": "c",
         "__config": "c",
         "filesystem": "c",
-        "stdbool.h": "c"
+        "stdbool.h": "c",
+        "__locale": "c",
+        "locale": "c",
+        "signal.h": "c",
+        "utsname.h": "c"
     }
 }

@@ -78,6 +78,11 @@ int handleRequest(int conn, pid_t pid, int reqId, NSDictionary* msg)
 			reply(conn, @{@"result": @(0), @"sbtoken":gSandboxExtensions});
 		} break;
 
+		case BSD_REQ_CHECK_SERVER:
+		{
+			reply(conn, @{@"result": @(0)});
+		} break;
+
 		case BSD_REQ_STOP_SERVER:
 		{
 			int result = set_stop_server();

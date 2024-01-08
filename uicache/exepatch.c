@@ -23,7 +23,7 @@
 #define BOOTSTRAP_INSTALL_NAME	"@loader_path/.prelib"
 
 extern void abort(void); //???
-size_t write_uleb128(uint64_t val, uint8_t buf[10])
+static size_t write_uleb128(uint64_t val, uint8_t buf[10])
 {
     uint8_t* start=buf;
     unsigned char c;
@@ -36,7 +36,7 @@ size_t write_uleb128(uint64_t val, uint8_t buf[10])
     } while (flag);
     return buf-start;
 }
-size_t write_sleb128(uint64_t val, uint8_t buf[10])
+static size_t write_sleb128(uint64_t val, uint8_t buf[10])
 {
     uint8_t* start=buf;
     unsigned char c;
@@ -49,7 +49,7 @@ size_t write_sleb128(uint64_t val, uint8_t buf[10])
     } while (flag);
     return buf-start;
 }
-uint64_t read_uleb128(uint8_t** pp, uint8_t* end)
+static uint64_t read_uleb128(uint8_t** pp, uint8_t* end)
 {
     uint8_t* p = *pp;
     uint64_t result = 0;
@@ -74,7 +74,7 @@ uint64_t read_uleb128(uint8_t** pp, uint8_t* end)
     *pp = p;
     return result;
 }
-int64_t read_sleb128(uint8_t** pp, uint8_t* end)
+static int64_t read_sleb128(uint8_t** pp, uint8_t* end)
 {
     uint8_t* p = *pp;
     int64_t  result = 0;

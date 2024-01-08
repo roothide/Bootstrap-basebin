@@ -278,9 +278,6 @@ int csd_code_directory_print_content(CS_DecodedSuperBlob *decodedSuperblob, CS_D
     printf("\tScatter offset: 0x%x\n", codeDir.scatterOffset);
     printf("\tTeam offset: 0x%x\n", codeDir.teamOffset);
 
-    printf("\truntime: 0x%x\n", codeDir.runtime);
-    printf("\tpreEncryptOffset: 0x%x\n", codeDir.preEncryptOffset);
-
     int maxdigits = count_digits(codeDir.nCodeSlots);
     bool codeSlotsCorrect = true;
     for (int64_t i = -((int64_t)codeDir.nSpecialSlots); i < (int64_t)codeDir.nCodeSlots; i++) {
@@ -458,6 +455,8 @@ void csd_code_directory_alloc(CS_DecodedBlob *codeDirBlob, MachO *macho)
             codeDir.teamOffset += codeDir.hashSize;
         }
     }
+
+    codeDir.codeLimit = codeSignatureOffset;
 
     // Write changes to codeDir struct
     CODE_DIRECTORY_APPLY_BYTE_ORDER(&codeDir, HOST_TO_BIG_APPLIER);

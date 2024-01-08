@@ -299,10 +299,10 @@ void forkfix(const char* tag, bool flag, bool child)
     // if(flag) {
     //     int count=0;
     //     thread_act_array_t list;
-    //     assert(task_threads(task, &list, &count) == KERN_SUCCESS);
+    //     ASSERT(task_threads(task, &list, &count) == KERN_SUCCESS);
     //     for(int i=0; i<count; i++) {
     //         if(list[i] != mach_thread_self()) { //mach_port_deallocate
-    //             assert(thread_suspend(list[i]) == KERN_SUCCESS);
+    //             ASSERT(thread_suspend(list[i]) == KERN_SUCCESS);
     //         }
     //     }
     // }
@@ -327,10 +327,10 @@ void forkfix(const char* tag, bool flag, bool child)
                 {
                     kr = _mach_vm_protect(task, (vm_address_t)header, seg->vmsize, false, flag ? VM_PROT_READ : VM_PROT_READ|VM_PROT_EXECUTE);
                     forklog("[%d] %s vm_protect.%d %d,%s\n", getpid(), tag, flag,  kr, mach_error_string(kr));
-                    assert(kr == KERN_SUCCESS);
+                    ASSERT(kr == KERN_SUCCESS);
                 }
 
-				// assert(*(int*)textaddr);
+				// ASSERT(*(int*)textaddr);
 
 #ifdef FORK_DEBUG
                 // showvm(task, (uint64_t)header, seg->vmsize); //stack overflow by mig_get_reply_port infinite reucrsion on child process
@@ -345,10 +345,10 @@ void forkfix(const char* tag, bool flag, bool child)
     // if(!flag) {
     //     int count=0;
     //     thread_act_array_t list;
-    //     assert(task_threads(task, &list, &count) == KERN_SUCCESS);
+    //     ASSERT(task_threads(task, &list, &count) == KERN_SUCCESS);
     //     for(int i=0; i<count; i++) {
     //         if(list[i] != mach_thread_self()) { //mach_port_deallocate
-    //             assert(thread_resume(list[i]) == KERN_SUCCESS);
+    //             ASSERT(thread_resume(list[i]) == KERN_SUCCESS);
     //         }
     //     }
     // }   
@@ -421,7 +421,7 @@ void parent_fixup(pid_t childPid)
 	// }
 	
 	int bsd_enableJIT2(pid_t pid);
-	assert(bsd_enableJIT2(childPid)==0);
+	ASSERT(bsd_enableJIT2(childPid)==0);
 
 	// Tell child we are done, this will make it resume
 	write(parentToChildPipe[1], &msg, sizeof(msg));
@@ -459,7 +459,7 @@ static inline __attribute__((always_inline))
 pid_t
 _do_fork(bool libsystem_atfork_handlers_only)
 {
-	// assert(requireJIT()==0);
+	// ASSERT(requireJIT()==0);
 
 	static int atforkinited=0;
 	if(atforkinited++==0) atforkinit();
