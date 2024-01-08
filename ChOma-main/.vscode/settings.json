@@ -20,6 +20,7 @@
 		"string_view": "c",
 		"unordered_map": "c",
 		"vector": "c",
-		"macho.h": "c"
+		"macho.h": "c",
+		"host.h": "c"
 	}
 }

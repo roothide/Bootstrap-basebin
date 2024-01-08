@@ -574,7 +574,7 @@ int patch_macho(int fd, struct mach_header_64* header)
 	return 0;
 }
 
-int patch_executable(const char* file, uint32_t offset)
+int patch_executable(const char* file, uint64_t offset, uint64_t size)
 {
 	int fd = open(file, O_RDWR);
     if(fd < 0) {
@@ -590,13 +590,21 @@ int patch_executable(const char* file, uint32_t offset)
     
     SYSLOG("file size = %lld\n", st.st_size);
     
-    void* macho = mmap(NULL, st.st_size, PROT_READ|PROT_WRITE, MAP_PRIVATE, fd, 0);
+    void* macho = mmap(NULL, size, PROT_READ|PROT_WRITE, MAP_PRIVATE, fd, offset);
     if(macho == MAP_FAILED) {
         fprintf(stderr, "map %s error:%d,%s\n", file, errno, strerror(errno));
         return -1;
     }
 
-    struct mach_header_64* header = (struct mach_header_64*)((uint64_t)macho + offset);
+    if(offset != 0) {
+        assert(ftruncate(fd, 0)==0);
+        assert(write(fd, macho, size)==size);
+        assert(fsync(fd)==0);
+        assert(stat(file, &st)==0);
+        assert(st.st_size==size);
+    }
+
+    struct mach_header_64* header = (struct mach_header_64*)((uint64_t)macho + 0);
 
 	int retval = patch_macho(fd, header);
 	SYSLOG("patch macho @ %x : %d", offset, retval);
@@ -608,88 +616,16 @@ int patch_executable(const char* file, uint32_t offset)
     return retval;
 }
 
-
-void machoEnumerateArchs(FILE* machoFile, bool (^archEnumBlock)(struct mach_header_64* header, uint32_t offset))
-{
-    struct mach_header_64 mh={0};
-    if(fseek(machoFile,0,SEEK_SET)!=0)return;
-    if(fread(&mh,sizeof(mh),1,machoFile)!=1)return;
-    
-    if(mh.magic==FAT_MAGIC || mh.magic==FAT_CIGAM)//and || mh.magic==FAT_MAGIC_64 || mh.magic==FAT_CIGAM_64? with fat_arch_64
-    {
-        struct fat_header fh={0};
-        if(fseek(machoFile,0,SEEK_SET)!=0)return;
-        if(fread(&fh,sizeof(fh),1,machoFile)!=1)return;
-        
-        for(int i = 0; i < OSSwapBigToHostInt32(fh.nfat_arch); i++)
-        {
-            uint32_t archMetadataOffset = sizeof(fh) + sizeof(struct fat_arch) * i;
-
-            struct fat_arch fatArch={0};
-            if(fseek(machoFile, archMetadataOffset, SEEK_SET)!=0)break;
-            if(fread(&fatArch, sizeof(fatArch), 1, machoFile)!=1)break;
-
-            if(fseek(machoFile, OSSwapBigToHostInt32(fatArch.offset), SEEK_SET)!=0)break;
-            if(fread(&mh, sizeof(mh), 1, machoFile)!=1)break;
-
-            if(mh.magic != MH_MAGIC_64 && mh.magic != MH_CIGAM_64) continue; //require Macho64
-            
-            if(!archEnumBlock(&mh, OSSwapBigToHostInt32(fatArch.offset)))
-                break;
-        }
-    }
-    else if(mh.magic == MH_MAGIC_64 || mh.magic == MH_CIGAM_64) //require Macho64
-    {
-        archEnumBlock(&mh, 0);
-    }
-}
-
-void machoGetInfo(FILE* candidateFile, bool *isMachoOut, bool *isLibraryOut)
-{
-    if (!candidateFile) return;
-
-    __block bool isMacho=false;
-    __block bool isLibrary = false;
-    
-    machoEnumerateArchs(candidateFile, ^bool(struct mach_header_64* header, uint32_t offset) {
-        switch(OSSwapLittleToHostInt32(header->filetype)) {
-            case MH_DYLIB:
-            case MH_BUNDLE:
-                isLibrary = true;
-            case MH_EXECUTE:
-                isMacho = true;
-                return false;
-
-            default:
-                return true;
-        }
-    });
-
-    if (isMachoOut) *isMachoOut = isMacho;
-    if (isLibraryOut) *isLibraryOut = isLibrary;
-}
+#include <choma/MachO.h>
+#include <choma/Host.h>
 
 int patch_app_exe(const char* file)
 {
-    __block int ret=-1;
-
-	FILE* fp = fopen(file, "rb");
-	if(!fp) return -1;
-
-    __block int archs=0;
-	machoEnumerateArchs(fp, ^bool (struct mach_header_64* header, uint32_t offset) {
-
-        archs++;
-        assert(archs==1); //fastPathSign pre-sign
-        
-		if((ret=patch_executable(file, offset)) != 0) {
-            return false;
-        }
-
-        return true;
-	});
-
-	fclose(fp);
-	return ret;
+    FAT *fat = fat_init_from_path(file);
+    if (!fat) return -1;
+    MachO *macho = fat_find_preferred_slice(fat);
+    if (!macho) return -1;
+    // printf("offset=%llx size=%llx\n", macho->archDescriptor.offset, macho->archDescriptor.size);
+	return patch_executable(file, macho->archDescriptor.offset, macho->archDescriptor.size);
 }
 

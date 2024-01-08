@@ -2,6 +2,8 @@
     "files.associations": {
         "fat.h": "c",
         "fixup-chains.h": "c",
-        "vm_page_size.h": "c"
+        "vm_page_size.h": "c",
+        "loader.h": "c",
+        "nlist.h": "c"
     }
 }

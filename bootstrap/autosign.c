@@ -159,6 +159,9 @@ int execBinary(const char* path, char** argv)
 
 int autosign(char* path)
 {
+	if(strstr(path, "/var/mobile/Library/pkgmirror/")) 
+		return 0;
+
     FILE* fp = fopen(path, "rb");
     if(fp) {
         bool ismacho=false,islib=false;
