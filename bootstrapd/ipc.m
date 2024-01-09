@@ -11,7 +11,7 @@
 #import <mach/mach.h>
 
 #include <roothide.h>
-
+#include "assert.h"
 
 #ifndef BOOTSTRAPD
 #define printf(...)
@@ -63,7 +63,7 @@ int socket_get_audit_token(int sd, audit_token_t* audit_token)
 
 int recvbuf(int sd, void* buffer, int bufsize)
 {
-	assert(bufsize <= 4096); //net.local.stream.recvspace?
+	ASSERT(bufsize <= 4096); //net.local.stream.recvspace?
 
     struct iovec   iov[1];
     iov[0].iov_base = buffer;
@@ -85,7 +85,7 @@ int recvbuf(int sd, void* buffer, int bufsize)
 	
 	NSLog(@"recvbuf %p %d %d, %s", buffer, bufsize, rlen, rlen>0?"":strerror(errno));
 	
-	//rlen=0 if client close unexcept, assert(rlen > 0);
+	//rlen=0 if client close unexcept, ASSERT(rlen > 0);
 
 	return rlen;
 }
@@ -94,7 +94,7 @@ int sendbuf(int sd, void* buffer, int bufsize)
 {
 	NSLog(@"sendbuf %d %p %d", sd, buffer, bufsize);
 
-	assert(bufsize <= 4096); //net.local.stream.sendspace?
+	ASSERT(bufsize <= 4096); //net.local.stream.sendspace?
 
     struct iovec   iov[1];
     iov[0].iov_base = buffer;
@@ -113,7 +113,7 @@ int sendbuf(int sd, void* buffer, int bufsize)
     int slen = sendmsg(sd, &msg, 0);
 	if(slen != bufsize) perror("sendmsg");
 	
-	//slen=0 if server close unexcept //assert(slen == bufsize);
+	//slen=0 if server close unexcept //ASSERT(slen == bufsize);
 
 	return slen;
 }
@@ -124,7 +124,7 @@ int reply(int socket, NSDictionary* msg)
 
     if(msg) {
         NSData *data = [NSPropertyListSerialization dataWithPropertyList:msg format:NSPropertyListBinaryFormat_v1_0 options:0 error:nil];
-        assert(data != nil);
+        ASSERT(data != nil);
         
         int slen = sendbuf(socket, (void*)data.bytes, data.length);
 
@@ -178,7 +178,7 @@ int request(int socket, int reqId, NSDictionary* msg)
 	NSError* err=nil;
 	NSData *data = [NSPropertyListSerialization dataWithPropertyList:reqMsg format:NSPropertyListBinaryFormat_v1_0 options:0 error:&err];
 	//NSLog(@"err=%@", err);
-	assert(data != nil);
+	ASSERT(data != nil);
 	
 	if(sendbuf(socket, (void*)data.bytes, data.length) != data.length)
 	{

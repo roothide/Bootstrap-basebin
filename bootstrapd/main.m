@@ -3,6 +3,7 @@
 #include <roothide.h>
 #include <sandbox.h>
 #include <spawn.h>
+#include "assert.h"
 #include "bootstrapd.h"
 #include "libbsd.h"
 #include "ipc.h"
@@ -230,7 +231,7 @@ int start_run_server()
 		//from theos install.exec
 		sigignore(SIGPIPE); //break by theos->ssh
 	} else {
-		assert(_daemon(0,0)==0);
+		ASSERT(_daemon(0,0)==0);
 	}
 
 	gSandboxExtensions = generateSandboxExtensions(NO);
@@ -267,7 +268,7 @@ int main(int argc, char *argv[], char *envp[]) {
 						if(killed==0) {
 							NSLog(@"server is running (%d)", pid);
 							if(force) {
-								assert(stopServer(true)==0);
+								ASSERT(stopServer(true)==0);
 							} else {
 								return -1;
 							}
@@ -277,7 +278,7 @@ int main(int argc, char *argv[], char *envp[]) {
 				}
 
 				fp = fopen(BSD_PID_PATH, "w");
-				assert(fp != NULL);
+				ASSERT(fp != NULL);
 				fprintf(fp, "%d", getpid());
 				fclose(fp);
 
@@ -321,7 +322,7 @@ int main(int argc, char *argv[], char *envp[]) {
 			}
 			else if(strcmp(argv[1], "openssh") == 0)
 			{
-				assert(argc >= 3);
+				ASSERT(argc >= 3);
 				if(strcmp(argv[2],"start")==0) {
 					return bsd_opensshctl(true);
 				} else if(strcmp(argv[2],"stop")==0) {

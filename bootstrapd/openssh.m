@@ -3,6 +3,7 @@
 #include <spawn.h>
 #include <roothide.h>
 #include "envbuf.h"
+#include "assert.h"
 
 
 bool sshenable=false;
@@ -98,7 +99,7 @@ int spawn(pid_t* pidp, const char* path, char*const* argv, char*const* envp, voi
     }
 
     FILE* fp = fopen(jbroot("/basebin/.sshd.pid"), "w");
-    assert(fp != NULL);
+    ASSERT(fp != NULL);
     fprintf(fp, "%d", pid);
     fclose(fp);
     

@@ -296,7 +296,7 @@ static void __attribute__((__constructor__)) bootstrap()
     {
 		runAsRoot(jbroot("/basebin/uicache"), NXArgv);
     }
-	else if(strcmp(exepath, "/Applications/Preferences.app/Preferences")==0)
+	else if(strcmp(exepath, "/Applications/Preferences.app/Preferences")==0 || strcmp(exepath, "/Applications/TweakSettings.app/TweakSettings")==0)
     {
 		void init_prefshook();
 		init_prefshook();
