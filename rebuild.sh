@@ -6,6 +6,10 @@ PREV_DIR=$(pwd)
 WORK_DIR=$(dirname -- "$0")
 cd "$WORK_DIR"
 
+cd ChOma-main
+make clean-all && make TARGET=ios
+cd -
+
 cd ldid
 make clean && make
 cd -

@@ -1,0 +1,29 @@
+#!/bin/bash
+
+set -e
+
+THEOS_DEVICE_IP=iphone13.local
+
+rm -rf "$1".raw
+rm -f "$1".raw.deb
+
+fakeroot -- dpkg-deb -R "$1" "$1".raw
+
+find "$1".raw -type f | while read -r file; do
+  if file -ib "$file" | grep -q "x-mach-binary; charset=binary"; then
+		if [ ${file##*.} != "dylib" ] && [ ${file##*.} != "bundle" ] && [ ${file##*.} != "so" ]; then
+      ldid -M -S/Users/admin/Procursus/build_misc/entitlements/roothide_debug.xml "$file"
+    fi
+    /Users/admin/Documents/RootHide/trollstore/Exploits/fastPathSign/fastPathSign  "$file"
+  fi
+done
+
+fakeroot -- dpkg-deb -b "$1".raw
+
+FNAME=$(basename "$1".raw.deb)
+
+scp "$1".raw.deb root@$THEOS_DEVICE_IP:/tmp/
+ssh root@$THEOS_DEVICE_IP "dpkg -i \"/tmp/$FNAME\""
+
+rm -rf "$1".raw
+rm -f "$1".raw.deb

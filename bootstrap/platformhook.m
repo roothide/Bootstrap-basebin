@@ -27,9 +27,9 @@ int new_csops_audittoken(pid_t pid, unsigned int  ops, void * useraddr, size_t u
     return ret;
 }
 
-void init_shortcutsHook()
+void init_platformHook()
 {    
-    NSLog(@"init_shortcutsHook %d", getpid());
+    NSLog(@"init_platformHook %d", getpid());
 
     if(requireJIT()!=0) return;
     

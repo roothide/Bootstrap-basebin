@@ -239,6 +239,7 @@ extern void runAsRoot(const char* path, char* argv[]);
 char* excludeProcesses[] = {
 	"/usr/sbin/dropbear",
 	"/usr/sbin/sshd",
+	"/usr/bin/fish",
 	"/usr/bin/dash",
 	"/usr/bin/bash",
 	"/usr/bin/zsh",
@@ -303,8 +304,13 @@ static void __attribute__((__constructor__)) bootstrap()
     }
 	else if(stringEndsWith(exepath, "/Shortcuts.app/Shortcuts"))
 	{
-		void init_shortcutsHook();
-		init_shortcutsHook();
+		void init_platformHook();
+		init_platformHook();
+	}
+	else if(strcmp(exepath, "/Applications/MobileSafari.app/MobileSafari")==0)
+	{
+		void init_platformHook();
+		init_platformHook();
 	}
 
 
@@ -315,31 +321,34 @@ static void __attribute__((__constructor__)) bootstrap()
 		ASSERT(checkpatchedexe());
 	}
 
-	if(getppid() == 1) 
+	if(getppid()==1)
 	{
-		bool excluded = false;
-		for(int i=0; i<sizeof(excludeProcesses)/sizeof(excludeProcesses[0]); i++)
-		{
-			if(strcmp(exepath, excludeProcesses[i])==0) {
-				excluded=true;
-				break;
-			}
-		}
-
 		if(stringStartsWith(exepath, "/Applications/")) {
 			const char* bundleIdentifier = CFStringGetCStringPtr(CFBundleGetIdentifier(CFBundleGetMainBundle()), kCFStringEncodingASCII);
-			if(strncmp(bundleIdentifier, "com.apple.", sizeof("com.apple.")-1) != 0) {
+			if(bundleIdentifier && !stringStartsWith(bundleIdentifier, "com.apple.")) {
 				ASSERT(bsd_checkServer()==0);
 			}
 		}
 
-		const char* tweakloader = jbroot("/usr/lib/TweakLoader.dylib");
-		if(!excluded && access(tweakloader, F_OK)==0 && requireJIT()==0) {
-			//currenly ellekit/oldabi uses JBROOT
-			const char* oldJBROOT = getenv("JBROOT");
-			setenv("JBROOT", jbroot("/"), 1);
-			dlopen(tweakloader, RTLD_NOW);
-			if(oldJBROOT) setenv("JBROOT", oldJBROOT, 1); else unsetenv("JBROOT");
+		if(access(jbroot("/var/mobile/.tweakenabled"), F_OK)==0)
+		{
+			bool excluded = false;
+			for(int i=0; i<sizeof(excludeProcesses)/sizeof(excludeProcesses[0]); i++)
+			{
+				if(strcmp(exepath, excludeProcesses[i])==0) {
+					excluded=true;
+					break;
+				}
+			}
+
+			const char* tweakloader = jbroot("/usr/lib/TweakLoader.dylib");
+			if(!excluded && access(tweakloader, F_OK)==0 && requireJIT()==0) {
+				//currenly ellekit/oldabi uses JBROOT
+				const char* oldJBROOT = getenv("JBROOT");
+				setenv("JBROOT", jbroot("/"), 1);
+				dlopen(tweakloader, RTLD_NOW);
+				if(oldJBROOT) setenv("JBROOT", oldJBROOT, 1); else unsetenv("JBROOT");
+			}
 		}
 	}
 

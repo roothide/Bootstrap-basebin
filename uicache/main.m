@@ -311,9 +311,18 @@ NSString *constructTeamIdentifierForEntitlements(NSDictionary *entitlements) {
 	return nil;
 }
 
-NSDictionary *constructEnvironmentVariablesForContainerPath(NSString *containerPath, BOOL isContainerized) {
-	NSString *homeDir = isContainerized ? containerPath : jbroot(@"/var/mobile");
-	NSString *tmpDir = isContainerized ? [containerPath stringByAppendingPathComponent:@"tmp"] : jbroot(@"/var/tmp");
+NSDictionary *constructEnvironmentVariablesForContainerPath(NSString *mainBundlePath, NSString *containerPath, BOOL isContainerized) 
+{
+	BOOL using_jbroot = YES;
+
+	if([NSFileManager.defaultManager fileExistsAtPath:[mainBundlePath stringByAppendingString:@"/../_TrollStore"]]) {
+		using_jbroot = NO;
+	} else if(![NSFileManager.defaultManager fileExistsAtPath:[mainBundlePath stringByAppendingString:@".jbroot"]]) {
+		using_jbroot = NO;
+	}
+
+	NSString *homeDir = isContainerized ? containerPath : (using_jbroot ? jbroot(@"/var/mobile") : @"/var/mobile");
+	NSString *tmpDir = isContainerized ? [containerPath stringByAppendingPathComponent:@"tmp"] : (using_jbroot ? jbroot(@"/var/tmp") : @"/var/tmp");
 	return @{
 		@"CFFIXED_USER_HOME" : homeDir,
 		@"HOME" : homeDir,
@@ -615,9 +624,9 @@ void registerPath(NSString *path, BOOL forceSystem)
 		if app executable using another container in entitlements, 
 		lsd still create the app-bundle-id container for EnvironmentVariables but set Container-Path to  /var/mobile,  
 		when executable  actually runs, the kernel sandbox framework will ask the containerermanagerd to get the container defined in entitlements */
-		dictToRegister[@"EnvironmentVariables"] = constructEnvironmentVariablesForContainerPath(containerPath, YES);
+		dictToRegister[@"EnvironmentVariables"] = constructEnvironmentVariablesForContainerPath(path, containerPath, YES);
 	} else {
-		dictToRegister[@"EnvironmentVariables"] = constructEnvironmentVariablesForContainerPath(nil, NO);
+		dictToRegister[@"EnvironmentVariables"] = constructEnvironmentVariablesForContainerPath(path, nil, NO);
 	}
 
 	dictToRegister[@"IsDeletable"] = @(registerAsUser || isRemovableSystemApp || isDefaultInstallationPath(path));
@@ -695,9 +704,9 @@ void registerPath(NSString *path, BOOL forceSystem)
 			NSString *pluginContainerPath = [pluginContainer url].path;
 
 			pluginDict[@"Container"] = pluginContainerPath;
-			pluginDict[@"EnvironmentVariables"] = constructEnvironmentVariablesForContainerPath(pluginContainerPath, pluginContainerized);
+			pluginDict[@"EnvironmentVariables"] = constructEnvironmentVariablesForContainerPath(path, pluginContainerPath, pluginContainerized);
 		} else {
-			pluginDict[@"EnvironmentVariables"] = constructEnvironmentVariablesForContainerPath(nil, pluginContainerized);
+			pluginDict[@"EnvironmentVariables"] = constructEnvironmentVariablesForContainerPath(path, nil, pluginContainerized);
 		}
 
 		pluginDict[@"Path"] = pluginPath;

@@ -15,7 +15,7 @@
 
 #include "common.h"
 
-// #define FORK_DEBUG
+//#define FORK_DEBUG
 
 #ifndef CPUFAMILY_ARM_PCORE_ECORE_COLL
 #define CPUFAMILY_ARM_PCORE_ECORE_COLL 0x2876f5b5
@@ -214,9 +214,15 @@ atforkinit()
         uname(&systemInfo);
 
         if (strncmp(systemInfo.machine, "iPhone", 6)==0
-        && (cpuFamily==CPUFAMILY_ARM_BLIZZARD_AVALANCHE
+         && (cpuFamily==CPUFAMILY_ARM_BLIZZARD_AVALANCHE
          || cpuFamily==CPUFAMILY_ARM_EVEREST_SAWTOOTH
           || cpuFamily==CPUFAMILY_ARM_PCORE_ECORE_COLL )) {
+            forkfix_method_2 = true;
+        }
+
+        //ipad mini6, A15 not M2
+        if ((strcmp(systemInfo.machine, "iPad14,1")==0 || strcmp(systemInfo.machine, "iPad14,2")==0) 
+        && (cpuFamily==CPUFAMILY_ARM_BLIZZARD_AVALANCHE)) {
             forkfix_method_2 = true;
         }
     }
