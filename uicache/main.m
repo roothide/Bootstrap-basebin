@@ -445,7 +445,7 @@ void freeplay(NSString* bundlePath)
 
 			NSString *bundleId = infoDict[@"CFBundleIdentifier"];
 			NSString *bundleExecutable = infoDict[@"CFBundleExecutable"];
-			if (!bundleId || !bundleExecutable) continue;
+			if (!bundleId || !bundleExecutable || !bundleExecutable.length) continue;
 
 			if ([infoDict[@"CFBundlePackageType"] isEqualToString:@"FMWK"]) continue;
 

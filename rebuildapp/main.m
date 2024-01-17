@@ -357,7 +357,7 @@ int signApp(NSString* appPath)
 
 			NSString *bundleId = infoDict[@"CFBundleIdentifier"];
 			NSString *bundleExecutable = infoDict[@"CFBundleExecutable"];
-			if (!bundleId || !bundleExecutable) continue;
+			if (!bundleId || !bundleExecutable || !bundleExecutable.length) continue;
 
 			NSString *bundleMainExecutablePath = [[filePath stringByDeletingLastPathComponent] stringByAppendingPathComponent:bundleExecutable];
 			if (![[NSFileManager defaultManager] fileExistsAtPath:bundleMainExecutablePath]) continue;
