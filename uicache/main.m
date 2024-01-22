@@ -418,18 +418,174 @@ int execBinary(const char* path, char** argv)
 }
 
 
-void freeplay(NSString* bundlePath)
+
+#define PLATFORM_IOS 2
+#define PLATFORM_MACOS 1
+
+@class RBSProcessIdentity;
+
+@interface RBSProcessIdentity : NSObject
++ (id)identityOfCurrentProcess;
++(id)identityForLSApplicationIdentity:(id)arg1 ;
++(id)identityForApplicationJobLabel:(id)arg1 ;
++ (id)identityForApplicationJobLabel:(id)arg1 bundleID:(id)arg2 platform:(int)arg3;
++(id)identityForPlugInKitIdentifier:(id)arg1 ;
+
++(id)identityForEmbeddedApplicationIdentifier:(id)arg1 ;
++(id)extensionIdentityForPlugInKitIdentifier:(id)arg1 hostIdentifier:(id)arg2 UUID:(id)arg3 ;
+
++(id)identityForDaemonJobLabel:(id)arg1 ;
+
+@end
+
+@interface RBSLaunchContext : NSObject
+@property (nonatomic,copy) NSDictionary * environment;
+@property (nonatomic,copy) NSString * standardOutputPath;
+@property (nonatomic,copy) NSString * standardErrorPath;
+@property (nonatomic,copy) NSString * executablePath;
+@property (nonatomic) unsigned long lsSpawnFlags;
+@property (nonatomic) BOOL lsManageRoleOnly;
+@property (nonatomic) unsigned int lsInitialRole;
+@property (nonatomic) unsigned int executionOptions;
+
+@property (assign,nonatomic) BOOL forceSubmit;
+
+-(void)setExtensionOverlay:(NSDictionary *)arg1 ;
+-(void)setHostPid:(int)pid;
+-(void)setExplanation:(NSString*)a;
+-(void)_setOverrideExecutablePath:(NSString*)a;
+
++ (id)contextWithIdentity:(id)arg1;
++ (id)context;
+@end
+
+@interface RBSLaunchRequest : NSObject
+- (_Bool)execute:(out id *)arg1 error:(out id *)arg2;
+- (id)initWithContext:(id)arg1;
+@end
+
+@interface MIInstallerClient : NSObject
+- (id)init;
+- (void)fetchInfoForAppWithBundleID:(id)arg1 wrapperURL:(id)arg2 completion:(id)arg3;
+@end
+
+@interface RBSProcessIdentifier : NSObject
++ (id)identifierWithPid:(int)pid;
+@end
+
+@interface RBSProcessHandle : NSObject
++ (id)handleForPredicate:(id)arg1 error:(out id*)arg2;
+- (int) rbs_pid;
+@end
+
+@interface RBSProcessPredicate : NSObject
++ (id)predicateMatchingIdentity:(id)arg1;
+@end
+
+
+int launchr(NSString* bundleId, NSString* executablePath)
 {
-    NSFileManager* fm = NSFileManager.defaultManager;
+	int platformIdentifier = 2; // 2 for ios, 1 for macos
+	int lsSpawnFlags = 1; // 0 for normal launch, 1 to launch suspended
+			
+	Class cRbsLaunchContext = NSClassFromString(@"RBSLaunchContext");
+	Class cRbsLaunchRequest = NSClassFromString(@"RBSLaunchRequest");
+	Class cRbsProcessIdentity = NSClassFromString(@"RBSProcessIdentity");
+	Class cRbsProcessHandle = NSClassFromString(@"RBSProcessHandle");
+	Class cRbsProcessPredicate = NSClassFromString(@"RBSProcessPredicate");
 
-    if(![fm fileExistsAtPath:[bundlePath stringByAppendingPathExtension:@"appbackup"]])
-        return;
+	// TODO: find out how to get rid of the runningboard watchdog, our child is being killed in ~30s when launched suspended now. This is Jetsam, find out how to configure
+	// TODO: create proper container for data
+	
+	NSString* jobLabel = [NSString stringWithFormat:@"%@-%@", bundleId, [NSUUID UUID]]; // Add the UUID to have unique job names if spawning multiple instances of the same app
 
-    if(![fm fileExistsAtPath:[bundlePath stringByAppendingPathComponent:@"SC_Info"]])
-        return;
+	NSLog(@"Submitting job: %@", jobLabel);
+	
+	RBSProcessIdentity* identity = [cRbsProcessIdentity identityForApplicationJobLabel:jobLabel bundleID:bundleId platform:platformIdentifier];
 
-    assert([fm moveItemAtPath:bundlePath toPath:[bundlePath stringByAppendingPathExtension:@"tmp"] error:nil]);
-    assert([fm moveItemAtPath:[bundlePath stringByAppendingPathExtension:@"appbackup"] toPath:bundlePath error:nil]);
+	// int hostpid = 2391;
+	// RBSProcessIdentity* identity = [cRbsProcessIdentity extensionIdentityForPlugInKitIdentifier:bundleId
+	//  												hostIdentifier:[RBSProcessIdentifier identifierWithPid:hostpid] UUID:nil];
+
+	// // RBSProcessIdentity* identity = [cRbsProcessIdentity identityForDaemonJobLabel:@"com.apple.SpringBoard"];
+	// NSLog(@"id=%@", identity);
+
+	RBSLaunchContext* context = [cRbsLaunchContext contextWithIdentity:identity];
+
+	// // [context _setOverrideExecutablePath:executablePath];
+	// // context.forceSubmit = YES;
+
+	// [context setHostPid:hostpid];
+	// [context setExplanation:jobLabel];
+	// [context setExtensionOverlay:@{
+	// 	@"CFBundlePackageType":@"XPC!",
+	// 	@"RunningBoard" : @{@"Managed":@1},
+	// 	@"XPCService" : @{
+	// 		@"PersonaEnterprise":@1000, @"Platform":@2, @"ProgramArguments":@[executablePath], 
+	// 		@"RunLoopType":@"_UIApplicationMain", //@"NSRunLoop",
+	// 		@"ServiceType":@"Application",
+	// 		@"_AdditionalSubServices":@{
+	// 			@"apple-extension-service":@1,
+	// 			@"viewservice":@1,
+	// 		},
+	// 		@"_LaunchWatchdogTimeOut":@9999999,
+	// 		@"_OmitSandboxParameters":@1,
+	// 		@"_SandboxProfile":@"plugin"
+	// 	}
+	// }];
+
+	// Look at -[RBLaunchdJobManager _generateDataWithIdentity:context:] to learn about the meaning of the context properties
+	[context setExecutablePath:executablePath];
+	[context setLsSpawnFlags:lsSpawnFlags];
+	// [context setStandardOutputPath:stdoutPath];
+	// [context setStandardErrorPath:stderrPath];
+	// [context setEnvironment:env];
+	// [context setExecutionOptions:0x8]; // Looking inside runningboard code it looks like this disabled pointer auth? Might come in handy
+	// [context setLsInitialRole:0x7]; // This value is mapped to PRIO_DARWIN_ROLE_UI_FOCAL by RBSDarwinRoleFromRBSRole()
+	
+	RBSLaunchRequest* request = [[cRbsLaunchRequest alloc] initWithContext:context];
+	
+	NSError* errResult;
+	BOOL success = [request execute:&context error:&errResult];
+
+	if (!success) {
+		NSLog(@"Error: %@", errResult);
+		return -1;
+	}
+	
+	RBSProcessPredicate* predicate = [cRbsProcessPredicate predicateMatchingIdentity:identity];
+	RBSProcessHandle* process = [cRbsProcessHandle handleForPredicate:predicate error:nil];
+
+	int pid = [process rbs_pid];
+
+	if(pid) kill(pid, SIGKILL);
+
+	NSLog(@"PID: %d of %@", pid, executablePath);
+
+    return 0;
+}
+
+int spawner(NSString* executablePath)
+{
+	posix_spawnattr_t attr;
+	posix_spawnattr_init(&attr);
+	posix_spawnattr_setflags(&attr, POSIX_SPAWN_START_SUSPENDED);
+
+	pid_t pid=0;
+	char* args[] = {(char*)executablePath.UTF8String,(char*)executablePath.UTF8String,NULL};
+	int ret = posix_spawn(&pid, args[0], NULL, &attr, args, NULL);
+	if(ret != 0) {
+		NSLog(@"Error: %d %s", ret, strerror(ret));
+		return -1;
+	}
+	if(pid) kill(pid, SIGKILL);
+	NSLog(@"pid: %d of %@", pid, executablePath);
+	return 0;
+}
+
+void activator(NSString* bundlePath)
+{
+	NSFileManager* fm = NSFileManager.defaultManager;
 
 	NSDirectoryEnumerator* enumerator = [fm enumeratorAtURL:[NSURL fileURLWithPath:bundlePath] includingPropertiesForKeys:nil options:0 errorHandler:nil];
 	for(NSURL*fileURL in enumerator)
@@ -449,30 +605,46 @@ void freeplay(NSString* bundlePath)
 
 			if ([infoDict[@"CFBundlePackageType"] isEqualToString:@"FMWK"]) continue;
 
-			// if ([infoDict[@"NSExtension"][@"NSExtensionPointIdentifier"] isEqualToString:@"com.apple.widget-extension"]) continue;
-            
-			if (![infoDict[@"CFBundlePackageType"] isEqualToString:@"APPL"]) continue;
-
 			NSString *bundleMainExecutablePath = [[filePath stringByDeletingLastPathComponent] stringByAppendingPathComponent:bundleExecutable];
 			if (![fm fileExistsAtPath:bundleMainExecutablePath]) continue;
 
-            posix_spawnattr_t attr;
-            posix_spawnattr_init(&attr);
-            posix_spawnattr_setflags(&attr, POSIX_SPAWN_START_SUSPENDED);
 
-            pid_t pid=0;
-            char* args[] = {(char*)bundleMainExecutablePath.UTF8String,(char*)bundleMainExecutablePath.UTF8String,NULL};
-            int ret = posix_spawn(&pid, args[0], NULL, &attr, args, NULL);
-            NSLog(@"freeplay: %@:%@\n%d,%s : %d : %@", infoDict[@"CFBundlePackageType"], bundleId, ret, strerror(ret), pid, bundleMainExecutablePath);
-            if(ret==0 && pid) {
-                kill(pid, SIGKILL);
-            }
+			// if ([infoDict[@"NSExtension"][@"NSExtensionPointIdentifier"] isEqualToString:@"com.apple.widget-extension"]) continue;
+            
+			NSLog(@"bundle=%@ type=%@", bundleId, infoDict[@"NSExtension"][@"NSExtensionPointIdentifier"]);
+
+			if ([infoDict[@"CFBundlePackageType"] isEqualToString:@"APPL"]) {
+				spawner(bundleMainExecutablePath);
+			} else {
+				// launchr(bundleId, bundleMainExecutablePath);
+				spawner(bundleMainExecutablePath);
+			}
         }
     }
+}
+
+void freeplay(NSString* mainBundleId, NSString* bundlePath)
+{
+    NSFileManager* fm = NSFileManager.defaultManager;
+
+    if(![fm fileExistsAtPath:[bundlePath stringByAppendingPathExtension:@"appbackup"]])
+        return;
+
+    if(![fm fileExistsAtPath:[bundlePath stringByAppendingPathComponent:@"SC_Info"]])
+        return;
+
+    assert([fm moveItemAtPath:bundlePath toPath:[bundlePath stringByAppendingPathExtension:@"tmp"] error:nil]);
+    assert([fm moveItemAtPath:[bundlePath stringByAppendingPathExtension:@"appbackup"] toPath:bundlePath error:nil]);
+
+	activator(bundlePath);
 
     assert([fm moveItemAtPath:bundlePath toPath:[bundlePath stringByAppendingPathExtension:@"appbackup"] error:nil]);
     assert([fm moveItemAtPath:[bundlePath stringByAppendingPathExtension:@"tmp"] toPath:bundlePath error:nil]);
+
+	activator(bundlePath);
 }
+
+BOOL fix_notification = NO;
 
 void registerPath(NSString *path, BOOL forceSystem)
 {
@@ -511,85 +683,90 @@ void registerPath(NSString *path, BOOL forceSystem)
 
 
     BOOL isAppleBundle = [appBundleID hasPrefix:@"com.apple."];
-	
-	NSString* executableName = appInfoPlist[@"CFBundleExecutable"];
-    // if([executableName hasPrefix:@"."]) executableName = [executableName substringFromIndex:1];
 
-    NSString* jbrootpath = [path stringByAppendingPathComponent:@".jbroot"];
-    BOOL jbrootexists = [NSFileManager.defaultManager fileExistsAtPath:jbrootpath];
+	if(!fix_notification)
+	{
+		NSString* executableName = appInfoPlist[@"CFBundleExecutable"];
+		// if([executableName hasPrefix:@"."]) executableName = [executableName substringFromIndex:1];
 
-    //try
-    unlink([path stringByAppendingPathComponent:@".preload"].UTF8String);
-    unlink([path stringByAppendingPathComponent:@".prelib"].UTF8String);
-    
-    NSString* rebuildFile = [path stringByAppendingPathComponent:@".rebuild"];
+		NSString* jbrootpath = [path stringByAppendingPathComponent:@".jbroot"];
+		BOOL jbrootexists = [NSFileManager.defaultManager fileExistsAtPath:jbrootpath];
 
-    if(jbrootexists)
-    {
-        if(!isAppleBundle && ![NSFileManager.defaultManager fileExistsAtPath:[path stringByAppendingString:@"/../_TrollStore"]])
-        {
-            freeplay(path);
-        }
+		//try
+		unlink([path stringByAppendingPathComponent:@".preload"].UTF8String);
+		unlink([path stringByAppendingPathComponent:@".prelib"].UTF8String);
+		
+		NSString* rebuildFile = [path stringByAppendingPathComponent:@".rebuild"];
 
-		BOOL requiredRebuild = NO;
-
-		NSMutableDictionary* rebuildStatus = [NSMutableDictionary dictionaryWithContentsOfFile:rebuildFile];
-
-		struct stat st={0};
-		if(stat(appExecutablePath.fileSystemRepresentation, &st) == 0)
+		if(jbrootexists)
 		{
-			requiredRebuild = YES;
-
-			if(rebuildStatus 
-				//dev may change after reboot// && [rebuildStatus[@"st_dev"] longValue]==st.st_dev
-				&& [rebuildStatus[@"st_ino"] unsignedLongLongValue]==st.st_ino
-				&& [rebuildStatus[@"st_mtime"] longValue]==st.st_mtimespec.tv_sec 
-				&& [rebuildStatus[@"st_mtimensec"] longValue]==st.st_mtimespec.tv_nsec) {
-				requiredRebuild = NO;
-			} else {
-				// NSLog(@"rebuild %ld,%d,%llu,%llu / %ld:%ld %ld:%ld", 
-				// [rebuildStatus[@"st_dev"] longValue], st.st_dev
-				// , [rebuildStatus[@"st_ino"] unsignedLongLongValue], st.st_ino
-				// , [rebuildStatus[@"st_mtime"] longValue], st.st_mtimespec.tv_sec 
-				// , [rebuildStatus[@"st_mtimensec"] longValue], st.st_mtimespec.tv_nsec);
+			if(!isAppleBundle && ![NSFileManager.defaultManager fileExistsAtPath:[path stringByAppendingString:@"/../_TrollStore"]])
+			{
+				freeplay(appBundleID, path);
 			}
+
+			BOOL requiredRebuild = NO;
+
+			NSMutableDictionary* rebuildStatus = [NSMutableDictionary dictionaryWithContentsOfFile:rebuildFile];
+
+			struct stat st={0};
+			if(stat(appExecutablePath.fileSystemRepresentation, &st) == 0)
+			{
+				requiredRebuild = YES;
+
+				if(rebuildStatus 
+					//dev may change after reboot// && [rebuildStatus[@"st_dev"] longValue]==st.st_dev
+					&& [rebuildStatus[@"st_ino"] unsignedLongLongValue]==st.st_ino
+					&& [rebuildStatus[@"st_mtime"] longValue]==st.st_mtimespec.tv_sec 
+					&& [rebuildStatus[@"st_mtimensec"] longValue]==st.st_mtimespec.tv_nsec) {
+					requiredRebuild = NO;
+				} else {
+					// NSLog(@"rebuild %ld,%d,%llu,%llu / %ld:%ld %ld:%ld", 
+					// [rebuildStatus[@"st_dev"] longValue], st.st_dev
+					// , [rebuildStatus[@"st_ino"] unsignedLongLongValue], st.st_ino
+					// , [rebuildStatus[@"st_mtime"] longValue], st.st_mtimespec.tv_sec 
+					// , [rebuildStatus[@"st_mtimensec"] longValue], st.st_mtimespec.tv_nsec);
+				}
+			}
+
+			if(!rebuildStatus) rebuildStatus = [NSMutableDictionary new];
+
+			if(requiredRebuild)
+			{
+				//NSLog(@"patch macho: %@", [path stringByAppendingPathComponent:executableName]);
+				int patch_app_exe(const char* file);
+				assert(patch_app_exe([path stringByAppendingPathComponent:executableName].UTF8String)==0);
+
+				char* argv[] = {"/basebin/rebuildapp", (char*)rootfs(path).UTF8String, NULL};
+				assert(execBinary(jbroot(argv[0]), argv) == 0);
+				
+				assert(stat(appExecutablePath.fileSystemRepresentation, &st) == 0); //update mtime
+
+				[rebuildStatus addEntriesFromDictionary:@{
+					@"st_dev":@(st.st_dev), 
+					@"st_ino":@(st.st_ino), 
+					@"st_mtime":@(st.st_mtimespec.tv_sec), 
+					@"st_mtimensec":@(st.st_mtimespec.tv_nsec),
+					@"sb_token":@(sbtoken)
+				}];
+			}
+
+			[rebuildStatus addEntriesFromDictionary:@{@"sb_token":@(sbtoken)}];
+			assert([rebuildStatus writeToFile:rebuildFile atomically:YES]);
+
+			// NSString* newExecutableName = @".preload";
+			// appInfoPlist[@"CFBundleExecutable"] = newExecutableName;
+
+			appInfoPlist[@"SBAppUsesLocalNotifications"] = @1;
+
+			link(jbroot("/basebin/preload"), [path stringByAppendingPathComponent:@".preload"].UTF8String);
+			link(jbroot("/basebin/preload.dylib"), [path stringByAppendingPathComponent:@".prelib"].UTF8String);
 		}
-
-		if(!rebuildStatus) rebuildStatus = [NSMutableDictionary new];
-
-        if(requiredRebuild)
-        {
-            //NSLog(@"patch macho: %@", [path stringByAppendingPathComponent:executableName]);
-            int patch_app_exe(const char* file);
-            assert(patch_app_exe([path stringByAppendingPathComponent:executableName].UTF8String)==0);
-
-            char* argv[] = {"/basebin/rebuildapp", (char*)rootfs(path).UTF8String, NULL};
-            assert(execBinary(jbroot(argv[0]), argv) == 0);
-            
-			assert(stat(appExecutablePath.fileSystemRepresentation, &st) == 0); //update mtime
-
-			[rebuildStatus addEntriesFromDictionary:@{
-				@"st_dev":@(st.st_dev), 
-				@"st_ino":@(st.st_ino), 
-				@"st_mtime":@(st.st_mtimespec.tv_sec), 
-				@"st_mtimensec":@(st.st_mtimespec.tv_nsec),
-				@"sb_token":@(sbtoken)
-			}];
-    	}
-
-		[rebuildStatus addEntriesFromDictionary:@{@"sb_token":@(sbtoken)}];
-		assert([rebuildStatus writeToFile:rebuildFile atomically:YES]);
-
-        // NSString* newExecutableName = @".preload";
-        // appInfoPlist[@"CFBundleExecutable"] = newExecutableName;
-
-        link(jbroot("/basebin/preload"), [path stringByAppendingPathComponent:@".preload"].UTF8String);
-        link(jbroot("/basebin/preload.dylib"), [path stringByAppendingPathComponent:@".prelib"].UTF8String);
-    }
-    else
-    {
-        unlink(rebuildFile.UTF8String);
-    }
+		else
+		{
+			unlink(rebuildFile.UTF8String);
+		}
+	}
 
     if(!isAppleBundle) {
         [appInfoPlist writeToFile:appInfoPath atomically:YES];
@@ -745,18 +922,20 @@ void registerPath(NSString *path, BOOL forceSystem)
 
 	if ([workspace registerApplicationDictionary:dictToRegister])
 	{
-		networkFix(appBundleID);
-		for(NSString* pluginId in dictToRegister[@"_LSBundlePlugins"])
+		if(!fix_notification)
 		{
-			NSDictionary* pluginDict = dictToRegister[@"_LSBundlePlugins"][pluginId];
-			networkFix(pluginDict[@"CFBundleIdentifier"]);
+			networkFix(appBundleID);
+			for(NSString* pluginId in dictToRegister[@"_LSBundlePlugins"])
+			{
+				NSDictionary* pluginDict = dictToRegister[@"_LSBundlePlugins"][pluginId];
+				networkFix(pluginDict[@"CFBundleIdentifier"]);
+			}
 		}
 	}
 	else
 	{
 		fprintf(stderr, _("Error: Unable to register %s\n"), path.fileSystemRepresentation);
 	}
-
 
     if(!isAppleBundle) {
         [appInfoData writeToFile:appInfoPath atomically:YES];
@@ -958,12 +1137,16 @@ int main(int argc, char *argv[]) {
 			{"help", no_argument, 0, 'h'},
 			{"verbose", no_argument, 0, 'v'},	// verbose was added to maintain compatibility with old uikittools
 			{"force", no_argument, 0, 'f'},
+			{"fix-notification", no_argument, 0, 'n'},
 			{NULL, 0, NULL, 0}};
 
 		int index = 0, code = 0;
 
-		while ((code = getopt_long(argc, argv, "ap:u:rl::si:hfv", longOptions, &index)) != -1) {
+		while ((code = getopt_long(argc, argv, "ap:u:rl::si:hfvn", longOptions, &index)) != -1) {
 			switch (code) {
+				case 'n':
+					fix_notification = YES;
+					break;
 				case 'a':
 					all = YES;
 					break;

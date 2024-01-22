@@ -34,5 +34,14 @@
 	<array>
 		<string>data-allowed-write</string>
 	</array>
+
+	<key>com.apple.runningboard.launch_extensions</key>
+	<true/>
+	<key>com.apple.runningboard.launchprocess</key>
+	<true/>
+	<key>com.apple.runningboard.process-state</key>
+	<true/>
+	<key>com.apple.runningboard.statecapture</key>
+	<true/>
 </dict>
 </plist>

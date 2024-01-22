@@ -22,6 +22,7 @@ cp -a ./entitlements $TARGET
 cp ./fastPathSign/fastPathSign $TARGET
 cp ./devtest/.theos/_/basebin/devtest $TARGET
 cp ./uicache/.theos/_/basebin/uicache $TARGET
+cp ./uicache/.theos/_/basebin/fixnotification.sh $TARGET
 cp ./preload/.theos/_/basebin/preload $TARGET
 cp ./preload/.theos/_/basebin/preload.dylib $TARGET
 cp ./bootstrap/.theos/_/basebin/bootstrap.dylib $TARGET
