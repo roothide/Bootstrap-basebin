@@ -18,6 +18,14 @@
 #include "common.h"
 #include "fishhook.h"
 
+bool g_sign_failed = false;
+
+extern void _exit(int code);
+
+void sign_check(void) {
+	if(g_sign_failed) _exit(-1);
+}
+
 void ensure_jbroot_symlink(const char* dirpath)
 {
 	//JBLogDebug("ensure_jbroot_symlink: %s", dirpath);
@@ -177,19 +185,31 @@ int autosign(char* path)
                 snprintf(sent,sizeof(sent),"-S%s", jbroot("/basebin/bootstrap.entitlements"));
 
                 char* args[] = {"ldid", "-M", sent, path, NULL};
-				ASSERT(execBinary(jbroot("/basebin/ldid"), args) == 0);
+				int status = execBinary(jbroot("/basebin/ldid"), args);
+				if(status != 0) {
+					fprintf(stderr, "ldid %s failed: %d\n", rootfs(path), status);
+					g_sign_failed = true;
+				}
             }
 			else
 			{
 				//since RootHidePatcher always re-sign with entitlements for all mach-o files....
                 char* args[] = {"ldid", "-S", path, NULL};
-				ASSERT(execBinary(jbroot("/basebin/ldid"), args) == 0);
+				int status = execBinary(jbroot("/basebin/ldid"), args);
+				if(status != 0) {
+					fprintf(stderr, "ldid %s failed: %d\n", rootfs(path), status);
+					g_sign_failed = true;
+				}
 			}
 			
 			if(strncmp(rootfs(path), "/Applications/", sizeof("/Applications/")-1) != 0)
 			{
 				char* args[] = {"fastPathSign", path, NULL};
-				ASSERT(execBinary(jbroot("/basebin/fastPathSign"), args) == 0);
+				int status = execBinary(jbroot("/basebin/fastPathSign"), args);
+				if(status != 0) {
+					fprintf(stderr, "sign %s failed: %d\n", rootfs(path), status);
+					g_sign_failed = true;
+				}
 			}
 
             char dpath[PATH_MAX];
@@ -261,4 +281,6 @@ void init_dpkg_hook()
 	};
 	struct mach_header_64* header = _dyld_get_prog_image_header();
 	rebind_symbols_image((void*)header, _dyld_get_image_slide(header), rebindings, sizeof(rebindings)/sizeof(rebindings[0]));
+
+	atexit(sign_check);
 }
