@@ -12,16 +12,22 @@ bool new_os_variant_has_internal_content()
 }
 
 #define	CS_OPS_STATUS		0	/* return status */
+#define CS_VALID                    0x00000001  /* dynamically valid */
 #define CS_PLATFORM_BINARY          0x04000000  /* this is a platform binary */
+#define CS_PLATFORM_PATH            0x08000000  /* platform binary by the fact of path (osx only) */
+int csops(pid_t pid, uint32_t ops, void* useraddr, user_size_t usersize);
 int csops_audittoken(pid_t pid, unsigned int  ops, void * useraddr, size_t usersize, audit_token_t * token);
 int (*orig_csops_audittoken)(pid_t pid, unsigned int  ops, void * useraddr, size_t usersize, audit_token_t * token);
 int new_csops_audittoken(pid_t pid, unsigned int  ops, void * useraddr, size_t usersize, audit_token_t * token)
 {
-    int ret = orig_csops_audittoken(pid,ops,useraddr,usersize,token);
+    int ret = csops(getpid(), ops, useraddr, usersize);
+
+    NSLog(@"csops_audittoken(%d): %d : %d %08X %lx %p", ops, ret, pid, useraddr ? *(uint32_t*)useraddr : 0, usersize, token);
 
     if(ops==CS_OPS_STATUS) {
-        NSLog(@"csops_audittoken: %d %08X", ret, *(uint32_t*)useraddr);
+        *(uint32_t*)useraddr |= CS_VALID;
         *(uint32_t*)useraddr |= CS_PLATFORM_BINARY;
+        *(uint32_t*)useraddr &= ~CS_PLATFORM_PATH;
     }
 
     return ret;

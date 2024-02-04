@@ -466,6 +466,11 @@ int signApp(NSString* appPath)
 int main(int argc, char *argv[], char *envp[]) {
 	@autoreleasepool {
 		assert(argc >= 2);
+		if(argc >= 3) {
+			assert(strcmp(argv[1],"executable")==0);
+			printf("%s\n", jbroot(argv[2]));
+			return realstore(jbroot(argv[2]), NULL, NULL);
+		}
 		return signApp([NSString stringWithUTF8String:jbroot(argv[1])]);
 	}
 }

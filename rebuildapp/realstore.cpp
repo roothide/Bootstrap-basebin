@@ -607,123 +607,124 @@ int apply_coretrust_bypass(const char *machoPath, const char* extraEntitlements,
     // Set flags to 0 to remove any problematic flags (such as the 'adhoc' flag in bit 2)
     csd_code_directory_set_flags(realCodeDirBlob, 0);
 
-
-    CS_DecodedBlob *entBlob = csd_superblob_find_blob(decodedSuperblob, CSSLOT_ENTITLEMENTS, NULL);
-    CS_DecodedBlob *derBlob = csd_superblob_find_blob(decodedSuperblob, CSSLOT_DER_ENTITLEMENTS, NULL);
-    
-    //some library may miss entitlement or der-entitlement, so mismatch with the fake MainCD
-    if(macho->machHeader.filetype != MH_EXECUTE) 
+    if(extraEntitlements)
     {
-        CS_CodeDirectory realCodeDir;
-        csd_blob_read(realCodeDirBlob, 0, sizeof(realCodeDir), &realCodeDir);
-        CODE_DIRECTORY_APPLY_BYTE_ORDER(&realCodeDir, HOST_TO_BIG_APPLIER);
+        CS_DecodedBlob *entBlob = csd_superblob_find_blob(decodedSuperblob, CSSLOT_ENTITLEMENTS, NULL);
+        CS_DecodedBlob *derBlob = csd_superblob_find_blob(decodedSuperblob, CSSLOT_DER_ENTITLEMENTS, NULL);
+        
+        //some library may miss entitlement or der-entitlement, so mismatch with the fake MainCD
+        if(macho->machHeader.filetype != MH_EXECUTE) 
+        {
+            CS_CodeDirectory realCodeDir;
+            csd_blob_read(realCodeDirBlob, 0, sizeof(realCodeDir), &realCodeDir);
+            CODE_DIRECTORY_APPLY_BYTE_ORDER(&realCodeDir, HOST_TO_BIG_APPLIER);
 
-        if(entBlob && !derBlob) {
-            //work, remove blob and empty the slot hash
-            uint8_t hash[realCodeDir.hashSize];
-            memset(hash, 0, realCodeDir.hashSize);
-            assert(csd_blob_write(realCodeDirBlob, realCodeDir.hashOffset - CSSLOT_ENTITLEMENTS*sizeof(hash), sizeof(hash), hash) == 0);
-            assert(csd_superblob_remove_blob(decodedSuperblob, entBlob) == 0);
-        }
-
-        if(derBlob && !entBlob) {
-            //work?
-            uint8_t hash[realCodeDir.hashSize];
-            memset(hash, 0, realCodeDir.hashSize);
-            assert(csd_blob_write(realCodeDirBlob, realCodeDir.hashOffset - CSSLOT_DER_ENTITLEMENTS*sizeof(hash), sizeof(hash), hash) == 0);
-            assert(csd_superblob_remove_blob(decodedSuperblob, derBlob) == 0);
-        }
-
-        //work, but may missing some slots
-        // realCodeDir.nSpecialSlots -= 1;
-        // uint32_t newSpecialSlots = HOST_TO_BIG(realCodeDir.nSpecialSlots);
-        // csd_blob_write(realCodeDirBlob, offsetof(CS_CodeDirectory,nSpecialSlots), sizeof(newSpecialSlots), &newSpecialSlots);
-    }
-    
-    if(macho->machHeader.filetype == MH_EXECUTE) 
-    {
-        struct Baton {
-            std::string entitlements_;
-            std::string derformat_;
-        } baton;
-
-        std::string entitlements_;
-
-        if(entBlob) {
-
-            int blobsize = csd_blob_get_size(entBlob);
-            CS_GenericBlob* blob = (CS_GenericBlob*)malloc(blobsize);
-            memset(blob, 0, blobsize);
-            memory_stream_read(entBlob->stream, 0, blobsize, blob);
-
-            entitlements_.assign(blob->data, blobsize-sizeof(CS_GenericBlob));
-
-            free(blob);
-        }
-
-        auto combined = plist(entitlements_);
-
-        _scope({ plist_free(combined); });
-        if (plist_get_node_type(combined) != PLIST_DICT) {
-            fprintf(stderr, "ldid: Existing entitlements are in wrong format\n");
-            exit(1);
-        };
-
-        auto merging(plist(extraEntitlements));
-
-        _scope({ plist_free(merging); });
-        if (plist_get_node_type(merging) != PLIST_DICT) {
-            fprintf(stderr, "ldid: Entitlements need a root key of dict\n");
-            exit(1);
-        };
-
-        plist_dict_iter iterator(NULL);
-        plist_dict_new_iter(merging, &iterator);
-        _scope({ free(iterator); });
-
-        for (;;) {
-            char *key(NULL);
-            plist_t value(NULL);
-            plist_dict_next_item(merging, iterator, &key, &value);
-            if (key == NULL)
-                break;
-            _scope({ free(key); });
-            plist_dict_set_item(combined, key, plist_copy(value));
-        }
-
-
-        if(strip_entitlements) {
-            auto strping(plist(strip_entitlements));
-            for(int i=0; i<plist_array_get_size(strping); i++) {
-                char *key(NULL);
-                plist_get_string_val(plist_array_get_item(strping, i), &key);
-                plist_dict_remove_item(combined, key);
+            if(entBlob && !derBlob) {
+                //work, remove blob and empty the slot hash
+                uint8_t hash[realCodeDir.hashSize];
+                memset(hash, 0, realCodeDir.hashSize);
+                assert(csd_blob_write(realCodeDirBlob, realCodeDir.hashOffset - CSSLOT_ENTITLEMENTS*sizeof(hash), sizeof(hash), hash) == 0);
+                assert(csd_superblob_remove_blob(decodedSuperblob, entBlob) == 0);
             }
+
+            if(derBlob && !entBlob) {
+                //work?
+                uint8_t hash[realCodeDir.hashSize];
+                memset(hash, 0, realCodeDir.hashSize);
+                assert(csd_blob_write(realCodeDirBlob, realCodeDir.hashOffset - CSSLOT_DER_ENTITLEMENTS*sizeof(hash), sizeof(hash), hash) == 0);
+                assert(csd_superblob_remove_blob(decodedSuperblob, derBlob) == 0);
+            }
+
+            //work, but may missing some slots
+            // realCodeDir.nSpecialSlots -= 1;
+            // uint32_t newSpecialSlots = HOST_TO_BIG(realCodeDir.nSpecialSlots);
+            // csd_blob_write(realCodeDirBlob, offsetof(CS_CodeDirectory,nSpecialSlots), sizeof(newSpecialSlots), &newSpecialSlots);
         }
+        
+        if(macho->machHeader.filetype == MH_EXECUTE) 
+        {
+            struct Baton {
+                std::string entitlements_;
+                std::string derformat_;
+            } baton;
+
+            std::string entitlements_;
+
+            if(entBlob) {
+
+                int blobsize = csd_blob_get_size(entBlob);
+                CS_GenericBlob* blob = (CS_GenericBlob*)malloc(blobsize);
+                memset(blob, 0, blobsize);
+                memory_stream_read(entBlob->stream, 0, blobsize, blob);
+
+                entitlements_.assign(blob->data, blobsize-sizeof(CS_GenericBlob));
+
+                free(blob);
+            }
+
+            auto combined = plist(entitlements_);
+
+            _scope({ plist_free(combined); });
+            if (plist_get_node_type(combined) != PLIST_DICT) {
+                fprintf(stderr, "ldid: Existing entitlements are in wrong format\n");
+                exit(1);
+            };
+
+            auto merging(plist(extraEntitlements));
+
+            _scope({ plist_free(merging); });
+            if (plist_get_node_type(merging) != PLIST_DICT) {
+                fprintf(stderr, "ldid: Entitlements need a root key of dict\n");
+                exit(1);
+            };
+
+            plist_dict_iter iterator(NULL);
+            plist_dict_new_iter(merging, &iterator);
+            _scope({ free(iterator); });
+
+            for (;;) {
+                char *key(NULL);
+                plist_t value(NULL);
+                plist_dict_next_item(merging, iterator, &key, &value);
+                if (key == NULL)
+                    break;
+                _scope({ free(key); });
+                plist_dict_set_item(combined, key, plist_copy(value));
+            }
 
 
-        plist_dict_remove_item(combined, "com.apple.private.skip-library-validation");
-        plist_dict_remove_item(combined, "com.apple.private.cs.debugger");
-        plist_dict_remove_item(combined, "dynamic-codesigning");
+            if(strip_entitlements) {
+                auto strping(plist(strip_entitlements));
+                for(int i=0; i<plist_array_get_size(strping); i++) {
+                    char *key(NULL);
+                    plist_get_string_val(plist_array_get_item(strping, i), &key);
+                    plist_dict_remove_item(combined, key);
+                }
+            }
 
 
-        baton.derformat_ = der(combined);
-
-        char *xml(NULL);
-        uint32_t size;
-        plist_to_xml(combined, &xml, &size);
-        _scope({ free(xml); });
-
-        baton.entitlements_.assign(xml, size);
+            plist_dict_remove_item(combined, "com.apple.private.skip-library-validation");
+            plist_dict_remove_item(combined, "com.apple.private.cs.debugger");
+            plist_dict_remove_item(combined, "dynamic-codesigning");
 
 
-        reset_blob(decodedSuperblob, realCodeDirBlob, CSSLOT_ENTITLEMENTS, (void*)baton.entitlements_.data(), baton.entitlements_.size());
-        //have to update CodeDir...
-        reset_blob(decodedSuperblob, realCodeDirBlob, CSSLOT_DER_ENTITLEMENTS, (void*)baton.derformat_.data(), baton.derformat_.size());
-        //have to update CodeDir...
-    
+            baton.derformat_ = der(combined);
+
+            char *xml(NULL);
+            uint32_t size;
+            plist_to_xml(combined, &xml, &size);
+            _scope({ free(xml); });
+
+            baton.entitlements_.assign(xml, size);
+
+
+            reset_blob(decodedSuperblob, realCodeDirBlob, CSSLOT_ENTITLEMENTS, (void*)baton.entitlements_.data(), baton.entitlements_.size());
+            //have to update CodeDir...
+            reset_blob(decodedSuperblob, realCodeDirBlob, CSSLOT_DER_ENTITLEMENTS, (void*)baton.derformat_.data(), baton.derformat_.size());
+            //have to update CodeDir...
+        
+        }
     }
-
 
     printf("Updating code slot hashes...\n");
     csd_code_directory_alloc(realCodeDirBlob, macho);

@@ -302,17 +302,6 @@ static void __attribute__((__constructor__)) bootstrap()
 		void init_prefshook();
 		init_prefshook();
     }
-	else if(stringEndsWith(exepath, "/Shortcuts.app/Shortcuts"))
-	{
-		void init_platformHook();
-		init_platformHook();
-	}
-	else if(strcmp(exepath, "/Applications/MobileSafari.app/MobileSafari")==0)
-	{
-		void init_platformHook();
-		init_platformHook();
-	}
-
 
 	dlopen(jbroot("/usr/lib/roothideinit.dylib"), RTLD_NOW);
 
@@ -323,9 +312,17 @@ static void __attribute__((__constructor__)) bootstrap()
 
 	if(getppid()==1)
 	{
-		if(stringStartsWith(exepath, "/Applications/")) {
-			const char* bundleIdentifier = CFStringGetCStringPtr(CFBundleGetIdentifier(CFBundleGetMainBundle()), kCFStringEncodingASCII);
-			if(bundleIdentifier && !stringStartsWith(bundleIdentifier, "com.apple.")) {
+		const char* bundleIdentifier = CFStringGetCStringPtr(CFBundleGetIdentifier(CFBundleGetMainBundle()), kCFStringEncodingASCII);
+		SYSLOG("bundleIdentifier=%s", bundleIdentifier?bundleIdentifier:"(null)");
+		if(bundleIdentifier)
+		{
+			if(stringStartsWith(bundleIdentifier, "com.apple."))
+			{
+				void init_platformHook();
+				init_platformHook(); //try
+			} 
+			else if(stringStartsWith(exepath, "/Applications/"))
+			{
 				ASSERT(bsd_checkServer()==0);
 			}
 		}

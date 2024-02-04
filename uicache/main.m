@@ -317,7 +317,7 @@ NSDictionary *constructEnvironmentVariablesForContainerPath(NSString *mainBundle
 
 	if([NSFileManager.defaultManager fileExistsAtPath:[mainBundlePath stringByAppendingString:@"/../_TrollStore"]]) {
 		using_jbroot = NO;
-	} else if(![NSFileManager.defaultManager fileExistsAtPath:[mainBundlePath stringByAppendingString:@".jbroot"]]) {
+	} else if(![NSFileManager.defaultManager fileExistsAtPath:[mainBundlePath stringByAppendingPathComponent:@".jbroot"]]) {
 		using_jbroot = NO;
 	}
 
@@ -394,6 +394,9 @@ NSArray* blockedAppPlugins = @[
     @"com.tigisoftware.Filza.Sharing",
 ];
 
+NSArray* patchRequiredAppPlugins = @[
+    @"com.apple.shortcuts.Run-Workflow",
+];
 
 int execBinary(const char* path, char** argv)
 {
@@ -583,9 +586,9 @@ void registerPath(NSString *path, BOOL forceSystem)
 
 		if(requiredRebuild)
 		{
-			//NSLog(@"patch macho: %@", [path stringByAppendingPathComponent:executableName]);
+			//NSLog(@"patch macho: %@", appExecutablePath);
 			int patch_app_exe(const char* file);
-			assert(patch_app_exe([path stringByAppendingPathComponent:executableName].UTF8String)==0);
+			assert(patch_app_exe(appExecutablePath.UTF8String)==0);
 
 			char* argv[] = {"/basebin/rebuildapp", (char*)rootfs(path).UTF8String, NULL};
 			assert(execBinary(jbroot(argv[0]), argv) == 0);
@@ -704,6 +707,7 @@ void registerPath(NSString *path, BOOL forceSystem)
 
 		if([blockedAppPlugins containsObject:pluginBundleID]) continue;
 
+
 		NSMutableDictionary *pluginDict = [NSMutableDictionary dictionary];
 
 		// Add entitlements
@@ -712,6 +716,77 @@ void registerPath(NSString *path, BOOL forceSystem)
 		NSDictionary *pluginEntitlements = dumpEntitlementsFromBinaryAtPath(pluginExecutablePath);
 		if (pluginEntitlements) {
 			pluginDict[@"Entitlements"] = pluginEntitlements;
+		}
+
+		//try
+		unlink([pluginPath stringByAppendingPathComponent:@".preload"].UTF8String);
+		unlink([pluginPath stringByAppendingPathComponent:@".prelib"].UTF8String);
+		unlink([pluginPath stringByAppendingPathComponent:@".jbroot"].UTF8String);
+
+		NSString* rebuildFile = [pluginPath stringByAppendingPathComponent:@".rebuild"];
+			
+		if(jbrootexists && [patchRequiredAppPlugins containsObject:pluginBundleID] && pluginExecutablePath && pluginExecutablePath.length)
+		{
+			NSLog(@"patch app plugin: %@ %@", pluginBundleID, pluginExecutablePath);
+			[NSFileManager.defaultManager copyItemAtPath:jbrootpath toPath:[pluginPath stringByAppendingPathComponent:@".jbroot"] error:nil];
+
+			BOOL requiredRebuild = NO;
+			NSMutableDictionary* rebuildStatus = [NSMutableDictionary dictionaryWithContentsOfFile:rebuildFile];
+
+			struct stat st={0};
+			if(stat(appExecutablePath.fileSystemRepresentation, &st) == 0)
+			{
+				requiredRebuild = YES;
+
+				if(rebuildStatus 
+					//dev may change after reboot// && [rebuildStatus[@"st_dev"] longValue]==st.st_dev
+					&& [rebuildStatus[@"st_ino"] unsignedLongLongValue]==st.st_ino
+					&& [rebuildStatus[@"st_mtime"] longValue]==st.st_mtimespec.tv_sec 
+					&& [rebuildStatus[@"st_mtimensec"] longValue]==st.st_mtimespec.tv_nsec) {
+					requiredRebuild = NO;
+				} else {
+					// NSLog(@"rebuild %ld,%d,%llu,%llu / %ld:%ld %ld:%ld", 
+					// [rebuildStatus[@"st_dev"] longValue], st.st_dev
+					// , [rebuildStatus[@"st_ino"] unsignedLongLongValue], st.st_ino
+					// , [rebuildStatus[@"st_mtime"] longValue], st.st_mtimespec.tv_sec 
+					// , [rebuildStatus[@"st_mtimensec"] longValue], st.st_mtimespec.tv_nsec);
+				}
+			}
+
+			if(!rebuildStatus) rebuildStatus = [NSMutableDictionary new];
+
+			if(requiredRebuild)
+			{
+				//NSLog(@"patch macho: %@", pluginExecutablePath);
+				int patch_app_exe(const char* file);
+				assert(patch_app_exe(pluginExecutablePath.UTF8String)==0);
+
+				char* argv[] = {"/basebin/rebuildapp", "executable", (char*)rootfs(pluginExecutablePath).UTF8String, NULL};
+				assert(execBinary(jbroot(argv[0]), argv) == 0);
+
+				assert(stat(appExecutablePath.fileSystemRepresentation, &st) == 0); //update mtime
+
+				[rebuildStatus addEntriesFromDictionary:@{
+					@"st_dev":@(st.st_dev), 
+					@"st_ino":@(st.st_ino), 
+					@"st_mtime":@(st.st_mtimespec.tv_sec), 
+					@"st_mtimensec":@(st.st_mtimespec.tv_nsec),
+					@"sb_token":@(sbtoken)
+				}];
+			}
+
+			[rebuildStatus addEntriesFromDictionary:@{@"sb_token":@(sbtoken)}];
+			assert([rebuildStatus writeToFile:rebuildFile atomically:YES]);
+
+			// NSString* newExecutableName = @".preload";
+			// appInfoPlist[@"CFBundleExecutable"] = newExecutableName;
+
+			link(jbroot("/basebin/preload"), [pluginPath stringByAppendingPathComponent:@".preload"].UTF8String);
+			link(jbroot("/basebin/preload.dylib"), [pluginPath stringByAppendingPathComponent:@".prelib"].UTF8String);
+		}
+		else
+		{
+			unlink(rebuildFile.UTF8String);
 		}
 
 		// Misc
