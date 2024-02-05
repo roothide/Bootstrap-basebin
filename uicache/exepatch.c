@@ -387,7 +387,7 @@ int patch_macho(int fd, struct mach_header_64* header)
             uint8_t  n_type = symbols64[i].n_type;
             
             int ordinal= GET_LIBRARY_ORDINAL(n_desc);
-            assert(ordinal > 0);
+            //assert(ordinal > 0); ordinal=0:BIND_SPECIAL_DYLIB_SELF
             
             // Handle defined weak def symbols which need to get a special ordinal
             if ( ((n_type & N_TYPE) == N_SECT) && ((n_type & N_EXT) != 0) && ((n_desc & N_WEAK_DEF) != 0) )

@@ -312,11 +312,17 @@ static void __attribute__((__constructor__)) bootstrap()
 
 	if(getppid()==1)
 	{
-		const char* bundleIdentifier = CFStringGetCStringPtr(CFBundleGetIdentifier(CFBundleGetMainBundle()), kCFStringEncodingASCII);
+		const char* bundleIdentifier = NULL;
+		CFBundleRef mainBundle = CFBundleGetMainBundle();
+		if(mainBundle) {
+			CFStringRef cfBundleIdentifier = CFBundleGetIdentifier(mainBundle);
+			if(cfBundleIdentifier)
+				bundleIdentifier = CFStringGetCStringPtr(cfBundleIdentifier, kCFStringEncodingASCII);
+		}
 		SYSLOG("bundleIdentifier=%s", bundleIdentifier?bundleIdentifier:"(null)");
 		if(bundleIdentifier)
 		{
-			if(stringStartsWith(bundleIdentifier, "com.apple."))
+			if(stringStartsWith(bundleIdentifier, "com.apple.") && strcmp(bundleIdentifier, "com.apple.springboard")!=0)
 			{
 				void init_platformHook();
 				init_platformHook(); //try

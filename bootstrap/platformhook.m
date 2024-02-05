@@ -20,7 +20,8 @@ int csops_audittoken(pid_t pid, unsigned int  ops, void * useraddr, size_t users
 int (*orig_csops_audittoken)(pid_t pid, unsigned int  ops, void * useraddr, size_t usersize, audit_token_t * token);
 int new_csops_audittoken(pid_t pid, unsigned int  ops, void * useraddr, size_t usersize, audit_token_t * token)
 {
-    int ret = csops(getpid(), ops, useraddr, usersize);
+    int ret = orig_csops_audittoken(pid, ops, useraddr, usersize, token);
+    if(ret==-1) ret = csops(getpid(), ops, useraddr, usersize);
 
     NSLog(@"csops_audittoken(%d): %d : %d %08X %lx %p", ops, ret, pid, useraddr ? *(uint32_t*)useraddr : 0, usersize, token);
 
