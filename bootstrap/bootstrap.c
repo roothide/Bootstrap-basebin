@@ -6,6 +6,7 @@
 #include <string.h>
 #include <util.h>
 #include <sys/stat.h>
+#include <sys/param.h>
 #include <sys/syslimits.h>
 #include <spawn.h>
 #include <paths.h>
@@ -245,6 +246,134 @@ char* excludeProcesses[] = {
 	"/usr/bin/zsh",
 };
 
+//export for PatchLoader
+__attribute__((visibility("default"))) int PLRequiredJIT() {
+	return requireJIT();
+}
+
+#include <pwd.h>
+#include <libgen.h>
+#include <stdio.h>
+
+#define CONTAINER_PATH_PREFIX   "/private/var/mobile/Containers/Data/" // +/Application,PluginKitPlugin,InternalDaemon
+
+void redirectEnvPath(const char* rootdir)
+{
+    // char executablePath[PATH_MAX]={0};
+    // uint32_t bufsize=sizeof(executablePath);
+    // if(_NSGetExecutablePath(executablePath, &bufsize)==0 && strstr(executablePath,"testbin2"))
+    //     printf("redirectNSHomeDir %s, %s\n\n", rootdir, getenv("CFFIXED_USER_HOME"));
+
+    //for now libSystem should be initlized, container should be set.
+
+    char* homedir = NULL;
+
+/* 
+there is a bug in NSHomeDirectory,
+if a containerized root process changes its uid/gid, 
+NSHomeDirectory will return a home directory that it cannot access. (exclude NSTemporaryDirectory)
+We just keep this bug:
+*/
+    if(!issetugid()) // issetugid() should always be false at this time. (but how about persona-mgmt? idk)
+    {
+        homedir = getenv("CFFIXED_USER_HOME");
+        if(homedir)
+        {
+            if(strncmp(homedir, CONTAINER_PATH_PREFIX, sizeof(CONTAINER_PATH_PREFIX)-1) == 0)
+            {
+                return; //containerized
+            }
+            else
+            {
+                homedir = NULL; //from parent, drop it
+            }
+        }
+    }
+
+    if(!homedir) {
+        struct passwd* pwd = getpwuid(geteuid());
+        if(pwd && pwd->pw_dir) {
+            homedir = pwd->pw_dir;
+        }
+    }
+
+    // if(!homedir) {
+    //     //CFCopyHomeDirectoryURL does, but not for NSHomeDirectory
+    //     homedir = getenv("HOME");
+    // }
+
+    if(!homedir) {
+        homedir = "/var/empty";
+    }
+
+    char newhome[PATH_MAX]={0};
+    snprintf(newhome,sizeof(newhome),"%s/%s",rootdir,homedir);
+    setenv("CFFIXED_USER_HOME", newhome, 1);
+}
+
+void redirectDirs(const char* rootdir)
+{
+    do { // only for jb process because some system process may crash when chdir
+        
+        char executablePath[PATH_MAX]={0};
+        uint32_t bufsize=sizeof(executablePath);
+        if(_NSGetExecutablePath(executablePath, &bufsize) != 0)
+            break;
+        
+        char realexepath[PATH_MAX];
+        if(!realpath(executablePath, realexepath))
+            break;
+            
+        char realjbroot[PATH_MAX];
+        if(!realpath(rootdir, realjbroot))
+            break;
+        
+        if(realjbroot[strlen(realjbroot)] != '/')
+            strcat(realjbroot, "/");
+        
+        if(strncmp(realexepath, realjbroot, strlen(realjbroot)) != 0)
+            break;
+    
+        pid_t ppid = getppid();
+        assert(ppid > 0);
+
+		bool isAppleApp=false;
+		if(ppid == 1) {
+			const char* bundleIdentifier = NULL;
+			CFBundleRef mainBundle = CFBundleGetMainBundle();
+			if(mainBundle) {
+				CFStringRef cfBundleIdentifier = CFBundleGetIdentifier(mainBundle);
+				if(cfBundleIdentifier)
+					bundleIdentifier = CFStringGetCStringPtr(cfBundleIdentifier, kCFStringEncodingASCII);
+			}
+			SYSLOG("bundleIdentifier=%s", bundleIdentifier?bundleIdentifier:"(null)");
+			if(bundleIdentifier)
+			{
+				if(stringStartsWith(bundleIdentifier, "com.apple."))
+				{
+					isAppleApp = true;
+				}
+			}
+		}
+
+		if(!isAppleApp) {
+			//for jailbroken binaries
+			redirectEnvPath(rootdir);
+		}
+
+        if(ppid == 1) {
+			char pwd[PATH_MAX];
+			if(getcwd(pwd, sizeof(pwd)) == NULL)
+				break;
+			if(strcmp(pwd, "/") != 0)
+				break;
+		
+			assert(chdir(rootdir)==0);
+		}
+        
+    } while(0);
+}
+
 // const char* bootstrapath=NULL;
 static void __attribute__((__constructor__)) bootstrap()
 {
@@ -254,11 +383,14 @@ static void __attribute__((__constructor__)) bootstrap()
 
 	const char* exepath = rootfs(executablePath);
 
-    SYSLOG("bootstrap....%s\n", exepath);
+    // SYSLOG("bootstrap....%s\n", exepath);
+	// SYSLOG("HOME=%s\n%s\n%s", getenv("HOME"), getenv("CFFIXED_USER_HOME"), getenv("TMPDIR"));
 	
 	// struct dl_info di={0};
     // dladdr((void*)bootstrap, &di);
 	// bootstrapath = strdup(di.dli_fname);
+
+	redirectDirs(jbroot("/"));
 
     const char* preload = getenv("DYLD_INSERT_LIBRARIES");
     if(!preload || !strstr(preload,"/basebin/bootstrap.dylib"))
