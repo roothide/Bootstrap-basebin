@@ -26,33 +26,35 @@ void sign_check(void) {
 	if(g_sign_failed) _exit(-1);
 }
 
-void ensure_jbroot_symlink(const char* dirpath)
+void ensure_jbroot_symlink(const char* filepath)
 {
-	//JBLogDebug("ensure_jbroot_symlink: %s", dirpath);
+	// JBLogDebug("ensure_jbroot_symlink: %s", filepath);
 
-	if(access(dirpath, F_OK) !=0 )
+	if(access(filepath, F_OK) !=0 )
 		return;
 
+	char realfpath[PATH_MAX];
+	ASSERT(realpath(filepath, realfpath) != NULL);
+
 	char realdirpath[PATH_MAX];
-	ASSERT(realpath(dirpath, realdirpath) != NULL);
+	dirname_r(realfpath, realdirpath);
 	if(realdirpath[strlen(realdirpath)] != '/') strcat(realdirpath, "/");
 
 	char jbrootpath[PATH_MAX];
-	char jbrootpath2[PATH_MAX];
-	snprintf(jbrootpath, sizeof(jbrootpath), "/private/var/containers/Bundle/Application/.jbroot-%016llX/", jbrand());
-	snprintf(jbrootpath2, sizeof(jbrootpath2), "/private/var/mobile/Containers/Shared/AppGroup/.jbroot-%016llX/", jbrand());
+	ASSERT(realpath(jbroot("/"), jbrootpath) != NULL);
+	if(jbrootpath[strlen(jbrootpath)] != '/') strcat(jbrootpath, "/");
+
+	// JBLogDebug("%s : %s", realdirpath, jbrootpath);
 
 	if(strncmp(realdirpath, jbrootpath, strlen(jbrootpath)) != 0
-		&& strncmp(realdirpath, jbrootpath2, strlen(jbrootpath2)) != 0 
-		&& strncmp(realdirpath, "/private/var/db/", sizeof("/private/var/db/")-1) !=0
-		)
+		&& strncmp(realdirpath, "/private/var/db/", sizeof("/private/var/db/")-1) !=0 ) 
 		return;
 
 	struct stat jbrootst;
 	ASSERT(stat(jbrootpath, &jbrootst) == 0);
 	
 	char sympath[PATH_MAX];
-	snprintf(sympath,sizeof(sympath),"%s/.jbroot", dirpath);
+	snprintf(sympath,sizeof(sympath),"%s/.jbroot", realdirpath);
 
 	struct stat symst;
 	if(lstat(sympath, &symst)==0)
@@ -75,12 +77,11 @@ void ensure_jbroot_symlink(const char* dirpath)
 	}
 
 	if(symlink(jbrootpath, sympath) ==0 ) {
-		//JBLogError("update .jbroot @ %s\n", sympath);
+		// JBLogError("update .jbroot @ %s\n", sympath);
 	} else {
-		//JBLogError("symlink error @ %s\n", sympath);
+		// JBLogError("symlink error @ %s\n", sympath);
 	}
 }
-
 
 void machoEnumerateArchs(FILE* machoFile, bool (^archEnumBlock)(struct mach_header_64* header, uint32_t offset))
 {
@@ -212,8 +213,7 @@ int autosign(char* path)
 				}
 			}
 
-            char dpath[PATH_MAX];
-            ensure_jbroot_symlink(dirname_r(path,dpath));
+            ensure_jbroot_symlink(path);
         }
 
         fclose(fp);
