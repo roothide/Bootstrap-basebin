@@ -46,8 +46,7 @@ void ensure_jbroot_symlink(const char* filepath)
 
 	// JBLogDebug("%s : %s", realdirpath, jbrootpath);
 
-	if(strncmp(realdirpath, jbrootpath, strlen(jbrootpath)) != 0
-		&& strncmp(realdirpath, "/private/var/db/", sizeof("/private/var/db/")-1) !=0 ) 
+	if(strncmp(realdirpath, jbrootpath, strlen(jbrootpath)) != 0)
 		return;
 
 	struct stat jbrootst;
