@@ -30,58 +30,17 @@
 #define BSD_REQ_DATA_KEY	"value"
 
 
-pid_t socket_get_pid(int sd)
-{
-	pid_t pid=-1;
-	socklen_t pidlen=sizeof(pid);
-	getsockopt(sd, 0, LOCAL_PEERPID, &pid, &pidlen);
-	return pid;
-}
-
-uid_t socket_get_uid(int sd)
-{
-	uid_t uid=-1; gid_t gid=-1;
-	getpeereid(sd, &uid, &gid);
-	return uid;
-}
-
-gid_t socket_get_gid(int sd)
-{
-	uid_t uid=-1; gid_t gid=-1;
-	getpeereid(sd, &uid, &gid);
-	return gid;
-}
-
-int socket_get_audit_token(int sd, audit_token_t* audit_token)
-{
-	socklen_t len = sizeof(*audit_token);
-	int ret = getsockopt(sd, SOL_LOCAL, LOCAL_PEERTOKEN, &audit_token, &len);
-	return ret;
-}
+struct sockaddr_in g_server_addr = {0};
 
 
-
-int recvbuf(int sd, void* buffer, int bufsize)
+int recvbuf(int sd, struct sockaddr_in* addr, void* buffer, int bufsize)
 {
 	ASSERT(bufsize <= 4096); //net.local.stream.recvspace?
 
-    struct iovec   iov[1];
-    iov[0].iov_base = buffer;
-    iov[0].iov_len = bufsize;
-
-    struct msghdr   msg = {0};
-
-    msg.msg_name   = NULL;
-    msg.msg_namelen = 0;
-    msg.msg_iov    = iov;
-    msg.msg_iovlen = 1;
-
-    msg.msg_control        = NULL;
-    msg.msg_controllen     = 0;
-
-    int rlen = 0;
+    socklen_t addrlen = addr ? sizeof(*addr) : 0;
 	
-	while((rlen=recvmsg(sd, &msg, 0))<=0 && errno==EINTR){}; //may be interrupted by ptrace
+    int rlen;
+	while((rlen=recvfrom(sd,buffer,bufsize,MSG_WAITALL,(struct sockaddr *)addr, &addrlen))<=0 && errno==EINTR){}; //may be interrupted by ptrace
 	
 	NSLog(@"recvbuf %p %d %d, %s", buffer, bufsize, rlen, rlen>0?"":strerror(errno));
 	
@@ -90,56 +49,34 @@ int recvbuf(int sd, void* buffer, int bufsize)
 	return rlen;
 }
 
-int sendbuf(int sd, void* buffer, int bufsize)
+int sendbuf(int sd, struct sockaddr_in* addr, void* buffer, int bufsize)
 {
 	NSLog(@"sendbuf %d %p %d", sd, buffer, bufsize);
 
 	ASSERT(bufsize <= 4096); //net.local.stream.sendspace?
 
-    struct iovec   iov[1];
-    iov[0].iov_base = buffer;
-    iov[0].iov_len = bufsize;
-
-    struct msghdr   msg = {0};
-
-    msg.msg_name   = NULL;
-    msg.msg_namelen = 0;
-    msg.msg_iov    = iov;
-    msg.msg_iovlen = 1;
-
-    msg.msg_control        = NULL;
-    msg.msg_controllen     = 0;
-
-    int slen = sendmsg(sd, &msg, 0);
-	if(slen != bufsize) perror("sendmsg");
+    int slen = sendto(sd, buffer, bufsize, MSG_DONTWAIT, (struct sockaddr *)addr, addr ? sizeof(*addr) : 0);
+	if(slen != bufsize) perror("sendto");
 	
 	//slen=0 if server close unexcept //ASSERT(slen == bufsize);
 
 	return slen;
 }
 
-int reply(int socket, NSDictionary* msg)
+int reply(int socket, struct sockaddr_in* addr, NSDictionary* msg)
 {
 	NSLog(@"reply %d %@", socket, msg);
 
-    if(msg) {
-        NSData *data = [NSPropertyListSerialization dataWithPropertyList:msg format:NSPropertyListBinaryFormat_v1_0 options:0 error:nil];
-        ASSERT(data != nil);
-        
-        int slen = sendbuf(socket, (void*)data.bytes, data.length);
+	if(!msg) msg = @{};
 
-        // auto close here (async with main server)
-        NSLog(@"close client %d", socket);
-        close(socket);
+    NSData *data = [NSPropertyListSerialization dataWithPropertyList:msg format:NSPropertyListBinaryFormat_v1_0 options:0 error:nil];
+    ASSERT(data != nil);
+    
+    int slen = sendbuf(socket, addr, (void*)data.bytes, data.length);
 
-        if(slen != data.length)
-        {
-            return -1;
-        }
-    } else {
-        // auto close here (async with main server)
-        NSLog(@"close client %d", socket);
-        close(socket);
+    if(slen != data.length)
+    {
+        return -1;
     }
 
 	return 0;
@@ -149,7 +86,7 @@ NSDictionary* reponse(int socket)
 {
 	int bufsize = 4096;
 	void* buffer = malloc(bufsize);
-	int size = recvbuf(socket, buffer, bufsize);
+	int size = recvbuf(socket, &g_server_addr, buffer, bufsize);
 
 	NSDictionary* repMsg = nil;
 	if(size > 0) {
@@ -169,9 +106,9 @@ NSDictionary* reponse(int socket)
 int request(int socket, int reqId, NSDictionary* msg)
 {
 	NSDictionary* reqMsg = @{ 
-		@(BSD_REQ_ID_KEY) : @(reqId), 
-		@(BSD_REQ_PID_KEY) : @(getpid()), 
-		@(BSD_REQ_CHECK_KEY) : @(jbrand()), 
+		@(BSD_REQ_ID_KEY) : @(reqId),
+		@(BSD_REQ_PID_KEY) : @(getpid()),
+		@(BSD_REQ_CHECK_KEY) : @(jbrand()),
 		@(BSD_REQ_DATA_KEY) : msg ? msg : @{}
 	};
 
@@ -180,7 +117,7 @@ int request(int socket, int reqId, NSDictionary* msg)
 	//NSLog(@"err=%@", err);
 	ASSERT(data != nil);
 	
-	if(sendbuf(socket, (void*)data.bytes, data.length) != data.length)
+	if(sendbuf(socket, &g_server_addr, (void*)data.bytes, data.length) != data.length)
 	{
 		return -1;
 	}
@@ -197,12 +134,12 @@ int set_stop_server()
     return 0;
 }
 
-int run_ipc_server(int (*callback)(int socket, pid_t pid, int reqId, NSDictionary* msg))
+int run_ipc_server(int (*callback)(int socket, struct sockaddr_in* addr, pid_t pid, int reqId, NSDictionary* msg))
 {	
 	//unlink the old one
 	unlink(BSD_PORT_PATH);
 
- 	int sd = socket(AF_INET, SOCK_STREAM, 0);
+ 	int sd = socket(AF_INET, SOCK_DGRAM, 0);
 	if(sd < 0) {
 		perror("socket");
 		return 1;
@@ -245,13 +182,6 @@ int run_ipc_server(int (*callback)(int socket, pid_t pid, int reqId, NSDictionar
 	write(pd, &addr, addrlen);
 	close(pd);
 
-	//listen sockfd
-	if(listen(sd, 128) < 0) {
-		perror("listen");
-		close(sd);
-		return 1;
-	}
-
 	int bufsize = 4096;
 	void* buffer = malloc(bufsize);
 
@@ -259,18 +189,12 @@ int run_ipc_server(int (*callback)(int socket, pid_t pid, int reqId, NSDictionar
 	{
         if(server_stop_flag) break;
 
-		struct sockaddr_in addr;
-		socklen_t len = sizeof(addr);
-		int cd = accept(sd, (struct sockaddr*)&addr, &len);
-		if(cd < 0) {
-			perror("accept");
-			close(sd);
-			return 1;
-		}
+		int cd=sd;
+        struct sockaddr_in client_addr;
+		int size = recvbuf(cd, &client_addr, buffer, bufsize);
+        
+        NSLog(@"new client %d", cd);
 
-		NSLog(@"new client %d", cd);
-
-		int size = recvbuf(cd, buffer, bufsize);
 		if(size > 0) { @autoreleasepool {
 
             NSData* data = [NSData dataWithBytes:buffer length:size];
@@ -283,13 +207,12 @@ int run_ipc_server(int (*callback)(int socket, pid_t pid, int reqId, NSDictionar
             
             if(checkObj.unsignedLongLongValue == jbrand())
             {
-			    //close(cd) by reply()
-			    callback(cd, pidObj.integerValue, reqIdObj.integerValue, reqMsg);
+			    callback(cd, &client_addr, pidObj.integerValue, reqIdObj.integerValue, reqMsg);
             } else {
-                close(cd);
+				NSLog(@"unknown connection %d", cd);
             }
 		}} else {
-			close(cd);
+			NSLog(@"unknown connection %d", cd);
 		}
 	}
 
@@ -334,9 +257,9 @@ int check_conn(int sock)
     return 0;
 }
 
-int connect_to_server()
+int connect_to_server_timeout(int timeout)
 {
-	int sd = socket(AF_INET, SOCK_STREAM, 0);
+	int sd = socket(AF_INET, SOCK_DGRAM, 0);
 	if(sd < 0) {
 		perror("socket");
 		return -1;
@@ -344,11 +267,18 @@ int connect_to_server()
 
 	int option_value = 1; /* Set NOSIGPIPE to ON */
 	if (setsockopt(sd, SOL_SOCKET, SO_NOSIGPIPE, &option_value, sizeof (option_value)) < 0) {
-		perror ("setsockopt");
+		perror ("SO_NOSIGPIPE");
 		return -1;
 	}
-
-	struct sockaddr_in addr;
+    
+    struct timeval tv;
+	tv.tv_sec = timeout;
+	tv.tv_usec = 0;
+	if (setsockopt(sd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+		perror("SO_RCVTIMEO");
+		close(sd);
+		return -1;
+	}
 
 	int pd = open(BSD_PORT_PATH, O_RDONLY);
 	if(pd < 0) {
@@ -357,7 +287,7 @@ int connect_to_server()
 		return -1;
 	}
 
-	if(read(pd, &addr, sizeof(addr)) < sizeof(addr)) {
+	if(read(pd, &g_server_addr, sizeof(g_server_addr)) < sizeof(g_server_addr)) {
 		perror("read BSD_PORT_PATH");
 		close(sd);
 		return -1;
@@ -365,14 +295,10 @@ int connect_to_server()
 
 	close(pd);
 
-	int ret = connect(sd, (struct sockaddr*)&addr, sizeof(addr));
-	//may be interrupted by signal
-	if(ret<0 && (errno!=EINTR || check_conn(sd)!=0)) {
-		perror("connect");
-		close(sd);
-		return -1;
-	}
-
 	return sd;
 }
 
+int connect_to_server()
+{
+	return connect_to_server_timeout(5);
+}

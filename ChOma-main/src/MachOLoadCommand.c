@@ -1,6 +1,8 @@
 #include "MachOLoadCommand.h"
 #include "Util.h"
 
+#define LOG(...)
+
 char *load_command_to_string(int loadCommand) {
     switch (loadCommand) {
         case LC_SEGMENT:
@@ -177,11 +179,11 @@ int update_load_commands_for_coretrust_bypass(MachO *macho, CS_SuperBlob *superb
     uint64_t newVMSize = align_to_size(newSegmentSize, 0x4000);
 
     // Update the segment command
-    printf("Updating __LINKEDIT segment...\n");
+    LOG("Updating __LINKEDIT segment...\n");
     update_segment_command_64(macho, "__LINKEDIT", vmAddress, newVMSize, fileOffset, newSegmentSize);
 
     // Update the code signature load command
-    printf("Updating LC_CODE_SIGNATURE load command...\n");
+    LOG("Updating LC_CODE_SIGNATURE load command...\n");
     update_lc_code_signature(macho, sizeOfCodeSignature);
 
     return 0;

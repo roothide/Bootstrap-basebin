@@ -257,7 +257,7 @@ NSDictionary *constructGroupsContainersForEntitlements(NSDictionary *entitlement
 	return nil;
 }
 
-BOOL constructContainerizationForEntitlements(NSString* path, NSDictionary *entitlements, NSString** customContainerOut) {
+BOOL constructContainerizationForEntitlements(NSString* bundleId, NSString* path, NSDictionary *entitlements, NSString** customContainerOut) {
 
 	//container-required: valid true/false, as first order, will ignore no-container and no-sandbox
 	NSObject *containerRequired = entitlements[@"com.apple.private.security.container-required"];
@@ -281,9 +281,12 @@ BOOL constructContainerizationForEntitlements(NSString* path, NSDictionary *enti
 	if (noSandbox && [noSandbox isKindOfClass:[NSNumber class]]) {
 		if (noSandbox.boolValue) {
 
-			NSNumber*AppDataContainers = entitlements[@"com.apple.private.security.storage.AppDataContainers"];
-			if (AppDataContainers && [AppDataContainers isKindOfClass:[NSNumber class]]) {
-				if (AppDataContainers.boolValue) return YES; //hack way
+			if([bundleId hasPrefix:@"com.apple."]) //only hack for system apps, otherwise it may conflict with Patcher
+			{
+				NSNumber*AppDataContainers = entitlements[@"com.apple.private.security.storage.AppDataContainers"];
+				if (AppDataContainers && [AppDataContainers isKindOfClass:[NSNumber class]]) {
+					if (AppDataContainers.boolValue) return YES; //hack way
+				}
 			}
 
 			return NO;
@@ -392,6 +395,7 @@ NSArray* blockedURLSchemes = @[
 
 NSArray* blockedAppPlugins = @[
     @"com.tigisoftware.Filza.Sharing",
+	@"com.opa334.CraneApplication.CraneShortcuts",
 ];
 
 NSArray* patchRequiredAppPlugins = @[
@@ -520,22 +524,26 @@ void registerPath(NSString *path, BOOL forceSystem)
 
 	NSString *appExecutablePath = [path stringByAppendingPathComponent:appInfoPlist[@"CFBundleExecutable"]];
 
-	//NSLog(@"Info=%@", appInfoPlist);
-    NSMutableArray* urltypes = [appInfoPlist[@"CFBundleURLTypes"] mutableCopy];
-    for(int i=0; i<urltypes.count; i++) {
-       //NSLog(@"schemes=%@", urltypes[i][@"CFBundleURLSchemes"]);
-        
-        NSMutableArray* schemes = [urltypes[i][@"CFBundleURLSchemes"] mutableCopy];
-        [schemes removeObjectsInArray:blockedURLSchemes];
-        //NSLog(@"new schemes=%@", schemes);
+	BOOL allowURLSchemes = [NSFileManager.defaultManager fileExistsAtPath:jbroot(@"/var/mobile/.allow_url_schemes")];
 
-		if(![appBundleID isEqualToString:@"com.apple.Preferences"] && [schemes containsObject:@"prefs"])
-			[schemes removeObject:@"prefs"];
+	if(!allowURLSchemes)
+	{
+		//NSLog(@"Info=%@", appInfoPlist);
+		NSMutableArray* urltypes = [appInfoPlist[@"CFBundleURLTypes"] mutableCopy];
+		for(int i=0; i<urltypes.count; i++) {
+		//NSLog(@"schemes=%@", urltypes[i][@"CFBundleURLSchemes"]);
+			
+			NSMutableArray* schemes = [urltypes[i][@"CFBundleURLSchemes"] mutableCopy];
+			[schemes removeObjectsInArray:blockedURLSchemes];
+			//NSLog(@"new schemes=%@", schemes);
 
-        urltypes[i][@"CFBundleURLSchemes"] = schemes.copy;
-    }
-    appInfoPlist[@"CFBundleURLTypes"] = urltypes.copy;
+			if(![appBundleID isEqualToString:@"com.apple.Preferences"] && [schemes containsObject:@"prefs"])
+				[schemes removeObject:@"prefs"];
 
+			urltypes[i][@"CFBundleURLSchemes"] = schemes.copy;
+		}
+		appInfoPlist[@"CFBundleURLTypes"] = urltypes.copy;
+	}
 
     BOOL isAppleBundle = [appBundleID hasPrefix:@"com.apple."];
 
@@ -643,7 +651,7 @@ void registerPath(NSString *path, BOOL forceSystem)
 	dictToRegister[@"CompatibilityState"] = @0;
 
  	NSString* appDataContainerID = nil;
-	BOOL appContainerized = constructContainerizationForEntitlements(path, entitlements, &appDataContainerID);
+	BOOL appContainerized = constructContainerizationForEntitlements(appBundleID, path, entitlements, &appDataContainerID);
 	dictToRegister[@"IsContainerized"] = @(appContainerized);
 	if (appContainerized) {
 		MCMContainer *appContainer = [NSClassFromString(@"MCMAppDataContainer") containerWithIdentifier:appBundleID createIfNecessary:YES existed:nil error:nil];
@@ -705,7 +713,7 @@ void registerPath(NSString *path, BOOL forceSystem)
 
 		if (!pluginBundleID) continue;
 
-		if([blockedAppPlugins containsObject:pluginBundleID]) continue;
+		if(!allowURLSchemes && [blockedAppPlugins containsObject:pluginBundleID]) continue;
 
 
 		NSMutableDictionary *pluginDict = [NSMutableDictionary dictionary];
@@ -797,7 +805,7 @@ void registerPath(NSString *path, BOOL forceSystem)
 		pluginDict[@"CompatibilityState"] = @0;
 
 		NSString* pluginDataContainerID = nil;
-		BOOL pluginContainerized = constructContainerizationForEntitlements(pluginPath, pluginEntitlements, &pluginDataContainerID);
+		BOOL pluginContainerized = YES; //pkd required plugin to have sandbox data container; constructContainerizationForEntitlements(pluginPath, pluginEntitlements, &pluginDataContainerID);
 		pluginDict[@"IsContainerized"] = @(pluginContainerized);
 		if (pluginContainerized) {
 			/* a plugin may use app's container, but lsd still create plugin-bundle-id container for it */

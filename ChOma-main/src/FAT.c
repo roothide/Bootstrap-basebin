@@ -9,6 +9,8 @@
 #include "FileStream.h"
 #include "MemoryStream.h"
 
+#define LOG(...)
+
 int fat_read_at_offset(FAT *fat, uint64_t offset, size_t size, void *outBuf)
 {
     return memory_stream_read(fat->stream, offset, size, outBuf);
@@ -35,7 +37,7 @@ int fat_parse_slices(FAT *fat)
 
     // Check if the file is a FAT file
     if (fatHeader.magic == FAT_MAGIC || fatHeader.magic == FAT_MAGIC_64) {
-        printf("FAT header found! Magic: 0x%x.\n", fatHeader.magic);
+        LOG("FAT header found! Magic: 0x%x.\n", fatHeader.magic);
         bool is64 = fatHeader.magic == FAT_MAGIC_64;
 
         // Sanity check the number of machOs
@@ -103,7 +105,7 @@ int fat_parse_slices(FAT *fat)
         if (!singleSlice) return -1;
         fat->slices[0] = singleSlice;
     }
-    printf("Found %u MachO slices.\n", fat->slicesCount);
+    LOG("Found %u MachO slices.\n", fat->slicesCount);
     return 0;
 }
 
@@ -145,7 +147,7 @@ FAT *fat_init_from_memory_stream(MemoryStream *stream)
     if (fat_parse_slices(fat) != 0) goto fail;
 
     size_t size = memory_stream_get_size(fat->stream);
-    printf("File size 0x%zx bytes, MachO slice count %u.\n", size, fat->slicesCount);
+    LOG("File size 0x%zx bytes, MachO slice count %u.\n", size, fat->slicesCount);
     return fat;
 
 fail:

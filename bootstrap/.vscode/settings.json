@@ -34,6 +34,10 @@
         "__locale": "c",
         "locale": "c",
         "signal.h": "c",
-        "utsname.h": "c"
+        "utsname.h": "c",
+        "param.h": "c",
+        "pwd.h": "c",
+        "libproc.h": "c",
+        "libproc_private.h": "c"
     }
 }

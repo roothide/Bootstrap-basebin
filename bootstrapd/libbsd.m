@@ -124,7 +124,7 @@ int bsd_checkServer()
 {
 	int result = -1;
 
-	int sd = connect_to_server();
+	int sd = connect_to_server_timeout(2);
 	if(sd <= 0) return -1;
 	int req = request(sd, BSD_REQ_CHECK_SERVER, nil);
 	NSLog(@"request=%d", req);

@@ -345,9 +345,13 @@ int signApp(NSString* appPath)
 	// Due to how the new CT bug works, in order for data containers to work properly we need to add the
 	// com.apple.private.security.container-required=<bundle-identifier> entitlement to every binary inside a bundle
 	// For this we will want to first collect info about all the bundles in the app by seeking for Info.plist files and adding the ent to the main binary
-	enumerator = [[NSFileManager defaultManager] enumeratorAtURL:[NSURL fileURLWithPath:appPath] includingPropertiesForKeys:nil options:0 errorHandler:nil];
+	enumerator = [[NSFileManager defaultManager] enumeratorAtURL:[NSURL fileURLWithPath:appPath] includingPropertiesForKeys:@[NSURLIsRegularFileKey] options:0 errorHandler:nil];
 	while(fileURL = [enumerator nextObject])
 	{
+		NSNumber *isFile=nil;
+        [fileURL getResourceValue:&isFile forKey:NSURLIsRegularFileKey error:nil];
+        if (!isFile || ![isFile boolValue]) continue;
+
 		NSMutableDictionary* extraEntitlements = baseEntitlements.mutableCopy;
 
 		NSString *filePath = fileURL.path;
@@ -439,9 +443,13 @@ int signApp(NSString* appPath)
 	}
 
 
-	enumerator = [[NSFileManager defaultManager] enumeratorAtURL:[NSURL fileURLWithPath:appPath] includingPropertiesForKeys:nil options:0 errorHandler:nil];
+	enumerator = [[NSFileManager defaultManager] enumeratorAtURL:[NSURL fileURLWithPath:appPath] includingPropertiesForKeys:@[NSURLIsRegularFileKey] options:0 errorHandler:nil];
 	while(fileURL = [enumerator nextObject])
 	{
+		NSNumber *isFile=nil;
+        [fileURL getResourceValue:&isFile forKey:NSURLIsRegularFileKey error:nil];
+        if (!isFile || ![isFile boolValue]) continue;
+
 		BOOL signedFile=NO;
 		for(NSString* signedExecutable in signedMainExecutables) {
 			if(isSameFile(signedExecutable, fileURL.path)) {

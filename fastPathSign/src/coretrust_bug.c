@@ -18,6 +18,8 @@
 #include "Templates/DecryptedSignature.h"
 #include "Templates/PrivateKey.h"
 
+#define LOG(...)
+
 // We can use static offsets here because we use a template signature blob
 #define SIGNED_ATTRS_OFFSET 0x13C6 // SignedAttributes sequence
 #define HASHHASH_OFFSET 0x1470 // SHA256 hash SignedAttribute
@@ -49,11 +51,11 @@ int update_signature_blob(CS_DecodedSuperBlob *superblob)
     uint8_t secondCDSHA256Hash[CC_SHA256_DIGEST_LENGTH];
     memcpy(secondCDSHA256Hash, fullHash, CC_SHA256_DIGEST_LENGTH);
     // Print the hash
-    printf("SHA256 hash: ");
+    LOG("SHA256 hash: ");
     for (int i = 0; i < CC_SHA256_DIGEST_LENGTH; i++) {
-        printf("%02x", secondCDSHA256Hash[i]);
+        LOG("%02x", secondCDSHA256Hash[i]);
     }
-    printf("\n");
+    LOG("\n");
 
     size_t base64OutLength = 0;
     char *newBase64Hash = base64_encode(secondCDSHA256Hash, CC_SHA1_DIGEST_LENGTH, &base64OutLength);
@@ -63,7 +65,7 @@ int update_signature_blob(CS_DecodedSuperBlob *superblob)
     }
 
     // Print the base64 hash
-    printf("Base64 hash: %.*s\n", CC_SHA256_DIGEST_LENGTH, newBase64Hash);
+    LOG("Base64 hash: %.*s\n", CC_SHA256_DIGEST_LENGTH, newBase64Hash);
 
     int ret = csd_blob_write(signatureBlob, HASHHASH_OFFSET, CC_SHA256_DIGEST_LENGTH, secondCDSHA256Hash);
     if (ret != 0) {
@@ -158,7 +160,7 @@ int apply_coretrust_bypass(const char *machoPath)
         return -1;
     }
 
-    printf("Applying App Store code directory...\n");
+    LOG("Applying App Store code directory...\n");
 
     // Append real code directory as alternateCodeDirectory at the end of superblob
     csd_superblob_remove_blob(decodedSuperblob, realCodeDirBlob);
@@ -169,7 +171,7 @@ int apply_coretrust_bypass(const char *machoPath)
     CS_DecodedBlob *appStoreCodeDirectoryBlob = csd_blob_init(CSSLOT_CODEDIRECTORY, (CS_GenericBlob *)AppStoreCodeDirectory);
     csd_superblob_insert_blob_at_index(decodedSuperblob, appStoreCodeDirectoryBlob, 0);
 
-    printf("Adding new signature blob...\n");
+    LOG("Adding new signature blob...\n");
     CS_DecodedBlob *signatureBlob = csd_superblob_find_blob(decodedSuperblob, CSSLOT_SIGNATURESLOT, NULL);
     if (signatureBlob) {
         // Remove existing signatureBlob if existant
@@ -189,7 +191,7 @@ int apply_coretrust_bypass(const char *machoPath)
     // 5. Actual CodeDirectory (SHA256)
     // 6. Signature blob
 
-    printf("Updating TeamID...\n");
+    LOG("Updating TeamID...\n");
 
     // Get team ID from AppStore code directory
     // For the bypass to work, both code directories need to have the same team ID
@@ -205,40 +207,40 @@ int apply_coretrust_bypass(const char *machoPath)
         return -1;
     }
 
-    printf("TeamID set to %s!\n", appStoreTeamID);
+    LOG("TeamID set to %s!\n", appStoreTeamID);
     free(appStoreTeamID);
 
     // Set flags to 0 to remove any problematic flags (such as the 'adhoc' flag in bit 2)
     csd_code_directory_set_flags(realCodeDirBlob, 0);
 
-    printf("Updating code slot hashes...\n");
+    LOG("Updating code slot hashes...\n");
     csd_code_directory_alloc(realCodeDirBlob, macho);
 
-    printf("Encoding unsigned superblob...\n");
+    LOG("Encoding unsigned superblob...\n");
     CS_SuperBlob *encodedSuperblobUnsigned = csd_superblob_encode(decodedSuperblob);
 
-    printf("Updating load commands...\n");
+    LOG("Updating load commands...\n");
     if (update_load_commands_for_coretrust_bypass(macho, encodedSuperblobUnsigned, originalCodeSignatureSize, memory_stream_get_size(macho->stream)) != 0) {
         printf("Error: failed to update load commands!\n");
         return -1;
     }
     free(encodedSuperblobUnsigned);
 
-    printf("Updating code slot hashes...\n");
+    LOG("Updating code slot hashes...\n");
     csd_code_directory_update(realCodeDirBlob, macho);
 
     int ret = 0;
-    printf("Signing binary...\n");
+    LOG("Signing binary...\n");
     ret = update_signature_blob(decodedSuperblob);
     if(ret == -1) {
         printf("Error: failed to create new signature blob!\n");
         return -1;
     }
 
-    printf("Encoding signed superblob...\n");
+    LOG("Encoding signed superblob...\n");
     CS_SuperBlob *newSuperblob = csd_superblob_encode(decodedSuperblob);
 
-    printf("Writing superblob to MachO...\n");
+    LOG("Writing superblob to MachO...\n");
     // Write the new signed superblob to the MachO
     macho_replace_code_signature(macho, newSuperblob);
 

@@ -6,6 +6,8 @@
 #include <choma/Host.h>
 #include <copyfile.h>
 
+#define LOG(...)
+
 char *extract_preferred_slice(const char *fatPath)
 {
     FAT *fat = fat_init_from_path(fatPath);
@@ -33,7 +35,7 @@ int apply_coretrust_bypass_wrapper(const char *inputPath, const char *outputPath
         printf("extracted failed %s\n", inputPath);
         return -1;
     }
-    printf("extracted best slice to %s\n", machoPath);
+    LOG("extracted best slice to %s\n", machoPath);
 
     int r = apply_coretrust_bypass(machoPath);
     if (r != 0) {
@@ -44,7 +46,7 @@ int apply_coretrust_bypass_wrapper(const char *inputPath, const char *outputPath
     r = copyfile(machoPath, outputPath, 0, COPYFILE_ALL | COPYFILE_MOVE | COPYFILE_UNLINK);
     if (r == 0) {
         chmod(outputPath, 0755);
-        printf("Signed file! CoreTrust bypass eta now!!\n");
+        LOG("Signed file! CoreTrust bypass eta now!!\n");
     }
     else {
         perror("copyfile");
@@ -80,9 +82,9 @@ int main(int argc, char *argv[]) {
     // }
 
 	char *machoPath = extract_preferred_slice(input);
-	printf("Extracted best slice to %s\n", machoPath);
+	LOG("Extracted best slice to %s\n", machoPath);
 
-    printf("Applying CoreTrust bypass...\n");
+    LOG("Applying CoreTrust bypass...\n");
 
 	if (apply_coretrust_bypass(machoPath) != 0) {
 		printf("Failed applying CoreTrust bypass\n");
@@ -92,7 +94,7 @@ int main(int argc, char *argv[]) {
    if (copyfile(machoPath, input, 0, COPYFILE_ALL | COPYFILE_MOVE | COPYFILE_UNLINK) == 0) {
         assert(chown(input, st.st_uid, st.st_gid)==0);
         assert(chmod(input, st.st_mode)==0);
-        printf("Applied CoreTrust Bypass!\n");
+        LOG("Applied CoreTrust Bypass!\n");
     }
     else {
         perror("copyfile");

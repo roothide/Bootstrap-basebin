@@ -18,6 +18,9 @@
 #include "common.h"
 #include "fishhook.h"
 
+#undef SYSLOG
+#define SYSLOG(...)
+
 bool g_sign_failed = false;
 
 extern void _exit(int code);
@@ -167,7 +170,10 @@ int execBinary(const char* path, char** argv)
 
 int autosign(char* path)
 {
-	if(strstr(path, "/var/mobile/Library/pkgmirror/")) 
+	if(strstr(path, "/var/mobile/Library/pkgmirror/"))
+		return 0;
+
+	if(stringEndsWith(path, "/usr/lib/frida/frida-agent.dylib"))
 		return 0;
 
     FILE* fp = fopen(path, "rb");
@@ -177,7 +183,7 @@ int autosign(char* path)
         
         if(ismacho) 
         {
-			printf("sign %s\n", rootfs(path));
+			SYSLOG("sign %s\n", rootfs(path));
 
             if(!islib)
             {
