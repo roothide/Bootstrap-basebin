@@ -4,6 +4,9 @@ THEOS_PACKAGE_SCHEME = roothide
 
 THEOS_DEVICE_IP = iphone.local
 
+FINALPACKAGE ?= 1
+DEBUG ?= 0
+
 include $(THEOS)/makefiles/common.mk
 
 LIBRARY_NAME = bootstrap

@@ -2,7 +2,7 @@
 #include <Foundation/Foundation.h>
 #include <signal.h>
 #include <pthread.h>
-
+#include "common.h"
 #include "libproc.h"
 #include "libproc_private.h"
 
@@ -21,17 +21,17 @@ int proc_paused(pid_t pid, bool* paused)
 	struct proc_bsdinfo procInfo={0};
 	int ret = proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &procInfo, sizeof(procInfo));
 	if(ret != sizeof(procInfo)) {
-		NSLog(@"bsdinfo failed, %d,%s\n", errno, strerror(errno));
+		SYSLOG("bsdinfo failed, %d,%s\n", errno, strerror(errno));
 		return -1;
 	}
 
 	if(procInfo.pbi_status == SSTOP)
 	{
-		NSLog(@"%d pstat=%x flag=%x xstat=%x\n", ret, procInfo.pbi_status, procInfo.pbi_flags, procInfo.pbi_xstatus);
+		SYSLOG("%d pstat=%x flag=%x xstat=%x\n", ret, procInfo.pbi_status, procInfo.pbi_flags, procInfo.pbi_xstatus);
 		*paused = true;
 	}
 	else if(procInfo.pbi_status != SRUN) {
-		NSLog(@"unexcept %d pstat=%x\n", ret, procInfo.pbi_status);
+		SYSLOG("unexcept %d pstat=%x\n", ret, procInfo.pbi_status);
 		return -1;
 	}
 
@@ -48,7 +48,7 @@ int     ptrace(int _request, pid_t _pid, caddr_t _addr, int _data);
 int enableJIT(pid_t pid)
 {
 	int ret = ptrace(PT_ATTACHEXC, pid, NULL, 0);
-	NSLog(@"attach=%d", ret);
+	SYSLOG("attach=%d", ret);
 	if(ret != 0) return ret;
 
 	//don't SIGCONT here, otherwise kernel may send exception msg to this process and the traced process keep waiting, kill(pid, SIGCONT);
@@ -57,7 +57,7 @@ int enableJIT(pid_t pid)
     {
         bool paused=false;
         ret = proc_paused(pid, &paused);
-        NSLog(@"paused=%d, %d", ret, paused);
+        SYSLOG("paused=%d, %d", ret, paused);
         
         if(ret != 0) return ret;
         
@@ -67,7 +67,7 @@ int enableJIT(pid_t pid)
 	}
 	
     ret = ptrace(PT_DETACH, pid, NULL, 0);
-    NSLog(@"detach=%d, %s", ret, strerror(errno));
+    SYSLOG("detach=%d, %s", ret, strerror(errno));
         
 	return ret;
 }

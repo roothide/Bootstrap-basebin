@@ -4,14 +4,14 @@
 #include <roothide.h>
 #include "envbuf.h"
 #include "assert.h"
-
+#include "common.h"
 
 bool sshenable=false;
 int restartick=0;
 pid_t sshdpid=0;
 
 extern const char** environ;
-#define SYSLOG(fmt,...) NSLog(@fmt,__VA_ARGS__)
+
 int spawn(pid_t* pidp, const char* path, char*const* argv, char*const* envp, void(^std_out)(char*), void(^std_err)(char*))
 {
     SYSLOG("spawn %s", path);

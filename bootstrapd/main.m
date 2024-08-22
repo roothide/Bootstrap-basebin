@@ -40,7 +40,7 @@ NSString *generateSandboxExtensions(BOOL ext)
 }
 
 
-int handleRequest(int conn, void* addr, pid_t pid, int reqId, NSDictionary* msg)
+int handleRequest(int conn, pid_t pid, int reqId, NSDictionary* msg)
 {
     NSLog(@"handleRequest %d from %d : %@", reqId, pid, msg);
 
@@ -56,7 +56,7 @@ int handleRequest(int conn, void* addr, pid_t pid, int reqId, NSDictionary* msg)
 				result = -1;
 			}
 
-			reply(conn, addr, @{@"result": @(result)});
+			reply(conn, @{@"result": @(result)});
 		} break;
 
 		case BSD_REQ_ENABLE_JIT2:
@@ -71,49 +71,49 @@ int handleRequest(int conn, void* addr, pid_t pid, int reqId, NSDictionary* msg)
 				result = -1;
 			}
 
-			reply(conn, addr, @{@"result": @(result)});
+			reply(conn, @{@"result": @(result)});
 		} break;
 
 		case BSD_REQ_GET_SBTOKEN:
 		{
-			reply(conn, addr, @{@"result": @(0), @"sbtoken":gSandboxExtensions});
+			reply(conn, @{@"result": @(0), @"sbtoken":gSandboxExtensions});
 		} break;
 
 		case BSD_REQ_CHECK_SERVER:
 		{
-			reply(conn, addr, @{@"result": @(0)});
+			reply(conn, @{@"result": @(0)});
 		} break;
 
 		case BSD_REQ_STOP_SERVER:
 		{
 			int result = set_stop_server();
-			reply(conn, addr, @{@"result": @(result)});
+			reply(conn, @{@"result": @(result)});
 		} break;
 
 		case BSD_REQ_SSH_START:
 		{
 			int openssh_start();
 			int result = openssh_start();
-			reply(conn, addr, @{@"result": @(result)});
+			reply(conn, @{@"result": @(result)});
 		} break;
 
 		case BSD_REQ_SSH_CHECK:
 		{
 			int openssh_check();
 			int result = openssh_check();
-			reply(conn, addr, @{@"result": @(result)});
+			reply(conn, @{@"result": @(result)});
 		} break;
 
 		case BSD_REQ_SSH_STOP:
 		{
 			int openssh_stop();
 			int result = openssh_stop();
-			reply(conn, addr, @{@"result": @(result)});
+			reply(conn, @{@"result": @(result)});
 		} break;
 
 		default:
 			NSLog(@"unknow request!");
-			reply(conn, addr, nil);
+			reply(conn, nil);
 			abort();
 			break;
 

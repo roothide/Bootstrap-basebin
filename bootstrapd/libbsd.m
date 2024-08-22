@@ -1,11 +1,7 @@
 
 #include "../bootstrapd/ipc.h"
 #include "../bootstrapd/bootstrapd.h"
-
-#ifndef BOOTSTRAPD
-#define printf(...)
-#define NSLog(...)
-#endif
+#include "../bootstrapd/common.h"
 
 int bsd_enableJIT()
 {
@@ -14,10 +10,10 @@ int bsd_enableJIT()
 	int sd = connect_to_server();
 	if(sd <= 0) return -1;
 	int req = request(sd, BSD_REQ_ENABLE_JIT, nil);
-	NSLog(@"request=%d", req);
+	SYSLOG("request=%d", req);
 	if(req == 0) {
 		NSDictionary* rep = reponse(sd);
-		NSLog(@"reponse=%@", rep);
+		SYSLOG("reponse=%@", rep);
 		NSNumber* resultObj = rep[@"result"];
         if(resultObj) result = resultObj.intValue;
 	}
@@ -26,22 +22,27 @@ int bsd_enableJIT()
 	return result;
 }
 
+extern int ipc_log_enabled;
 int bsd_enableJIT2(pid_t pid)
 {
+	ipc_log_enabled=0;
+
     int result=-1;
 
 	int sd = connect_to_server();
 	if(sd <= 0) return -1;
 	int req = request(sd, BSD_REQ_ENABLE_JIT2, @{@"pid":@(pid)});
-	NSLog(@"request=%d", req);
+	SYSLOG("request=%d", req);
 	if(req == 0) {
 		NSDictionary* rep = reponse(sd);
-		NSLog(@"reponse=%@", rep);
+		SYSLOG("reponse=%@", rep);
 		NSNumber* resultObj = rep[@"result"];
         if(resultObj) result = resultObj.intValue;
 	}
 	close(sd);
 
+	ipc_log_enabled=1;
+	
 	return result;
 }
 
@@ -52,11 +53,11 @@ const char* bsd_getsbtoken()
 	int sd = connect_to_server();
 	if(sd <= 0) return NULL;
 	int req = request(sd, BSD_REQ_GET_SBTOKEN, nil);
-	NSLog(@"request=%d", req);
+	SYSLOG("request=%d", req);
 	if(req == 0) {
 		NSDictionary* rep = reponse(sd);
 		result = [rep[@"sbtoken"] UTF8String];
-		NSLog(@"reponse=%@", rep);
+		SYSLOG("reponse=%@", rep);
 	}
 	close(sd);
 
@@ -70,10 +71,10 @@ int bsd_opensshctl(bool run)
 	int sd = connect_to_server();
 	if(sd <= 0) return -1;
 	int req = request(sd, run ? BSD_REQ_SSH_START : BSD_REQ_SSH_STOP, nil);
-	NSLog(@"request=%d", req);
+	SYSLOG("request=%d", req);
 	if(req == 0) {
 		NSDictionary* rep = reponse(sd);
-		NSLog(@"reponse=%@", rep);
+		SYSLOG("reponse=%@", rep);
 		NSNumber* resultObj = rep[@"result"];
 		if(resultObj) result = resultObj.intValue;
 	}
@@ -89,10 +90,10 @@ int bsd_opensshcheck()
 	int sd = connect_to_server();
 	if(sd <= 0) return -1;
 	int req = request(sd, BSD_REQ_SSH_CHECK, nil);
-	NSLog(@"request=%d", req);
+	SYSLOG("request=%d", req);
 	if(req == 0) {
 		NSDictionary* rep = reponse(sd);
-		NSLog(@"reponse=%@", rep);
+		SYSLOG("reponse=%@", rep);
 		NSNumber* resultObj = rep[@"result"];
 		if(resultObj) result = resultObj.intValue;
 	}
@@ -108,10 +109,10 @@ int bsd_stopServer()
 	int sd = connect_to_server();
 	if(sd <= 0) return -1;
 	int req = request(sd, BSD_REQ_STOP_SERVER, nil);
-	NSLog(@"request=%d", req);
+	SYSLOG("request=%d", req);
 	if(req == 0) {
 		NSDictionary* rep = reponse(sd);
-		NSLog(@"reponse=%@", rep);
+		SYSLOG("reponse=%@", rep);
 		NSNumber* resultObj = rep[@"result"];
 		if(resultObj) result = resultObj.intValue;
 	}
@@ -124,13 +125,13 @@ int bsd_checkServer()
 {
 	int result = -1;
 
-	int sd = connect_to_server_timeout(2);
+	int sd = connect_to_server();
 	if(sd <= 0) return -1;
 	int req = request(sd, BSD_REQ_CHECK_SERVER, nil);
-	NSLog(@"request=%d", req);
+	SYSLOG("request=%d", req);
 	if(req == 0) {
 		NSDictionary* rep = reponse(sd);
-		NSLog(@"reponse=%@", rep);
+		SYSLOG("reponse=%@", rep);
 		NSNumber* resultObj = rep[@"result"];
 		if(resultObj) result = resultObj.intValue;
 	}

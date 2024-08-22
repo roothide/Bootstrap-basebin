@@ -4,6 +4,9 @@ THEOS_PACKAGE_SCHEME = roothide
 
 THEOS_DEVICE_IP = iphone13pm.local
 
+FINALPACKAGE ?= 1
+DEBUG ?= 0
+
 include $(THEOS)/makefiles/common.mk
 
 TOOL_NAME = bootstrapd
