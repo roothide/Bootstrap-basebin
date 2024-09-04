@@ -8,16 +8,6 @@
 
 extern char*const* environ;
 
-
-//an unsandboxed app may lose EnvironmentVariables which from lsd when launching from "Search" on home screen
-// #define JB_ROOT_PATH(path) ({ \
-// 	char *outPath = alloca(PATH_MAX); \
-// 	strlcpy(outPath, getenv("_JBROOT"), PATH_MAX); \
-// 	strlcat(outPath, path, PATH_MAX); \
-// 	(outPath); \
-// })
-
-
 void unsandbox(const char* sbtoken) {
 	char extensionsCopy[strlen(sbtoken)];
 	strcpy(extensionsCopy, sbtoken);

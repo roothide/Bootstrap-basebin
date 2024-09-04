@@ -49,7 +49,7 @@ int recvbuf(int sd, void* buffer, int bufsize)
     
     while((rlen=recvmsg(sd, &msg, 0))<=0 && errno==EINTR){}; //may be interrupted by ptrace
     
-    SYSLOG("recvbuf %p %d %d, %s", buffer, bufsize, rlen, rlen>0?"":strerror(errno));
+    SYSLOG("recvbuf %p %d/%d, %s", buffer, bufsize, rlen, rlen>=0?"":strerror(errno));
     
     //rlen=0 if client close unexcept, ASSERT(rlen > 0);
 
@@ -161,15 +161,6 @@ int set_stop_server()
     return 0;
 }
 
-void spray(int socket) {
-	srand(jbrand());
-	int l = jbrand()%4096;
-	for(int i=0; i<l; i++) {
-		uint8_t c=(uint8_t)rand();
-		send(socket, &c, 1, MSG_DONTWAIT|MSG_NOSIGNAL/*|MSG_MORE*/);
-	}
-}
-
 int run_ipc_server(int (*callback)(int socket, pid_t pid, int reqId, NSDictionary* msg))
 {
     //unlink the old one
@@ -193,7 +184,7 @@ int run_ipc_server(int (*callback)(int socket, pid_t pid, int reqId, NSDictionar
     {
         addr.sin_family = AF_INET;
         addr.sin_addr.s_addr = 0;
-        addr.sin_port = htons(1001+arc4random()%(65535-1001));
+        addr.sin_port = htons(1001+arc4random()%40000);
         
         //bind sockfd & addr
         if(bind(sd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
@@ -271,11 +262,9 @@ int run_ipc_server(int (*callback)(int socket, pid_t pid, int reqId, NSDictionar
                 //close(cd) by reply()
                 callback(cd, pidObj.integerValue, reqIdObj.integerValue, reqMsg);
             } else {
-				spray(cd);
                 close(cd);
             }
         }} else {
-			spray(cd);
             close(cd);
         }
     }

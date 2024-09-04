@@ -183,8 +183,11 @@ fsync(STDERR_FILENO);\
 
 bool forkfix_method_2=false;
 
-extern pid_t __fork(void);
-extern pid_t __vfork(void);
+pid_t ffsys_fork(void);
+pid_t ffsys_getpid(void);
+ssize_t ffsys_read(int fildes, void *buf, size_t nbyte);
+ssize_t ffsys_write(int fildes, const void *buf, size_t nbyte);
+int ffsys_close(int fildes);
 
 bool* _DisableInitializeForkSafety = NULL;
 static void (**_libSystem_atfork_prepare)(void) = 0;
@@ -281,26 +284,80 @@ void showvm(task_port_t task, uint64_t start, uint64_t size)
 
 __attribute__((noinline, naked)) volatile kern_return_t _mach_vm_protect(mach_port_name_t target, mach_vm_address_t address, mach_vm_size_t size, boolean_t set_maximum, vm_prot_t new_protection)
 {
-#if __arm64__
     __asm("mov x16, #0xFFFFFFFFFFFFFFF2");
     __asm("svc 0x80");
     __asm("ret");
-#else
-    __asm(".intel_syntax noprefix; \
-           mov rax, 0xFFFFFFFFFFFFFFF2; \
-           syscall; \
-           ret");
-#endif
 }
+
+__attribute__((noinline, naked)) volatile mach_port_name_t _task_self_trap(void)
+{
+    __asm("mov x16, #0xFFFFFFFFFFFFFFE4");
+    __asm("svc 0x80");
+    __asm("ret");
+}
+
+__attribute__((noinline, naked)) int _sigprocmask(int how, const sigset_t *nsm, sigset_t *osm)
+{
+    __asm("mov x16, #0x30");
+    __asm("svc 0x80");
+    __asm("ret");
+}
+
+__attribute__((noinline, naked)) int _sigaction (int sig, const struct sigaction * __restrict nsv, struct sigaction * __restrict osv)
+{
+    __asm("mov x16, #0x2E");
+    __asm("svc 0x80");
+    __asm("ret");
+}
+
+__attribute__((noinline, naked)) int syscall__abort_with_payload(uint32_t reason_namespace, uint64_t reason_code,
+				void *payload, uint32_t payload_size, const char *reason_string, uint64_t reason_flags)
+{
+    __asm("mov x16, #0x209");
+    __asm("svc 0x80");
+    __asm("ret");
+}
+
+__attribute__((noinline, naked)) int syscall__terminate_with_payload(int pid, uint32_t reason_namespace, uint64_t reason_code,
+				void *payload, uint32_t payload_size, const char *reason_string, uint64_t reason_flags)
+{
+    __asm("mov x16, #0x208");
+    __asm("svc 0x80");
+    __asm("ret");
+}
+
+void fork_abort(const char* reason) {
+
+    struct sigaction act={0};
+    act.sa_handler = SIG_DFL;
+    _sigaction(SIGABRT, &act, NULL);
+
+    sigset_t mask = __sigbits(SIGABRT);
+    _sigprocmask(SIG_UNBLOCK, &mask, NULL);
+
+    syscall__abort_with_payload(OS_REASON_DYLD, DYLD_EXIT_REASON_OTHER, NULL, 0, reason, 0);
+    syscall__terminate_with_payload(ffsys_getpid(), OS_REASON_DYLD, DYLD_EXIT_REASON_OTHER, NULL, 0, reason, 0x200);
+    // should never return
+}
+
+#define fork_assert(e)	(__builtin_expect(!(e), 0) ? fork_abort(#e) : (void)0)
 
 #include <sys/fcntl.h>
 #include <sys/mman.h>
 #include <sys/syslimits.h>
 
+int _strcmp(const char *s1, const char *s2)
+{
+	while (*s1 == *s2++)
+		if (*s1++ == '\0')
+			return (0);
+	return (*(const unsigned char *)s1 - *(const unsigned char *)(s2 - 1));
+}
+
 void forkfix(const char* tag, bool flag, bool child)
 {
 	kern_return_t kr = -1;
-	mach_port_t task = task_self_trap();//mach_port_deallocate for task_self_trap()
+	mach_port_t task = _task_self_trap();//mach_port_deallocate for task_self_trap()
 
     // if(flag) {
     //     int count=0;
@@ -314,26 +371,27 @@ void forkfix(const char* tag, bool flag, bool child)
     // }
 
 
-    struct mach_header_64* header = _dyld_get_prog_image_header(); //_NSGetMachExecuteHeader()
+    static struct mach_header_64* header = NULL; //save the header for child on parent
+    if(!header) header = _dyld_get_prog_image_header(); //_NSGetMachExecuteHeader()
     struct load_command* lc = (struct load_command*)((uint64_t)header + sizeof(*header));
     for (uint32_t i = 0; i < header->ncmds; i++) {
         if (lc->cmd == LC_SEGMENT_64)
         {
             struct segment_command_64 * seg = (struct segment_command_64 *) lc;
-            if(strcmp(seg->segname, SEG_TEXT)==0)
+            if(_strcmp(seg->segname, SEG_TEXT)==0)
             {
                 forklog("%s-%d segment: %s file=%llx:%llx vm=%p:%llx\n", tag, flag, seg->segname, seg->fileoff, seg->filesize, (void*)seg->vmaddr, seg->vmsize);
 
                 //According to dyld, the __TEXT address is always equal to the header address
 
 #ifdef FORK_DEBUG
-                showvm(task, (uint64_t)header, seg->vmsize); 
+                showvm(task, (uint64_t)header, seg->vmsize);
 #endif
                 if(!forkfix_method_2)
                 {
                     kr = _mach_vm_protect(task, (vm_address_t)header, seg->vmsize, false, flag ? VM_PROT_READ : VM_PROT_READ|VM_PROT_EXECUTE);
                     forklog("[%d] %s vm_protect.%d %d,%s\n", getpid(), tag, flag,  kr, mach_error_string(kr));
-                    ASSERT(kr == KERN_SUCCESS);
+                    fork_assert(kr == KERN_SUCCESS);
                 }
 
 				// ASSERT(*(int*)textaddr);
@@ -385,13 +443,13 @@ int parentToChildPipe[2];
 static void openPipes(void)
 {
 	if (pipe(parentToChildPipe) < 0 || pipe(childToParentPipe) < 0) {
-		abort();
+		fork_abort("openPipes");
 	}
 }
 static void closePipes(void)
 {
-	if (close(parentToChildPipe[0]) != 0 || close(parentToChildPipe[1]) != 0 || close(childToParentPipe[0]) != 0 || close(childToParentPipe[1]) != 0) {
-		abort();
+	if (ffsys_close(parentToChildPipe[0]) != 0 || ffsys_close(parentToChildPipe[1]) != 0 || ffsys_close(childToParentPipe[0]) != 0 || ffsys_close(childToParentPipe[1]) != 0) {
+		fork_abort("closePipes");
 	}
 }
 
@@ -399,10 +457,10 @@ void child_fixup(void)
 {
 	// Tell parent we are waiting for fixup now
 	char msg = ' ';
-	write(childToParentPipe[1], &msg, sizeof(msg));
+	ffsys_write(childToParentPipe[1], &msg, sizeof(msg));
 
 	// Wait until parent completes fixup
-	while((read(parentToChildPipe[0], &msg, sizeof(msg))<=0) && errno==EINTR){}; //may be interrupted by ptrace
+	while((ffsys_read(parentToChildPipe[0], &msg, sizeof(msg))<=0) && errno==EINTR){}; //may be interrupted by ptrace
 
 }
 
@@ -417,17 +475,11 @@ void parent_fixup(pid_t childPid)
 	// Wait until the child is ready and waiting
 	char msg = ' ';
 	read(childToParentPipe[0], &msg, sizeof(msg));
-
-	// // Child is waiting for wx_allowed + permission fixups now
-	// // Apply fixup
-	// int64_t fix_ret = jbdswForkFix(childPid);
-	// if (fix_ret != 0) {
-	// 	kill(childPid, SIGKILL);
-	// 	abort();
-	// }
 	
 	int bsd_enableJIT2(pid_t pid);
-	ASSERT(bsd_enableJIT2(childPid)==0);
+	if(bsd_enableJIT2(childPid) != 0) {
+        kill(childPid, SIGKILL);
+    }
 
 	// Tell child we are done, this will make it resume
 	write(parentToChildPipe[1], &msg, sizeof(msg));
@@ -442,7 +494,7 @@ pid_t __fork1(void)
 {
 	openPipes();
 
-	pid_t pid = __fork();
+	pid_t pid = ffsys_fork();
 	if (pid < 0) {
 		closePipes();
 		return pid;
@@ -471,6 +523,12 @@ _do_fork(bool libsystem_atfork_handlers_only)
 	if(atforkinited++==0) atforkinit();
 
 	forklog("atfork inited");
+
+    if(forkfix_method_2 && getppid()==1) {
+        //prevent sptm panic
+        return -1;
+    }
+
 
 	int ret;
 

@@ -1,6 +1,5 @@
 #import <Foundation/Foundation.h>
 #import <Foundation/NSURL.h>
-#import <MobileCoreServices/MobileCoreServices.h>
 #import <dlfcn.h>
 #import <getopt.h>
 #import <stdio.h>

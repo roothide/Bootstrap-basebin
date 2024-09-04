@@ -67,7 +67,7 @@ int enableJIT(pid_t pid)
 	}
 	
     ret = ptrace(PT_DETACH, pid, NULL, 0);
-    SYSLOG("detach=%d, %s", ret, strerror(errno));
+    SYSLOG("detach=%d, %s", ret, ret==0?"":strerror(errno));
         
 	return ret;
 }

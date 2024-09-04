@@ -208,10 +208,12 @@ DYLD_INTERPOSE(execv_hook, execv)
 DYLD_INTERPOSE(execl_hook, execl)
 DYLD_INTERPOSE(execvp_hook, execvp)
 DYLD_INTERPOSE(execvP_hook, execvP)
+#ifdef __arm64e__
 DYLD_INTERPOSE(fork_hook, fork)
 DYLD_INTERPOSE(vfork_hook, vfork)
 DYLD_INTERPOSE(forkpty_hook, forkpty)
 DYLD_INTERPOSE(daemon_hook, daemon)
+#endif
 
 
 int requireJIT()
