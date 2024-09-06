@@ -303,7 +303,7 @@ __attribute__((noinline, naked)) int _sigprocmask(int how, const sigset_t *nsm, 
     __asm("ret");
 }
 
-__attribute__((noinline, naked)) int _sigaction (int sig, const struct sigaction * __restrict nsv, struct sigaction * __restrict osv)
+__attribute__((noinline, naked)) int _sigaction(int sig, const struct sigaction * __restrict nsv, struct sigaction * __restrict osv)
 {
     __asm("mov x16, #0x2E");
     __asm("svc 0x80");
@@ -460,7 +460,7 @@ void child_fixup(void)
 	ffsys_write(childToParentPipe[1], &msg, sizeof(msg));
 
 	// Wait until parent completes fixup
-	while((ffsys_read(parentToChildPipe[0], &msg, sizeof(msg))<=0) && errno==EINTR){}; //may be interrupted by ptrace
+	while((ffsys_read(parentToChildPipe[0], &msg, sizeof(msg))<0) && errno==EINTR){}; //may be interrupted by ptrace
 
 }
 

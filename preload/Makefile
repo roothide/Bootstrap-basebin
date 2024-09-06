@@ -4,8 +4,6 @@ TARGET := iphone:clang:latest:15.0
 
 THEOS_PACKAGE_SCHEME = roothide
 
-THEOS_DEVICE_IP = iphone13.local
-
 include $(THEOS)/makefiles/common.mk
 
 TOOL_NAME = preload

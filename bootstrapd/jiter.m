@@ -53,9 +53,9 @@ int enableJIT(pid_t pid)
 
 	//don't SIGCONT here, otherwise kernel may send exception msg to this process and the traced process keep waiting, kill(pid, SIGCONT);
 
+	bool paused=false;
 	for(int i=0; i<1000*50; i++)
     {
-        bool paused=false;
         ret = proc_paused(pid, &paused);
         SYSLOG("paused=%d, %d", ret, paused);
         
@@ -65,9 +65,13 @@ int enableJIT(pid_t pid)
 
 		usleep(10);
 	}
+
+	if(!paused) {
+		SYSLOG("*** ptrace: wait process timeout");
+	}
 	
     ret = ptrace(PT_DETACH, pid, NULL, 0);
     SYSLOG("detach=%d, %s", ret, ret==0?"":strerror(errno));
-        
+
 	return ret;
 }

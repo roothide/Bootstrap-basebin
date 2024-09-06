@@ -47,7 +47,7 @@ int recvbuf(int sd, void* buffer, int bufsize)
 
     int rlen = 0;
     
-    while((rlen=recvmsg(sd, &msg, 0))<=0 && errno==EINTR){}; //may be interrupted by ptrace
+    while((rlen=recvmsg(sd, &msg, 0))<0 && errno==EINTR){}; //may be interrupted by ptrace
     
     SYSLOG("recvbuf %p %d/%d, %s", buffer, bufsize, rlen, rlen>=0?"":strerror(errno));
     
@@ -76,7 +76,8 @@ int sendbuf(int sd, void* buffer, int bufsize)
     msg.msg_control        = NULL;
     msg.msg_controllen     = 0;
 
-    int slen = sendmsg(sd, &msg, 0);
+    int slen = 0;
+    while((slen=sendmsg(sd, &msg, 0))<0 && errno==EINTR){}; //may be interrupted by signal
     if(slen != bufsize) perror("sendmsg");
     
     //slen=0 if server close unexcept //ASSERT(slen == bufsize);

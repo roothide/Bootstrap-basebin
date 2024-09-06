@@ -2,8 +2,6 @@ TARGET := iphone:clang:latest:15.0
 
 THEOS_PACKAGE_SCHEME = roothide
 
-THEOS_DEVICE_IP = iphone.local
-
 FINALPACKAGE ?= 1
 DEBUG ?= 0
 

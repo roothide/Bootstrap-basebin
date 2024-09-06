@@ -32,12 +32,6 @@ _ffsys_fork_end:
     ret
 #endif
 
-.global _ffsys_vm_protect
-_ffsys_vm_protect:
-	mov x16, #-14
-	svc 0x80
-	ret
-
 .global _ffsys_getpid
 _ffsys_getpid:
 	mov x16, #20
@@ -48,16 +42,64 @@ _ffsys_getpid:
 _ffsys_read:
 	mov x16, #3
 	svc 0x80
+	b.cc _ffsys_read_end
+#ifdef __arm64e__
+	pacibsp
+#endif
+	stp x29, x30, [SP, #-0x10]!
+	mov x29, sp
+	bl _cerror
+	mov sp, x29
+	ldp x29, x30, [SP],#0x10
+#ifdef __arm64e__
+	retab
+#else
+    ret
+#endif
+
+_ffsys_read_end:
 	ret
 
 .global _ffsys_write
 _ffsys_write:
 	mov x16, #4
 	svc 0x80
+	b.cc _ffsys_write_end
+#ifdef __arm64e__
+	pacibsp
+#endif
+	stp x29, x30, [SP, #-0x10]!
+	mov x29, sp
+	bl _cerror
+	mov sp, x29
+	ldp x29, x30, [SP],#0x10
+#ifdef __arm64e__
+	retab
+#else
+    ret
+#endif
+
+_ffsys_write_end:
 	ret
 
 .global _ffsys_close
 _ffsys_close:
 	mov x16, #6
 	svc 0x80
+	b.cc _ffsys_close_end
+#ifdef __arm64e__
+	pacibsp
+#endif
+	stp x29, x30, [SP, #-0x10]!
+	mov x29, sp
+	bl _cerror
+	mov sp, x29
+	ldp x29, x30, [SP],#0x10
+#ifdef __arm64e__
+	retab
+#else
+    ret
+#endif
+
+_ffsys_close_end:
 	ret
