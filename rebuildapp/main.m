@@ -208,6 +208,28 @@ BOOL isSameFile(NSString *path1, NSString *path2)
 	return sb1.st_ino == sb2.st_ino;
 }
 
+
+BOOL isSubpathOf(NSString *parentPath, NSString *subPath) 
+{
+    NSURL *parentURL = [NSURL fileURLWithPath:parentPath].URLByStandardizingPath;
+    NSURL *subURL = [NSURL fileURLWithPath:subPath].URLByStandardizingPath;
+
+    NSArray<NSString *> *parentComponents = parentURL.pathComponents;
+    NSArray<NSString *> *subComponents = subURL.pathComponents;
+
+    if (subComponents.count < parentComponents.count) {
+        return NO;
+    }
+
+    for (NSUInteger i = 0; i < parentComponents.count; i++) {
+        if (![subComponents[i] isEqualToString:parentComponents[i]]) {
+            return NO;
+        }
+    }
+
+    return YES;
+}
+
 void machoEnumerateArchs(FILE* machoFile, bool (^archEnumBlock)(struct mach_header_64* header, uint32_t offset))
 {
 	struct mach_header_64 mh={0};
@@ -304,6 +326,10 @@ BOOL isDefaultInstallationPath(NSString* _path)
     return YES;
 }
 
+NSArray* blockedResignBundles = @[
+    @"com.apple.Safari.SandboxBroker",
+];
+
 int signApp(NSString* appPath)
 {
 	NSDictionary* baseEntitlements = nil;
@@ -340,6 +366,7 @@ int signApp(NSString* appPath)
 	NSURL* fileURL;
 	NSDirectoryEnumerator *enumerator;
 
+	NSMutableArray* blockedBundlePaths = [NSMutableArray new];
 	NSMutableArray* signedMainExecutables = [NSMutableArray new];
 
 	// Due to how the new CT bug works, in order for data containers to work properly we need to add the
@@ -362,6 +389,11 @@ int signApp(NSString* appPath)
 			NSString *bundleId = infoDict[@"CFBundleIdentifier"];
 			NSString *bundleExecutable = infoDict[@"CFBundleExecutable"];
 			if (!bundleId || !bundleExecutable || !bundleExecutable.length) continue;
+
+			if([blockedResignBundles containsObject:bundleId]) {
+				[blockedBundlePaths addObject:[filePath stringByDeletingLastPathComponent]];
+				continue;
+			}
 
 			NSString *bundleMainExecutablePath = [[filePath stringByDeletingLastPathComponent] stringByAppendingPathComponent:bundleExecutable];
 			if (![[NSFileManager defaultManager] fileExistsAtPath:bundleMainExecutablePath]) continue;
@@ -449,6 +481,16 @@ int signApp(NSString* appPath)
 		NSNumber *isFile=nil;
         [fileURL getResourceValue:&isFile forKey:NSURLIsRegularFileKey error:nil];
         if (!isFile || ![isFile boolValue]) continue;
+
+		BOOL blockedFile=NO;
+		for(NSString* blockedBundlePath in blockedBundlePaths) {
+			if(isSubpathOf(blockedBundlePath, fileURL.path)) {
+				// NSLog(@"skip blocked bundle %@", fileURL);
+				blockedFile=YES;
+				break;
+			}
+		}
+		if(blockedFile) continue;
 
 		BOOL signedFile=NO;
 		for(NSString* signedExecutable in signedMainExecutables) {

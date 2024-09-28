@@ -547,7 +547,7 @@ _do_fork(bool libsystem_atfork_handlers_only)
 	// struct sigaction act = {0};
     // struct sigaction oldact = {0};
 
-	// act.sa_flags = SA_ONSTACK|SA_NODEFER|SA_SIGINFO;
+	// act.sa_flags = SA_ONSTACK|SA_SIGINFO;
     // act.sa_sigaction = forksig;
 	// sigfillset(&act.sa_mask);
 

@@ -524,7 +524,7 @@ int patch_macho(int fd, struct mach_header_64* header)
 
         if(code_sign && newfsize!=st.st_size)
         {
-            // some machos has padding data in the end
+            // some machos have padding data in the end
             // assert(st.st_size == (code_sign->dataoff+code_sign->datasize));
 
             void* data = (void*)((uint64_t)header + code_sign->dataoff);
