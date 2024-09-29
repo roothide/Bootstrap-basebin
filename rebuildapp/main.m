@@ -390,7 +390,10 @@ int signApp(NSString* appPath)
 			NSString *bundleExecutable = infoDict[@"CFBundleExecutable"];
 			if (!bundleId || !bundleExecutable || !bundleExecutable.length) continue;
 
-			if([blockedResignBundles containsObject:bundleId]) {
+			NSString* platformName = infoDict[@"DTPlatformName"];
+			NSArray* supportedPlatforms = infoDict[@"CFBundleSupportedPlatforms"];
+
+			if([blockedResignBundles containsObject:bundleId] || [platformName isEqualToString:@"watchos"] || [supportedPlatforms containsObject:@"WatchOS"]) {
 				[blockedBundlePaths addObject:[filePath stringByDeletingLastPathComponent]];
 				continue;
 			}

@@ -43,3 +43,22 @@ void init_platformHook()
     DobbyHook(csops_audittoken, new_csops_audittoken, (void**)&orig_csops_audittoken);
     // DobbyHook(os_variant_has_internal_content, new_os_variant_has_internal_content, (void**)&orig_os_variant_has_internal_content);
 }
+
+@interface NSUserDefaults(SafariCoreExtras)
++ (NSUserDefaults*) safari_browserDefaults;
+@end
+
+@implementation NSUserDefaults(SafariCoreExtras)
++ (NSUserDefaults*) safari_browserDefaults
+{
+    static NSUserDefaults* _appDefaults = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        NSString* path = [NSString stringWithFormat:@"%s/Library/Preferences/%@.plist", getenv("HOME"), NSBundle.mainBundle.bundleIdentifier];
+        NSLog(@"safari_browserDefaults %@", path);
+        _appDefaults = [[NSUserDefaults alloc] initWithSuiteName:path];
+        NSLog(@"_appDefaults %@", _appDefaults);
+    });
+    return _appDefaults;
+}
+@end
