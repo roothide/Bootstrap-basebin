@@ -16,6 +16,9 @@ bootstrap_INSTALL_PATH = /basebin
 
 include $(THEOS_MAKE_PATH)/library.mk
 
+clean::
+	rm -rf ./packages/*
+	
 ifneq ($(DEBUG), 1)
 before-package::
 	strip -N ./.theos/_/basebin/bootstrap.dylib

@@ -24,6 +24,9 @@ prelib_INSTALL_PATH = /basebin
 
 include $(THEOS_MAKE_PATH)/library.mk
 
+clean::
+	rm -rf ./packages/*
+	
 before-package::
 	mv ./.theos/_/basebin/prelib.dylib ./.theos/_/basebin/preload.dylib
 	

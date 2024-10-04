@@ -339,29 +339,8 @@ void redirectDirs(const char* rootdir)
         pid_t ppid = getppid();
         assert(ppid > 0);
 
-		bool isAppleApp=false;
-		if(ppid == 1) {
-			const char* bundleIdentifier = NULL;
-			CFBundleRef mainBundle = CFBundleGetMainBundle();
-			if(mainBundle) {
-				CFStringRef cfBundleIdentifier = CFBundleGetIdentifier(mainBundle);
-				if(cfBundleIdentifier)
-					bundleIdentifier = CFStringGetCStringPtr(cfBundleIdentifier, kCFStringEncodingASCII);
-			}
-			SYSLOG("bundleIdentifier=%s", bundleIdentifier?bundleIdentifier:"(null)");
-			if(bundleIdentifier)
-			{
-				if(stringStartsWith(bundleIdentifier, "com.apple."))
-				{
-					isAppleApp = true;
-				}
-			}
-		}
-
-		if(!isAppleApp) {
-			//for jailbroken binaries
-			redirectEnvPath(rootdir);
-		}
+		//for jailbroken binaries
+		redirectEnvPath(rootdir);
 
         if(ppid == 1) {
 			char pwd[PATH_MAX];
@@ -392,7 +371,18 @@ static void __attribute__((__constructor__)) bootstrap()
     // dladdr((void*)bootstrap, &di);
 	// bootstrapath = strdup(di.dli_fname);
 
-	redirectDirs(jbroot("/"));
+	const char* bundleIdentifier = NULL;
+	CFBundleRef mainBundle = CFBundleGetMainBundle();
+	if(mainBundle) {
+		CFStringRef cfBundleIdentifier = CFBundleGetIdentifier(mainBundle);
+		if(cfBundleIdentifier)
+			bundleIdentifier = CFStringGetCStringPtr(cfBundleIdentifier, kCFStringEncodingASCII);
+	}
+	SYSLOG("bundleIdentifier=%s", bundleIdentifier?bundleIdentifier:"(null)");
+
+	if(!bundleIdentifier || !stringStartsWith(bundleIdentifier, "com.apple.")) {
+		redirectDirs(jbroot("/"));
+	}
 
     const char* preload = getenv("DYLD_INSERT_LIBRARIES");
     if(!preload || !strstr(preload,"/basebin/bootstrap.dylib"))
@@ -446,14 +436,6 @@ static void __attribute__((__constructor__)) bootstrap()
 
 	if(getppid()==1)
 	{
-		const char* bundleIdentifier = NULL;
-		CFBundleRef mainBundle = CFBundleGetMainBundle();
-		if(mainBundle) {
-			CFStringRef cfBundleIdentifier = CFBundleGetIdentifier(mainBundle);
-			if(cfBundleIdentifier)
-				bundleIdentifier = CFStringGetCStringPtr(cfBundleIdentifier, kCFStringEncodingASCII);
-		}
-		SYSLOG("bundleIdentifier=%s", bundleIdentifier?bundleIdentifier:"(null)");
 		if(bundleIdentifier)
 		{
 			if(stringStartsWith(bundleIdentifier, "com.apple.") && strcmp(bundleIdentifier, "com.apple.springboard")!=0)

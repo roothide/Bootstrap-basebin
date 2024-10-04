@@ -15,6 +15,9 @@ rebuildapp_INSTALL_PATH = /basebin/
 
 include $(THEOS_MAKE_PATH)/tool.mk
 
+clean::
+	rm -rf ./packages/*
+	
 before-package::
 	cp -a ../entitlements ./.theos/_/basebin/
 	

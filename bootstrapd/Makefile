@@ -19,5 +19,8 @@ bootstrapd_INSTALL_PATH = /basebin/
 
 include $(THEOS_MAKE_PATH)/tool.mk
 
+clean::
+	rm -rf ./packages/*
+	
 after-install::
 	install.exec '$(THEOS_PACKAGE_INSTALL_PREFIX)/basebin/$(TOOL_NAME)' server -f

@@ -49,18 +49,20 @@ static void perform_rebinding_with_section(section_t *section,
                                            nlist_t *symtab,
                                            char *strtab,
                                            uint32_t *indirect_symtab) {
+  SYSLOG("rebinding with section %s\n", section->sectname);
   uint32_t *indirect_symbol_indices = indirect_symtab + section->reserved1;
   void **indirect_symbol_bindings = (void **)((uintptr_t)slide + section->addr);
 
   for (uint i = 0; i < section->size / sizeof(void *); i++) {
-    uint32_t symtab_index = indirect_symbol_indices[i];
-    if (symtab_index == INDIRECT_SYMBOL_ABS || symtab_index == INDIRECT_SYMBOL_LOCAL ||
-        symtab_index == (INDIRECT_SYMBOL_LOCAL   | INDIRECT_SYMBOL_ABS)) {
-      continue;
-    }
-    uint32_t strtab_offset = symtab[symtab_index].n_un.n_strx;
-    char *symbol_name = strtab + strtab_offset;
-    bool symbol_name_longer_than_1 = symbol_name[0] && symbol_name[1];
+    // uint32_t symtab_index = indirect_symbol_indices[i];
+    // SYSLOG("rebinding symbol %x\n", symtab_index);
+    // if (symtab_index == INDIRECT_SYMBOL_ABS || symtab_index == INDIRECT_SYMBOL_LOCAL ||
+    //     symtab_index == (INDIRECT_SYMBOL_LOCAL   | INDIRECT_SYMBOL_ABS)) {
+    //   continue;
+    // }
+    // uint32_t strtab_offset = symtab[symtab_index].n_un.n_strx;
+    // char *symbol_name = strtab + strtab_offset;
+    // bool symbol_name_longer_than_1 = symbol_name[0] && symbol_name[1];
 
 
     void* orig = indirect_symbol_bindings[i];
@@ -69,7 +71,16 @@ static void perform_rebinding_with_section(section_t *section,
 #endif
 
       for (uint j = 0; j < dyld_interpose_count; j++) {
-        if (symbol_name_longer_than_1 && orig==dyld_interpose_array[j].orig) {
+    void* orig1 = dyld_interpose_array[j].orig;
+    void* hook1 = dyld_interpose_array[j].hook;
+#if __has_feature(ptrauth_calls)
+    orig1 = ptrauth_strip(orig1, ptrauth_key_asia);
+    hook1 = ptrauth_strip(hook1, ptrauth_key_asia);
+#endif
+
+        if (orig==orig1) {
+          SYSLOG("[%s/%llx] orig %p==%p/%p hook=%p/%p\n", section->sectname, section->addr+i*sizeof(void*), orig, dyld_interpose_array[j].orig,orig1, dyld_interpose_array[j].hook,hook1);
+
           kern_return_t err;
 
           /**
@@ -93,6 +104,9 @@ static void perform_rebinding_with_section(section_t *section,
             newf = ptrauth_sign_unauthenticated(newf, ptrauth_key_asia, &(indirect_symbol_bindings[i]));
 #endif
             indirect_symbol_bindings[i] = newf;
+            SYSLOG("rebind %p -> %p\n", orig, newf);
+          } else {
+            SYSLOG("vm_protect failed: %s\n", mach_error_string(err));
           }
 
         }
@@ -199,11 +213,25 @@ void load_interpose(struct mach_header_64* header)
 }
 
 
+bool register_init = false;
 void* __current_module=NULL;
 void interpose_bind(const struct mach_header *header, intptr_t slide)
 {
     if(header == __current_module) return;
     
+    if(register_init)
+    {
+      int count = _dyld_image_count();
+      for (int i = 0; i < count; i++)
+      {
+          if (header == _dyld_get_image_header(i))
+          {
+              SYSLOG("interpose_bind %p %lx %s\n", header, slide, _dyld_get_image_name(i));
+              break;
+          }
+      }
+    }
+
     rebind_symbols_for_image(header, slide);
 }
 
@@ -222,4 +250,5 @@ void __interpose()
 
     _dyld_register_func_for_add_image(interpose_bind);
 
+    // register_init = true;
 }

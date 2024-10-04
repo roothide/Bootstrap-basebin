@@ -10,3 +10,7 @@ devtest_CODESIGN_FLAGS = -Sentitlements.plist
 devtest_INSTALL_PATH = /basebin
 
 include $(THEOS_MAKE_PATH)/tool.mk
+
+clean::
+	rm -rf ./packages/*
+	

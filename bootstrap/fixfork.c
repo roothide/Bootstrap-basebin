@@ -524,7 +524,8 @@ _do_fork(bool libsystem_atfork_handlers_only)
 
 	forklog("atfork inited");
 
-    if(forkfix_method_2 && getppid()==1) {
+    //make sure it's not reparented to launchd (cause we cannot detect reparent from user land)
+    if(forkfix_method_2 && getppid()==1 && kill(getpgrp(), 0)==0) {
         //prevent sptm panic
         return -1;
     }
