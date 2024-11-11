@@ -258,6 +258,14 @@ NSDictionary *constructGroupsContainersForEntitlements(NSDictionary *entitlement
 
 BOOL constructContainerizationForEntitlements(NSString* bundleId, NSString* path, NSDictionary *entitlements, NSString** customContainerOut) {
 
+	//hack way for "unsandbox but with a data container", so File Provider and Backup service can work for the jailbroken app
+	NSNumber *hackContainer = entitlements[@"uicache.app-data-container-required"];
+	if (hackContainer && [hackContainer isKindOfClass:[NSNumber class]]) {
+		if (hackContainer.boolValue) {
+			return YES;
+		}
+	}
+	
 	//container-required: valid true/false, as first order, will ignore no-container and no-sandbox
 	NSObject *containerRequired = entitlements[@"com.apple.private.security.container-required"];
 	if (containerRequired && [containerRequired isKindOfClass:[NSNumber class]]) {
