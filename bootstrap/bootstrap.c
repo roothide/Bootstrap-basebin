@@ -461,7 +461,7 @@ static void __attribute__((__constructor__)) bootstrap()
 			}
 
 			const char* tweakloader = jbroot("/usr/lib/TweakLoader.dylib");
-			if(!excluded && access(tweakloader, F_OK)==0 && requireJIT()==0) {
+			if(!excluded && requireJIT()==0 && access(tweakloader, F_OK)==0) { //fix frida: always enable JIT before checking tweakloader
 				//currenly ellekit/oldabi uses JBROOT
 				const char* oldJBROOT = getenv("JBROOT");
 				setenv("JBROOT", jbroot("/"), 1);

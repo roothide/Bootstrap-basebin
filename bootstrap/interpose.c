@@ -197,15 +197,19 @@ void load_interpose(struct mach_header_64* header)
                     
                     if ( ((sec[j].flags & SECTION_TYPE) == S_INTERPOSING)
                      || ((strcmp(sec[j].sectname, "__interpose") == 0) &&
-                         ((strncmp(sec[j].segname, "__DATA", 6) == 0) || strncmp(sec[j].segname, "__AUTH", 6) == 0)) ) 
+                         ((strcmp(sec[j].segname, "__DATA") == 0) || strcmp(sec[j].segname, "__AUTH") == 0)) ) 
                     {
                         dyld_interpose_count = sec[j].size / sizeof(dyld_interpose_array[0]);
                         *(void**)&dyld_interpose_array = (void*)((uint64_t)header + sec[j].addr);
+                        SYSLOG("found interpose %p %d\n", dyld_interpose_array, dyld_interpose_count);
                         break;
                     }   
+
+                    //found?
+                    if(dyld_interpose_array) break;
                 }
             }
-		}
+        }
         
         /////////
         lc = (struct load_command *) ((char *)lc + lc->cmdsize);

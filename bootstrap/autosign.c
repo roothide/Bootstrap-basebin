@@ -173,7 +173,9 @@ int autosign(char* path)
 	if(strstr(path, "/var/mobile/Library/pkgmirror/"))
 		return 0;
 
-	if(stringEndsWith(path, "/usr/lib/frida/frida-agent.dylib"))
+	const char* jbpath = rootfs(path);
+
+	if(stringStartsWith(jbpath, "/usr/lib/frida/frida-agent.dylib")) // xxx.dpkg-new
 		return 0;
 
     FILE* fp = fopen(path, "rb");
@@ -183,7 +185,7 @@ int autosign(char* path)
         
         if(ismacho) 
         {
-			SYSLOG("sign %s\n", rootfs(path));
+			SYSLOG("sign %s\n", jbpath);
 
             if(!islib)
             {
@@ -193,7 +195,7 @@ int autosign(char* path)
                 char* args[] = {"ldid", "-M", sent, path, NULL};
 				int status = execBinary(jbroot("/basebin/ldid"), args);
 				if(status != 0) {
-					fprintf(stderr, "ldid %s failed: %d\n", rootfs(path), status);
+					fprintf(stderr, "ldid %s failed: %d\n", jbpath, status);
 					g_sign_failed = true;
 				}
             }
@@ -203,17 +205,17 @@ int autosign(char* path)
                 char* args[] = {"ldid", "-S", path, NULL};
 				int status = execBinary(jbroot("/basebin/ldid"), args);
 				if(status != 0) {
-					fprintf(stderr, "ldid %s failed: %d\n", rootfs(path), status);
+					fprintf(stderr, "ldid %s failed: %d\n", jbpath, status);
 					g_sign_failed = true;
 				}
 			}
 			
-			if(strncmp(rootfs(path), "/Applications/", sizeof("/Applications/")-1) != 0)
+			if(strncmp(jbpath, "/Applications/", sizeof("/Applications/")-1) != 0)
 			{
 				char* args[] = {"fastPathSign", path, NULL};
 				int status = execBinary(jbroot("/basebin/fastPathSign"), args);
 				if(status != 0) {
-					fprintf(stderr, "sign %s failed: %d\n", rootfs(path), status);
+					fprintf(stderr, "sign %s failed: %d\n", jbpath, status);
 					g_sign_failed = true;
 				}
 			}
