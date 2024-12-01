@@ -151,6 +151,12 @@ void update_lc_code_signature(MachO *macho, uint64_t size) {
 
 int update_load_commands_for_coretrust_bypass(MachO *macho, CS_SuperBlob *superblob, uint64_t originalCodeSignatureSize, uint64_t originalMachOSize) {
 
+    uint32_t csSegmentOffset = 0, csSegmentSize = 0;
+    macho_find_code_signature_bounds(macho, &csSegmentOffset, &csSegmentSize);
+
+    //always use the load_cmd->data_size instead of superblob->length
+    originalCodeSignatureSize = csSegmentSize;
+    
     uint64_t sizeOfCodeSignature = BIG_TO_HOST(superblob->length);
 
     // Calculate how much padding we currently have

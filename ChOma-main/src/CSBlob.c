@@ -137,20 +137,20 @@ int macho_replace_code_signature(MachO *macho, CS_SuperBlob *superblob)
     // See how much space we have to write the new code signature
     uint64_t entireFileSize = memory_stream_get_size(macho->stream);
     uint64_t freeSpace = entireFileSize - csSegmentOffset;
-    uint64_t paddingSize = freeSpace - sizeOfCodeSignature;
-    uint8_t* padding = malloc(paddingSize);
-    memset(padding, 0, paddingSize);
+    // uint64_t paddingSize = freeSpace - sizeOfCodeSignature;
+    // uint8_t* padding = malloc(paddingSize);
+    // memset(padding, 0, paddingSize);
 
     if (newCodeSignatureSize >= freeSpace) {
         macho_write_at_offset(macho, csSegmentOffset, newCodeSignatureSize, superblob);
-        macho_write_at_offset(macho, csSegmentOffset + newCodeSignatureSize, paddingSize, padding);
+        // macho_write_at_offset(macho, csSegmentOffset + newCodeSignatureSize, paddingSize, padding);
     } else if (newCodeSignatureSize < freeSpace) {
         memory_stream_trim(macho_get_stream(macho), 0, entireFileSize-csSegmentOffset);
         macho_write_at_offset(macho, csSegmentOffset, newCodeSignatureSize, superblob);
-        macho_write_at_offset(macho, csSegmentOffset + newCodeSignatureSize, paddingSize, padding);
+        // macho_write_at_offset(macho, csSegmentOffset + newCodeSignatureSize, paddingSize, padding);
     }
 
-    free(padding);
+    // free(padding);
 
     return 0;
 }
