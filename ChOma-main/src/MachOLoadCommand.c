@@ -153,9 +153,6 @@ int update_load_commands_for_coretrust_bypass(MachO *macho, CS_SuperBlob *superb
 
     uint32_t csSegmentOffset = 0, csSegmentSize = 0;
     macho_find_code_signature_bounds(macho, &csSegmentOffset, &csSegmentSize);
-
-    //always use the load_cmd->data_size instead of superblob->length
-    originalCodeSignatureSize = csSegmentSize;
     
     uint64_t sizeOfCodeSignature = BIG_TO_HOST(superblob->length);
 
@@ -168,7 +165,7 @@ int update_load_commands_for_coretrust_bypass(MachO *macho, CS_SuperBlob *superb
             struct segment_command_64 *segmentCommand = (struct segment_command_64 *)cmd;
             SEGMENT_COMMAND_64_APPLY_BYTE_ORDER(segmentCommand, LITTLE_TO_HOST_APPLIER);
             if (strcmp(segmentCommand->segname, "__LINKEDIT") == 0) {
-                blockPaddingSize = segmentCommand->filesize - originalCodeSignatureSize;
+                blockPaddingSize = csSegmentOffset - segmentCommand->fileoff;
                 vmAddress = segmentCommand->vmaddr;
                 fileOffset = segmentCommand->fileoff;
                 *stop = true;

@@ -354,6 +354,11 @@ int csd_superblob_insert_blob_at_index(CS_DecodedSuperBlob *superblob, CS_Decode
 
 int csd_superblob_append_blob(CS_DecodedSuperBlob *superblob, CS_DecodedBlob *blobToAppend)
 {
+    if (!superblob->firstBlob) {
+        superblob->firstBlob = blobToAppend;
+        return 0;
+    }
+
     CS_DecodedBlob *lastBlob = superblob->firstBlob;
     while (lastBlob->next) {
         lastBlob = lastBlob->next;
