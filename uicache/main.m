@@ -826,6 +826,9 @@ void registerPath(NSString *path, BOOL forceSystem)
 		MCMContainer *pluginContainer = [NSClassFromString(@"MCMPluginKitPluginDataContainer") containerWithIdentifier:pluginBundleID createIfNecessary:YES existed:nil error:nil];
 		NSString *pluginContainerPath = [pluginContainer url].path;
 
+		pluginDict[@"Container"] = pluginContainerPath;
+		pluginDict[@"EnvironmentVariables"] = constructEnvironmentVariablesForContainerPath(path, pluginContainerPath, pluginContainerized);
+
 		pluginDict[@"Path"] = pluginPath;
 		pluginDict[@"PluginOwnerBundleID"] = appBundleID;
 		pluginDict[@"SignerOrganization"] = @"Apple Inc.";
