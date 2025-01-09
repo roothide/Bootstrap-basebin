@@ -246,6 +246,9 @@ char* excludeProcesses[] = {
 	"/usr/bin/dash",
 	"/usr/bin/bash",
 	"/usr/bin/zsh",
+
+	"/Applications/Terminal.app/Terminal",
+	"/Applications/MTerminal.app/MTerminal",
 };
 
 //export for PatchLoader
@@ -412,6 +415,17 @@ static void __attribute__((__constructor__)) bootstrap()
 			exit(0);
 		}
     }
+    else if(strcmp(exepath, "/usr/bin/ldrestart")==0)
+    {
+		if(access(jbroot("/basebin/.launchctl_support"), F_OK) != 0) 
+		{
+			char* args[] = {"/usr/bin/killall", "-9", "backboardd", NULL};
+			runAsRoot(jbroot(args[0]), args);
+
+			fprintf(stderr, "ldrestart is not supported.\n");
+			exit(0);
+		}
+	}
 	else if(strcmp(exepath, "/usr/bin/dpkg")==0)
     {
 		void init_dpkg_hook();
@@ -427,6 +441,30 @@ static void __attribute__((__constructor__)) bootstrap()
 		init_prefshook();
     }
 
+	//checkServer before loading roothidepatch
+	if(getppid()==1)
+	{
+		if(bundleIdentifier)
+		{
+			if(stringStartsWith(bundleIdentifier, "com.apple.") 
+			&& strcmp(bundleIdentifier, "com.apple.springboard")!=0
+			&& strcmp(bundleIdentifier, "com.apple.Terminal")!=0
+			)
+			{
+				void init_platformHook();
+				init_platformHook(); //try
+			} 
+			else if(stringStartsWith(exepath, "/Applications/"))
+			{
+				if(bsd_checkServer() != 0) {
+					void launchBootstrapApp();
+					launchBootstrapApp();
+					abort();
+				}
+			}
+		}
+	}
+
 	dlopen(jbroot("/usr/lib/roothideinit.dylib"), RTLD_NOW);
 
 	//load first
@@ -436,19 +474,6 @@ static void __attribute__((__constructor__)) bootstrap()
 
 	if(getppid()==1)
 	{
-		if(bundleIdentifier)
-		{
-			if(stringStartsWith(bundleIdentifier, "com.apple.") && strcmp(bundleIdentifier, "com.apple.springboard")!=0)
-			{
-				void init_platformHook();
-				init_platformHook(); //try
-			} 
-			else if(stringStartsWith(exepath, "/Applications/"))
-			{
-				ASSERT(bsd_checkServer()==0);
-			}
-		}
-
 		if(access(jbroot("/var/mobile/.tweakenabled"), F_OK)==0)
 		{
 			bool excluded = false;

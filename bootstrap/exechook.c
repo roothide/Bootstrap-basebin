@@ -149,12 +149,12 @@ int posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
     if(!isBootstrapApp) if(!preload || !strstr(preload, "/basebin/bootstrap.dylib"))
     {
         int newlen = strlen(bootstrapath)+1;
-        if(preload) newlen += strlen(preload) + 1;
+        if(preload && *preload) newlen += strlen(preload);
 
         char newpreload[newlen];
         strcpy(newpreload, bootstrapath);
 
-        if(preload) {
+        if(preload && *preload) {
             strcat(newpreload, ":");
             strcat(newpreload, preload);
         }

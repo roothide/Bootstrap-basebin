@@ -18,14 +18,60 @@
 #include "common.h"
 #include "fishhook.h"
 
-#undef SYSLOG
-#define SYSLOG(...)
+#include <Foundation/Foundation.h>
+
+// #undef SYSLOG
+// #define SYSLOG(...)
+
+NSMutableSet* gUpdatedAppBundles = nil;
 
 bool g_sign_failed = false;
 
 extern void _exit(int code);
 
+
+int execBinary(const char* path, char** argv)
+{
+	pid_t pid=0;
+	int ret = posix_spawn(&pid, path, NULL, NULL, (char* const*)argv, /*environ* ignore preload lib*/ NULL);
+	if(ret != 0) {
+		return -1;
+	}
+
+	int status=0;
+    while(waitpid(pid, &status, 0) != -1)
+    {
+        if (WIFSIGNALED(status)) {
+            return 128 + WTERMSIG(status);
+        } else if (WIFEXITED(status)) {
+            return WEXITSTATUS(status);
+        }
+        //keep waiting?return status;
+    };
+
+	return -1;
+}
+
+void sign_apps() {
+	SYSLOG("app sign %s", gUpdatedAppBundles.description.UTF8String);
+	for(NSString* appbundle in gUpdatedAppBundles)
+	{
+		char* args[] = {"/basebin/uicache", "-p", (char*)jbroot(appbundle.fileSystemRepresentation), "--patchonly", NULL};
+		int status = execBinary(jbroot(args[0]), args);
+		if(status != 0) {
+			fprintf(stderr, "signapp %s failed: %d\n", appbundle.fileSystemRepresentation, status);
+			g_sign_failed = true;
+		}
+	}
+	[gUpdatedAppBundles removeAllObjects];
+}
+
+/* `postinst` is called before this */
 void sign_check(void) {
+	SYSLOG("autosign: sign_check!");
+
+	sign_apps();
+
 	if(g_sign_failed) _exit(-1);
 }
 
@@ -145,29 +191,6 @@ void machoGetInfo(FILE* candidateFile, bool *isMachoOut, bool *isLibraryOut)
 	if (isLibraryOut) *isLibraryOut = isLibrary;
 }
 
-
-int execBinary(const char* path, char** argv)
-{
-	pid_t pid=0;
-	int ret = posix_spawn(&pid, path, NULL, NULL, (char* const*)argv, /*environ* ignore preload lib*/ NULL);
-	if(ret != 0) {
-		return -1;
-	}
-
-	int status=0;
-    while(waitpid(pid, &status, 0) != -1)
-    {
-        if (WIFSIGNALED(status)) {
-            return 128 + WTERMSIG(status);
-        } else if (WIFEXITED(status)) {
-            return WEXITSTATUS(status);
-        }
-        //keep waiting?return status;
-    };
-
-	return -1;
-}
-
 int autosign(char* path)
 {
 	if(strstr(path, "/var/mobile/Library/pkgmirror/"))
@@ -185,7 +208,7 @@ int autosign(char* path)
         
         if(ismacho) 
         {
-			SYSLOG("sign %s\n", jbpath);
+			SYSLOG("autosign: sign %s\n", jbpath);
 
             if(!islib)
             {
@@ -210,8 +233,17 @@ int autosign(char* path)
 				}
 			}
 			
-			if(strncmp(jbpath, "/Applications/", sizeof("/Applications/")-1) != 0)
+			if(strncmp(jbpath, "/Applications/", sizeof("/Applications/")-1) == 0)
 			{
+				const char* p1 = strchr(jbpath+sizeof("/Applications/")-1, '/');
+				if(p1)
+				{
+					char appbundle[PATH_MAX]={0};
+					snprintf(appbundle, sizeof(appbundle), "%.*s", (int)(p1-jbpath), jbpath);
+					[gUpdatedAppBundles addObject:[NSString stringWithUTF8String:appbundle]];
+					SYSLOG("autosign: add app bundle %s\n", appbundle);
+				}
+			} else {
 				char* args[] = {"fastPathSign", path, NULL};
 				int status = execBinary(jbroot("/basebin/fastPathSign"), args);
 				if(status != 0) {
@@ -280,11 +312,93 @@ int dpkghook_new_rmdir(char* path)
     return dpkghook_orig_rmdir(path);
 }
 
+int (*dpkghook_orig_system)(const char* command);
+int dpkghook_new_system(const char* command)
+{
+	SYSLOG("system: %s", command);
+
+	// sign_apps();
+
+	return dpkghook_orig_system(command);
+}
+
+int (*dpkghook_orig_execvp)(const char *name, char * const *argv);
+int dpkghook_new_execvp(const char *name, char * const *argv)
+{
+	SYSLOG("execvp %s %s\n", name, argv[0]);
+
+	/*
+	/Library/dpkg/info/<package>.{prerm,postinst,postrm}
+	*/
+	const char* path = jbroot(name);
+	FILE* fp = fopen(path, "rb");
+    if(fp) {
+        bool ismacho=false,islib=false;
+        machoGetInfo(fp, &ismacho, &islib);
+        
+        if(ismacho)
+        {
+            ensure_jbroot_symlink(path);
+        }
+
+        fclose(fp);
+	}
+
+	// sign_apps();
+
+	return dpkghook_orig_execvp(name, argv);
+}
+
+int (*dpkghook_orig_execlp)(const char *name, const char *arg, ...);
+int dpkghook_new_execlp(const char *name, const char *arg, ...)
+{
+	SYSLOG("execlp %s %s\n", name, arg);
+
+	va_list ap;
+	const char **argv;
+	int n;
+
+	va_start(ap, arg);
+	n = 1;
+	while (va_arg(ap, char *) != NULL)
+		n++;
+	va_end(ap);
+	argv = alloca((n + 1) * sizeof(*argv));
+	if (argv == NULL) {
+		errno = ENOMEM;
+		return (-1);
+	}
+	va_start(ap, arg);
+	n = 1;
+	argv[0] = arg;
+	while ((argv[n] = va_arg(ap, char *)) != NULL)
+		n++;
+	va_end(ap);
+
+	// sign_apps();
+
+	return dpkghook_orig_execvp(name, __DECONST(char **, argv));
+}
+
+pid_t (*dpkghook_orig_fork)();
+pid_t dpkghook_new_fork() {
+
+	sign_apps();
+
+	return dpkghook_orig_fork();
+}
+
 void init_dpkg_hook()
 {
+	gUpdatedAppBundles = [NSMutableSet new];
+
 	struct rebinding rebindings[] = {
 		{"close", dpkghook_new_close, (void**)&dpkghook_orig_close},
 		{"rmdir", dpkghook_new_rmdir, (void**)&dpkghook_orig_rmdir},
+		{"ie_system", dpkghook_new_system, (void**)&dpkghook_orig_system},
+		{"ie_execlp", dpkghook_new_execlp, (void**)&dpkghook_orig_execlp},
+		{"ie_execvp", dpkghook_new_execvp, (void**)&dpkghook_orig_execvp},
+		{"fork", dpkghook_new_fork, (void**)&dpkghook_orig_fork},
 	};
 	struct mach_header_64* header = _dyld_get_prog_image_header();
 	rebind_symbols_image((void*)header, _dyld_get_image_slide(header), rebindings, sizeof(rebindings)/sizeof(rebindings[0]));

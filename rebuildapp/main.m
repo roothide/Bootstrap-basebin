@@ -345,7 +345,8 @@ int signApp(NSString* appPath)
 
 	} else if(isDefaultInstallationPath(appPath)) {
 
-		 if([NSFileManager.defaultManager fileExistsAtPath:[appPath stringByAppendingString:@"/../_TrollStore"]])
+		 if([NSFileManager.defaultManager fileExistsAtPath:[appPath stringByAppendingString:@"/../_TrollStore"]]
+		 	|| [NSFileManager.defaultManager fileExistsAtPath:[appPath stringByAppendingString:@"/../_TrollStoreLite"]])
 		 {
 			//trollstored apps
 			baseEntitlements = [NSDictionary dictionaryWithContentsOfFile:jbroot(@"/basebin/bootstrap.entitlements")];

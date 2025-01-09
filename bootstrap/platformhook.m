@@ -62,3 +62,21 @@ void init_platformHook()
     return _appDefaults;
 }
 @end
+
+@interface LSApplicationWorkspace : NSObject
++(instancetype)defaultWorkspace;
+-(BOOL)openApplicationWithBundleID:(id)arg1 ;
+-(id)pluginsWithIdentifiers:(id)arg1 protocols:(id)arg2 version:(id)arg3 ;
+-(id)pluginsWithIdentifiers:(id)arg1 protocols:(id)arg2 version:(id)arg3 applyFilter:(/*^block*/id)arg4 ;
+-(id)pluginsWithIdentifiers:(id)arg1 protocols:(id)arg2 version:(id)arg3 withFilter:(/*^block*/id)arg4 ;
+-(void)enumeratePluginsMatchingQuery:(id)arg1 withBlock:(/*^block*/id)arg2 ;
+-(id)pluginsMatchingQuery:(id)arg1 applyFilter:(/*^block*/id)arg2 ;
+@end
+
+#include <dlfcn.h>
+void launchBootstrapApp()
+{
+    dlopen("/System/Library/Frameworks/CoreServices.framework/CoreServices", RTLD_NOW);
+    Class class_LSApplicationWorkspace = NSClassFromString(@"LSApplicationWorkspace");
+    [[class_LSApplicationWorkspace defaultWorkspace] openApplicationWithBundleID:@"com.roothide.Bootstrap"];
+}

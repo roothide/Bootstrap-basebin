@@ -28,21 +28,22 @@
 - (BOOL)isValid;
 @end
 
-@interface LSPlugInKitProxy : NSObject
-- (NSString *)bundleIdentifier;
-@property (nonatomic,readonly) NSURL *dataContainerURL;
-@end
-
-@interface LSApplicationProxy : NSObject
-- (id)correspondingApplicationRecord;
-+ (id)applicationProxyForIdentifier:(id)arg1;
-- (id)localizedNameForContext:(id)arg1;
-- (_LSApplicationState *)appState;
+@interface LSBundleProxy : NSObject
+-(BOOL)isContainerized;
 - (NSURL *)bundleURL;
 - (NSURL *)containerURL;
 - (NSURL *)dataContainerURL;
 - (NSString *)bundleExecutable;
 - (NSString *)bundleIdentifier;
+@end
+
+@interface LSPlugInKitProxy : LSBundleProxy
+@end
+
+@interface LSApplicationProxy : LSBundleProxy
++ (id)applicationProxyForIdentifier:(id)arg1;
+- (id)localizedNameForContext:(id)arg1;
+- (_LSApplicationState *)appState;
 - (NSString *)vendorName;
 - (NSString *)teamID;
 - (NSString *)applicationType;
@@ -256,10 +257,10 @@ NSDictionary *constructGroupsContainersForEntitlements(NSDictionary *entitlement
 	return nil;
 }
 
-BOOL constructContainerizationForEntitlements(NSString* bundleId, NSString* path, NSDictionary *entitlements, NSString** customContainerOut) {
+BOOL constructContainerizationForEntitlements(NSString* bundleId, NSString* path, NSDictionary *entitlements) {
 
 	//hack way for "unsandbox but with a data container", so File Provider and Backup service can work for the jailbroken app
-	NSNumber *hackContainer = entitlements[@"uicache.app-data-container-required"];
+	NSNumber *hackContainer = entitlements[@"uicache.data-container-required"] ?: entitlements[@"uicache.app-data-container-required"];
 	if (hackContainer && [hackContainer isKindOfClass:[NSNumber class]]) {
 		if (hackContainer.boolValue) {
 			return YES;
@@ -271,8 +272,10 @@ BOOL constructContainerizationForEntitlements(NSString* bundleId, NSString* path
 	if (containerRequired && [containerRequired isKindOfClass:[NSNumber class]]) {
 		return [(NSNumber*)containerRequired boolValue];
 	}else if (containerRequired && [containerRequired isKindOfClass:[NSString class]]) {
-		*customContainerOut = (NSString*)containerRequired;
-		return YES; //right?
+		/* this feature is only supported by the kernel sandbox.framework, lsd does not make any special treatment for this.
+			and no matter what type of bundle the executable belongs to, the process will always get an app-data-container(/var/mobile/Containers/Data/Application/) from sandbox.framework
+		*/
+		return YES;
 	}
 
 	//no-container: only valid true
@@ -306,11 +309,11 @@ BOOL constructContainerizationForEntitlements(NSString* bundleId, NSString* path
 	//
 	// }
 
-	// apps in containers/Bundle/ always containerized by default
-	if([path hasPrefix:@"/var/containers/Bundle/"] || [path hasPrefix:@"/private/var/containers/Bundle/"])
+	// executables in containers/Bundle/ are always containerized by default
+	if([path.stringByStandardizingPath hasPrefix:@"/var/containers/Bundle/"])
 		return YES;
 
-	return NO; //other paths such rootfs/preboot/var don't containerized by default
+	return NO; // executables in other paths such rootfs/preboot/var will not be containerized by default
 }
 
 NSString *constructTeamIdentifierForEntitlements(NSDictionary *entitlements) {
@@ -321,11 +324,13 @@ NSString *constructTeamIdentifierForEntitlements(NSDictionary *entitlements) {
 	return nil;
 }
 
+//sometimes launching the app may lose those environment variables(if not being containerized in lsd registry?)
 NSDictionary *constructEnvironmentVariablesForContainerPath(NSString *mainBundlePath, NSString *containerPath, BOOL isContainerized) 
 {
 	BOOL using_jbroot = YES;
 
-	if([NSFileManager.defaultManager fileExistsAtPath:[mainBundlePath stringByAppendingString:@"/../_TrollStore"]]) {
+	if([NSFileManager.defaultManager fileExistsAtPath:[mainBundlePath stringByAppendingString:@"/../_TrollStore"]]
+		|| [NSFileManager.defaultManager fileExistsAtPath:[mainBundlePath stringByAppendingString:@"/../_TrollStoreLite"]]) {
 		using_jbroot = NO;
 	} else if(![NSFileManager.defaultManager fileExistsAtPath:[mainBundlePath stringByAppendingPathComponent:@".jbroot"]]) {
 		using_jbroot = NO;
@@ -509,6 +514,8 @@ void freeplay(NSString* mainBundleId, NSString* bundlePath)
 	activator(bundlePath);
 }
 
+int patchonly=0;
+
 void registerPath(NSString *path, BOOL forceSystem)
 {
 	const char* sbtoken = bsd_getsbtoken();
@@ -568,7 +575,9 @@ void registerPath(NSString *path, BOOL forceSystem)
 
 	if(jbrootexists)
 	{
-		if(!isAppleBundle && ![NSFileManager.defaultManager fileExistsAtPath:[path stringByAppendingString:@"/../_TrollStore"]])
+		if(!isAppleBundle
+			 && ![NSFileManager.defaultManager fileExistsAtPath:[path stringByAppendingString:@"/../_TrollStore"]]
+			  && ![NSFileManager.defaultManager fileExistsAtPath:[path stringByAppendingString:@"/../_TrollStoreLite"]])
 		{
 			freeplay(appBundleID, path);
 		}
@@ -657,8 +666,7 @@ void registerPath(NSString *path, BOOL forceSystem)
 	dictToRegister[@"CodeInfoIdentifier"] = appBundleID;
 	dictToRegister[@"CompatibilityState"] = @0;
 
- 	NSString* appDataContainerID = nil;
-	BOOL appContainerized = constructContainerizationForEntitlements(appBundleID, path, entitlements, &appDataContainerID);
+	BOOL appContainerized = constructContainerizationForEntitlements(appBundleID, path, entitlements);
 	dictToRegister[@"IsContainerized"] = @(appContainerized);
 	if (appContainerized) {
 		MCMContainer *appContainer = [NSClassFromString(@"MCMAppDataContainer") containerWithIdentifier:appBundleID createIfNecessary:YES existed:nil error:nil];
@@ -811,19 +819,12 @@ void registerPath(NSString *path, BOOL forceSystem)
 		pluginDict[@"CodeInfoIdentifier"] = pluginBundleID;
 		pluginDict[@"CompatibilityState"] = @0;
 
-		NSString* pluginDataContainerID = nil;
-		BOOL pluginContainerized = YES; //pkd required plugin to have sandbox data container; constructContainerizationForEntitlements(pluginPath, pluginEntitlements, &pluginDataContainerID);
-		pluginDict[@"IsContainerized"] = @(pluginContainerized);
-		if (pluginContainerized) {
-			/* a plugin may use app's container, but lsd still create plugin-bundle-id container for it */
-			MCMContainer *pluginContainer = [NSClassFromString(@"MCMPluginKitPluginDataContainer") containerWithIdentifier:pluginBundleID createIfNecessary:YES existed:nil error:nil];
-			NSString *pluginContainerPath = [pluginContainer url].path;
+		/* pkd requires that App PlugIns be containerized */
+		BOOL pluginContainerized = YES;
 
-			pluginDict[@"Container"] = pluginContainerPath;
-			pluginDict[@"EnvironmentVariables"] = constructEnvironmentVariablesForContainerPath(path, pluginContainerPath, pluginContainerized);
-		} else {
-			pluginDict[@"EnvironmentVariables"] = constructEnvironmentVariablesForContainerPath(path, nil, pluginContainerized);
-		}
+		pluginDict[@"IsContainerized"] = @(pluginContainerized);
+		MCMContainer *pluginContainer = [NSClassFromString(@"MCMPluginKitPluginDataContainer") containerWithIdentifier:pluginBundleID createIfNecessary:YES existed:nil error:nil];
+		NSString *pluginContainerPath = [pluginContainer url].path;
 
 		pluginDict[@"Path"] = pluginPath;
 		pluginDict[@"PluginOwnerBundleID"] = appBundleID;
@@ -859,6 +860,7 @@ void registerPath(NSString *path, BOOL forceSystem)
 		printf("Registering dictionary: %s\n", dictToRegister.description.UTF8String);
 	}
 
+if(!patchonly) {
 	if ([workspace registerApplicationDictionary:dictToRegister])
 	{
 		networkFix(appBundleID);
@@ -872,6 +874,7 @@ void registerPath(NSString *path, BOOL forceSystem)
 	{
 		fprintf(stderr, _("Error: Unable to register %s\n"), path.fileSystemRepresentation);
 	}
+}
 
     if(!isAppleBundle) {
         [appInfoData writeToFile:appInfoPath atomically:YES];
@@ -910,30 +913,8 @@ void listBundleID(void) {
 	}
 }
 
-void printfNSObject(id obj)
-{
-	unsigned int outCount=0;
-    objc_property_t *properties =class_copyPropertyList([obj class], &outCount);
-    for (int i = 0; i<outCount; i++)
-    {
-        objc_property_t property = properties[i];
-        const char* char_f =property_getName(property);
-        NSString *propertyName = [NSString stringWithUTF8String:char_f];
-		@try{
-        id propertyValue = [obj valueForKey:(NSString *)propertyName];
-		printf("%s:\t%s\n", propertyName.UTF8String, [propertyValue debugDescription].UTF8String);
-		}
-        @catch (NSException *exception)
-        {
-			printf("***unaccessible %s\n", propertyName.UTF8String);
-		}
-    }
-    free(properties);
-}
-
 void infoForBundleID(NSString *bundleID) {
 	LSApplicationProxy *app = [LSApplicationProxy applicationProxyForIdentifier:bundleID];
-	//printfNSObject(app);
 
 	if ([[app appState] isValid]) {
 		printf(_("Name: %s\n"), [[app localizedNameForContext:nil] UTF8String]);
@@ -946,6 +927,7 @@ void infoForBundleID(NSString *bundleID) {
 		printf(_("Team ID: %s\n"), [[app teamID] UTF8String]);
 		printf(_("Type: %s\n"), [[app applicationType] UTF8String]);
 		printf(_("Removable: %s\n"), [app isDeletable] ? _("true") : _("false"));
+		printf(_("Containerized: %s\n"), [app isContainerized] ? _("true") : _("false"));
 
 		for(NSString* name in [app environmentVariables])
 			printf(_("EnvironmentVariables: %s = %s\n"), [name UTF8String], [[[app environmentVariables] objectForKey:name] UTF8String]);
@@ -1073,12 +1055,18 @@ int main(int argc, char *argv[]) {
 			{"help", no_argument, 0, 'h'},
 			{"verbose", no_argument, 0, 'v'},	// verbose was added to maintain compatibility with old uikittools
 			{"force", no_argument, 0, 'f'},
+			{"patchonly", no_argument, 0, 0},
 			{NULL, 0, NULL, 0}};
 
 		int index = 0, code = 0;
 
 		while ((code = getopt_long(argc, argv, "ap:u:rl::si:hfvn", longOptions, &index)) != -1) {
 			switch (code) {
+				case 0:
+					if (strcmp(longOptions[index].name, "patchonly") == 0) {
+						patchonly = 1;
+					}
+					break;
 				case 'a':
 					all = YES;
 					break;

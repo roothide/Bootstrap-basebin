@@ -513,6 +513,9 @@ pid_t __fork1(void)
 
 #define LIBSYSTEM_ATFORK_HANDLERS_ONLY_FLAG 1
 
+#include <dlfcn.h>
+extern void* _dyld_get_shared_cache_range(size_t* length);
+
 static inline __attribute__((always_inline))
 pid_t
 _do_fork(bool libsystem_atfork_handlers_only)
@@ -528,6 +531,43 @@ _do_fork(bool libsystem_atfork_handlers_only)
     if(forkfix_method_2 && getppid()==1 && kill(getpgrp(), 0)==0) {
         //prevent sptm panic
         return -1;
+    }
+
+    size_t dsc_length=0;
+    void* dsc_start = _dyld_get_shared_cache_range(&dsc_length);
+
+    natural_t depth = 1;
+    vm_size_t region_size = 0;
+    vm_address_t region_base = 0;
+    
+    while(true)
+    {     
+        struct vm_region_submap_info_64 info={0};
+        mach_msg_type_number_t info_cnt = VM_REGION_SUBMAP_INFO_COUNT_64;
+        
+        kern_return_t kr = vm_region_recurse_64(mach_task_self(), &region_base, &region_size,
+                                            &depth, (vm_region_info_t)&info, &info_cnt);
+        if(kr != KERN_SUCCESS) {
+            break;
+        }
+
+        if(info.is_submap != 0) {
+            depth++;
+        }
+        else 
+        {
+            if ((info.protection & VM_PROT_EXECUTE) != 0) {
+                if (info.share_mode == SM_PRIVATE) {
+                    if((uint64_t)region_base >= (uint64_t)dsc_start
+                     && (uint64_t)region_base < ((uint64_t)dsc_start+dsc_length))
+                    {
+                        return -1;
+                    }
+                }
+            }
+
+            region_base += region_size;
+        }
     }
 
 
