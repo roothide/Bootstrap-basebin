@@ -87,7 +87,7 @@ int varClean(NSString* bundleIdentifier)
 {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-		varCleanQueue = dispatch_queue_create("varClean", DISPATCH_QUEUE_CONCURRENT);
+		varCleanQueue = dispatch_queue_create("varClean", DISPATCH_QUEUE_SERIAL);
 		varCleanDict = [NSMutableDictionary new];
 		varCleanInit();
 	});

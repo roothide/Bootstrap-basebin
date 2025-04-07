@@ -284,23 +284,11 @@ NSUserDefaults* new_NSUserDefaults__initWithSuiteName_container_(id self, SEL _c
     }
 
     NSUserDefaults* result = orig_NSUserDefaults__initWithSuiteName_container_(self, _cmd, suiteName, container);
-    
-    if(result && redirected)
-    {
-        //append global defaults
-        CFArrayRef keyList = CFPreferencesCopyKeyList(kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesCurrentHost);
-        if(keyList) {
-            CFDictionaryRef prefs = CFPreferencesCopyMultiple(keyList, kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesCurrentHost);
-            if(prefs) {
-                [result registerDefaults:(__bridge NSDictionary*)prefs];
-                CFRelease(prefs);
-            }
-            CFRelease(keyList);
-        }
-    }
 
     return result;
 }
+
+void _CFXPreferencesRegisterDefaultValues(CFDictionaryRef defaults);
 
 void init_prefs_objchook()
 {
@@ -310,6 +298,17 @@ void init_prefs_objchook()
     // hook_class_method(NSUserDefaults.class, @selector(standardUserDefaults), new_NSUserDefaults_standardUserDefaults, (void**)&orig_NSUserDefaults_standardUserDefaults);
     // hook_instance_method(NSUserDefaults.class, @selector(initWithSuiteName:), new_NSUserDefaults_initWithSuiteName_, (void**)&orig_NSUserDefaults_initWithSuiteName_);
     hook_instance_method(NSUserDefaults.class, @selector(_initWithSuiteName:container:), new_NSUserDefaults__initWithSuiteName_container_, (void**)&orig_NSUserDefaults__initWithSuiteName_container_);
+
+    //register default values first (both for NSUserDefaults and CFPreferences)
+    CFArrayRef keyList = CFPreferencesCopyKeyList(kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesCurrentHost);
+    if(keyList) {
+        CFDictionaryRef prefs = CFPreferencesCopyMultiple(keyList, kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesCurrentHost);
+        if(prefs) {
+            _CFXPreferencesRegisterDefaultValues(prefs);
+            CFRelease(prefs);
+        }
+        CFRelease(keyList);
+    }
 }
 
 
