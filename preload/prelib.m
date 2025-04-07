@@ -33,7 +33,8 @@ bool checkpatchedexe() {
 
 static void __attribute__((__constructor__)) preload()
 {
-	if(getppid() != 1) return;
+	// debugserver spawn reparent
+	// if(getppid() != 1) return;
 
     NSString* rebuildFile = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@".rebuild"];
 	NSDictionary* rebuildStatus = [NSDictionary dictionaryWithContentsOfFile:rebuildFile];

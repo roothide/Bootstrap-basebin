@@ -33,7 +33,6 @@ int main(int argc, char *argv[], char *envp[]) {
 			}
 
 			setenv("DYLD_INSERT_LIBRARIES", "@executable_path/.jbroot/basebin/bootstrap.dylib:@executable_path/.prelib", 1);
-			setenv("_JBROOT", jbroot("/"), 1);
 		}
 
 		char executable[PATH_MAX];

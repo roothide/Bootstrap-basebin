@@ -13,16 +13,19 @@ extern int    NXArgc;
 
 #define EXPORT __attribute__ ((visibility ("default")))
 
-#include <sys/syslog.h>
-#define SYSLOG(...) do {\
-openlog("bootstrap",LOG_PID,LOG_AUTH);\
-syslog(LOG_DEBUG, __VA_ARGS__);closelog();\
-} while(0)
+#ifdef DEBUG
+void bootstrapLog(const char* format, ...);
+#define SYSLOG	bootstrapLog
+#else
+#define SYSLOG(...)
+#endif
 
 bool stringStartsWith(const char *str, const char* prefix);
 bool stringEndsWith(const char* str, const char* suffix);
 
 void fixsuid();
+
+pid_t __getppid();
 
 int requireJIT();
 

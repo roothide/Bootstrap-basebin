@@ -582,14 +582,6 @@ int patch_executable(const char* file, uint64_t offset, uint64_t size)
         return -1;
     }
     
-    struct stat st;
-    if(stat(file, &st) < 0) {
-        fprintf(stderr, "stat %s error:%d,%s\n", file, errno, strerror(errno));
-        return -1;
-    }
-    
-    SYSLOG("file size = %lld\n", st.st_size);
-    
     void* macho = mmap(NULL, size, PROT_READ|PROT_WRITE, MAP_PRIVATE, fd, offset);
     if(macho == MAP_FAILED) {
         fprintf(stderr, "map %s error:%d,%s\n", file, errno, strerror(errno));
@@ -597,9 +589,12 @@ int patch_executable(const char* file, uint64_t offset, uint64_t size)
     }
 
     if(offset != 0) {
+        //thin fat macho
         assert(ftruncate(fd, 0)==0);
         assert(write(fd, macho, size)==size);
         assert(fsync(fd)==0);
+
+        struct stat st;
         assert(stat(file, &st)==0);
         assert(st.st_size==size);
     }
@@ -609,7 +604,7 @@ int patch_executable(const char* file, uint64_t offset, uint64_t size)
 	int retval = patch_macho(fd, header);
 	SYSLOG("patch macho @ %x : %d", offset, retval);
 
-    munmap(macho, st.st_size);
+    munmap(macho, size);
 
     close(fd);
 
@@ -628,4 +623,3 @@ int patch_app_exe(const char* file)
     // printf("offset=%llx size=%llx\n", macho->archDescriptor.offset, macho->archDescriptor.size);
 	return patch_executable(file, macho->archDescriptor.offset, macho->archDescriptor.size);
 }
-

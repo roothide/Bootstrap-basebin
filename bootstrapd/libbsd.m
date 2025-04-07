@@ -139,3 +139,22 @@ int bsd_checkServer()
 
 	return result;
 }
+
+int bsd_varClean()
+{
+	int result = -1;
+
+	int sd = connect_to_server();
+	if(sd <= 0) return -1;
+	int req = request(sd, BSD_REQ_VAR_CLEAN, @{@"bundleIdentifier":NSBundle.mainBundle.bundleIdentifier});
+	SYSLOG("request=%d", req);
+	if(req == 0) {
+		NSDictionary* rep = reponse(sd);
+		SYSLOG("reponse=%@", rep);
+		NSNumber* resultObj = rep[@"result"];
+		if(resultObj) result = resultObj.intValue;
+	}
+	close(sd);
+
+	return result;
+}

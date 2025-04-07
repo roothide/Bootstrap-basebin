@@ -39,7 +39,6 @@ NSString *generateSandboxExtensions(BOOL ext)
 	return extensionString;
 }
 
-
 int handleRequest(int conn, pid_t pid, int reqId, NSDictionary* msg)
 {
     NSLog(@"handleRequest %d from %d : %@", reqId, pid, msg);
@@ -108,6 +107,15 @@ int handleRequest(int conn, pid_t pid, int reqId, NSDictionary* msg)
 		{
 			int openssh_stop();
 			int result = openssh_stop();
+			reply(conn, @{@"result": @(result)});
+		} break;
+
+		case BSD_REQ_VAR_CLEAN:
+		{
+			NSString* bundleIdentifier = msg[@"bundleIdentifier"];
+			int varClean(NSString* bundleIdentifier);
+			int result = varClean(bundleIdentifier);
+
 			reply(conn, @{@"result": @(result)});
 		} break;
 
@@ -281,7 +289,6 @@ int main(int argc, char *argv[], char *envp[]) {
 				ASSERT(fp != NULL);
 				fprintf(fp, "%d", getpid());
 				fclose(fp);
-
 				return start_run_server();
 			}
 			else if(strcmp(argv[1], "check") == 0)

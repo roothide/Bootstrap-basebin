@@ -324,28 +324,6 @@ NSString *constructTeamIdentifierForEntitlements(NSDictionary *entitlements) {
 	return nil;
 }
 
-//sometimes launching the app may lose those environment variables(if not being containerized in lsd registry?)
-NSDictionary *constructEnvironmentVariablesForContainerPath(NSString *mainBundlePath, NSString *containerPath, BOOL isContainerized) 
-{
-	BOOL using_jbroot = YES;
-
-	if([NSFileManager.defaultManager fileExistsAtPath:[mainBundlePath stringByAppendingString:@"/../_TrollStore"]]
-		|| [NSFileManager.defaultManager fileExistsAtPath:[mainBundlePath stringByAppendingString:@"/../_TrollStoreLite"]]) {
-		using_jbroot = NO;
-	} else if(![NSFileManager.defaultManager fileExistsAtPath:[mainBundlePath stringByAppendingPathComponent:@".jbroot"]]) {
-		using_jbroot = NO;
-	}
-
-	NSString *homeDir = isContainerized ? containerPath : (using_jbroot ? jbroot(@"/var/mobile") : @"/var/mobile");
-	NSString *tmpDir = isContainerized ? [containerPath stringByAppendingPathComponent:@"tmp"] : (using_jbroot ? jbroot(@"/var/tmp") : @"/var/tmp");
-	return @{
-		@"CFFIXED_USER_HOME" : homeDir,
-		@"HOME" : homeDir,
-		@"TMPDIR" : tmpDir
-	}.mutableCopy;
-}
-
-
 #define APP_PATH_PREFIX "/private/var/containers/Bundle/Application/"
 
 BOOL isDefaultInstallationPath(NSString* _path)
@@ -413,6 +391,36 @@ NSArray* blockedAppPlugins = @[
 NSArray* patchRequiredAppPlugins = @[
     @"com.apple.shortcuts.Run-Workflow",
 ];
+
+NSArray* appleInternalIdentifiers = @[
+	@"com.apple.Terminal",
+];
+
+
+//sometimes launching the app may lose those environment variables(if not being containerized in lsd registry?)
+NSDictionary *constructEnvironmentVariablesForContainerPath(NSString *mainBundleIdentifier, NSString *mainBundlePath, NSString *containerPath, BOOL isContainerized) 
+{
+	BOOL using_jbroot = YES;
+
+	//Ignore the app from trollstore as TrollStore will reset its data container path when rebuilding icon cache
+	//and its home directory will be redirected to jbroot by bootstrap.dylib (if tweak enabled)
+	if([NSFileManager.defaultManager fileExistsAtPath:[mainBundlePath stringByAppendingString:@"/../_TrollStore"]]
+		|| [NSFileManager.defaultManager fileExistsAtPath:[mainBundlePath stringByAppendingString:@"/../_TrollStoreLite"]]) {
+		using_jbroot = NO;
+	} else if(![NSFileManager.defaultManager fileExistsAtPath:[mainBundlePath stringByAppendingPathComponent:@".jbroot"]]) {
+		using_jbroot = NO;
+	} else if([mainBundleIdentifier hasPrefix:@"com.apple."] && ![appleInternalIdentifiers containsObject:mainBundleIdentifier]) {
+		using_jbroot = NO;
+	}
+
+	NSString *homeDir = isContainerized ? containerPath : (using_jbroot ? jbroot(@"/var/mobile") : @"/var/mobile");
+	NSString *tmpDir = isContainerized ? [containerPath stringByAppendingPathComponent:@"tmp"] : (using_jbroot ? jbroot(@"/var/tmp") : @"/var/tmp");
+	return @{
+		@"CFFIXED_USER_HOME" : homeDir,
+		@"HOME" : homeDir,
+		@"TMPDIR" : tmpDir
+	}.mutableCopy;
+}
 
 int execBinary(const char* path, char** argv)
 {
@@ -676,9 +684,9 @@ void registerPath(NSString *path, BOOL forceSystem)
 		if app executable using another container in entitlements, 
 		lsd still create the app-bundle-id container for EnvironmentVariables but set Container-Path to  /var/mobile,  
 		when executable  actually runs, the kernel sandbox framework will ask the containerermanagerd to get the container defined in entitlements */
-		dictToRegister[@"EnvironmentVariables"] = constructEnvironmentVariablesForContainerPath(path, containerPath, YES);
+		dictToRegister[@"EnvironmentVariables"] = constructEnvironmentVariablesForContainerPath(appBundleID, path, containerPath, YES);
 	} else {
-		dictToRegister[@"EnvironmentVariables"] = constructEnvironmentVariablesForContainerPath(path, nil, NO);
+		dictToRegister[@"EnvironmentVariables"] = constructEnvironmentVariablesForContainerPath(appBundleID, path, nil, NO);
 	}
 
 	dictToRegister[@"IsDeletable"] = @(registerAsUser || isRemovableSystemApp || isDefaultInstallationPath(path));
@@ -827,7 +835,7 @@ void registerPath(NSString *path, BOOL forceSystem)
 		NSString *pluginContainerPath = [pluginContainer url].path;
 
 		pluginDict[@"Container"] = pluginContainerPath;
-		pluginDict[@"EnvironmentVariables"] = constructEnvironmentVariablesForContainerPath(path, pluginContainerPath, pluginContainerized);
+		pluginDict[@"EnvironmentVariables"] = constructEnvironmentVariablesForContainerPath(appBundleID, path, pluginContainerPath, pluginContainerized);
 
 		pluginDict[@"Path"] = pluginPath;
 		pluginDict[@"PluginOwnerBundleID"] = appBundleID;
@@ -963,6 +971,8 @@ void infoForBundleID(NSString *bundleID) {
 	}
 }
 
+extern char*const* environ;
+
 void registerAll(void) {
 	if (force) {
 		[[LSApplicationWorkspace defaultWorkspace] _LSPrivateRebuildApplicationDatabasesForSystemApps:YES internal:YES user:NO];
@@ -1012,7 +1022,18 @@ void registerAll(void) {
 		) {
 			NSString* bundlePath = [installedApps[bundleID] path];
 			if (verbose) printf(_("registering %s : %s\n"), bundleID.UTF8String, bundlePath.UTF8String);
-			registerPath(bundlePath, NO);
+			
+			pid_t pid;
+			char *const args[] = {"/basebin/uicache", "-p", (char*)rootfs(bundlePath.UTF8String), NULL};
+			assert(posix_spawn(&pid, jbroot(args[0]), NULL, NULL, args, environ) == 0);
+
+			int status=0;
+			while(waitpid(pid, &status, 0) != -1) {
+				usleep(100*1000);
+			};
+			if(!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+				fprintf(stderr, _("Error: Failed to register %s\n"), bundlePath.UTF8String);
+			}
 		}
 	}
 

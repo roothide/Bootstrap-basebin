@@ -1,5 +1,6 @@
 #include <Foundation/Foundation.h>
 #include <roothide.h>
+#include <dlfcn.h>
 #include "common.h"
 #include "fishhook.h"
 #include "dobby.h"
@@ -23,7 +24,7 @@ int new_csops_audittoken(pid_t pid, unsigned int  ops, void * useraddr, size_t u
     int ret = orig_csops_audittoken(pid, ops, useraddr, usersize, token);
     if(ret==-1) ret = csops(getpid(), ops, useraddr, usersize);
 
-    NSLog(@"csops_audittoken(%d): %d : %d %08X %lx %p", ops, ret, pid, useraddr ? *(uint32_t*)useraddr : 0, usersize, token);
+    SYSLOG("csops_audittoken(%d): %d : %d %08X %lx %p", ops, ret, pid, useraddr ? *(uint32_t*)useraddr : 0, usersize, token);
 
     if(ops==CS_OPS_STATUS) {
         *(uint32_t*)useraddr |= CS_VALID;
@@ -36,7 +37,7 @@ int new_csops_audittoken(pid_t pid, unsigned int  ops, void * useraddr, size_t u
 
 void init_platformHook()
 {    
-    NSLog(@"init_platformHook %d", getpid());
+    SYSLOG("init_platformHook %d", getpid());
 
     if(requireJIT()!=0) return;
     
@@ -44,39 +45,43 @@ void init_platformHook()
     // DobbyHook(os_variant_has_internal_content, new_os_variant_has_internal_content, (void**)&orig_os_variant_has_internal_content);
 }
 
-@interface NSUserDefaults(SafariCoreExtras)
-+ (NSUserDefaults*) safari_browserDefaults;
-@end
 
-@implementation NSUserDefaults(SafariCoreExtras)
-+ (NSUserDefaults*) safari_browserDefaults
+#include <bootstrap.h>
+int (*orig__xpc_activate_endpoint)(const char *name, int type, void* handle, uint64_t flags, mach_port_t* p_port, bool* non_launching);
+int new__xpc_activate_endpoint(const char *name, int type, void* handle, uint64_t flags, mach_port_t* p_port, bool* p_non_launching)
 {
-    static NSUserDefaults* _appDefaults = nil;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        NSString* path = [NSString stringWithFormat:@"%s/Library/Preferences/%@.plist", getenv("HOME"), NSBundle.mainBundle.bundleIdentifier];
-        NSLog(@"safari_browserDefaults %@", path);
-        _appDefaults = [[NSUserDefaults alloc] initWithSuiteName:path];
-        NSLog(@"_appDefaults %@", _appDefaults);
-    });
-    return _appDefaults;
+    SYSLOG("_xpc_activate_endpoint name=%s type=%d handle=%p flags=%llx", name, type, handle, flags);
+
+    int ret = orig__xpc_activate_endpoint(name, type, handle, flags, p_port, p_non_launching);
+    SYSLOG("_xpc_activate_endpoint ret=%d port=%x non-launching=%d", ret, *p_port, *p_non_launching);
+
+    if(ret != 0) {
+        mach_port_t port = MACH_PORT_NULL;
+        kern_return_t kr = bootstrap_check_in(bootstrap_port, name, &port);
+        SYSLOG("bootstrap_check_in port=%x kr=%x,%s", port, kr, bootstrap_strerror(kr));
+        if(kr == KERN_SUCCESS) {
+            *p_non_launching = false;
+            *p_port = port;
+            ret = 0;
+        }
+    }
+
+    return ret;
 }
-@end
 
-@interface LSApplicationWorkspace : NSObject
-+(instancetype)defaultWorkspace;
--(BOOL)openApplicationWithBundleID:(id)arg1 ;
--(id)pluginsWithIdentifiers:(id)arg1 protocols:(id)arg2 version:(id)arg3 ;
--(id)pluginsWithIdentifiers:(id)arg1 protocols:(id)arg2 version:(id)arg3 applyFilter:(/*^block*/id)arg4 ;
--(id)pluginsWithIdentifiers:(id)arg1 protocols:(id)arg2 version:(id)arg3 withFilter:(/*^block*/id)arg4 ;
--(void)enumeratePluginsMatchingQuery:(id)arg1 withBlock:(/*^block*/id)arg2 ;
--(id)pluginsMatchingQuery:(id)arg1 applyFilter:(/*^block*/id)arg2 ;
-@end
-
-#include <dlfcn.h>
-void launchBootstrapApp()
+void init_xpchook()
 {
-    dlopen("/System/Library/Frameworks/CoreServices.framework/CoreServices", RTLD_NOW);
-    Class class_LSApplicationWorkspace = NSClassFromString(@"LSApplicationWorkspace");
-    [[class_LSApplicationWorkspace defaultWorkspace] openApplicationWithBundleID:@"com.roothide.Bootstrap"];
+    SYSLOG("init_xpchook %d", getpid());
+
+    if(requireJIT()!=0) return;
+
+    if(dlopen("/usr/lib/system/libxpc.dylib", RTLD_NOW)==NULL) {
+        SYSLOG("dlopen libxpc.dylib failed");
+        return;
+    }
+
+    void* _xpc_activate_endpoint = DobbySymbolResolver("/usr/lib/system/libxpc.dylib", "__xpc_activate_endpoint");
+    SYSLOG("_xpc_activate_endpoint=%p", _xpc_activate_endpoint);
+
+    DobbyHook(_xpc_activate_endpoint, (void *)new__xpc_activate_endpoint, (void **)&orig__xpc_activate_endpoint);
 }

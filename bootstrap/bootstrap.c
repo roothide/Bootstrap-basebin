@@ -7,13 +7,19 @@
 #include <util.h>
 #include <sys/stat.h>
 #include <sys/param.h>
+#include <sys/sysctl.h>
 #include <sys/syslimits.h>
 #include <spawn.h>
 #include <paths.h>
 #include <dlfcn.h>
+#include <pwd.h>
+#include <stdio.h>
+#include <libgen.h>
 #include <roothide.h>
 #include "common.h"
 #include "sandbox.h"
+#include "libproc.h"
+#include "libproc_private.h"
 #include "../bootstrapd/libbsd.h"
 
 #include <CoreFoundation/CoreFoundation.h>
@@ -216,12 +222,40 @@ DYLD_INTERPOSE(daemon_hook, daemon)
 #endif
 
 
+/* pbi_flags values */
+#define PROC_FLAG_TRACED        2       /* process currently being traced, possibly by gdb */
 int requireJIT()
 {
 	static int result = -1;
-	static int inited = 0;
-	if(inited++) return result;
-	return (result=bsd_enableJIT());
+	
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+		int32_t opt[4] = {
+			CTL_KERN,
+			KERN_PROC,
+			KERN_PROC_PID,
+			getpid(),
+		};
+		struct kinfo_proc info={0};
+		size_t len = sizeof(struct kinfo_proc);
+		if(sysctl(opt, 4, &info, &len, NULL, 0) == 0) {
+			if((info.kp_proc.p_flag & P_TRACED) != 0) {
+				result = 0;
+				return;
+			}
+		}
+		
+		struct proc_bsdinfo procInfo={0};
+		if (proc_pidinfo(getpid(), PROC_PIDTBSDINFO, 0, &procInfo, sizeof(procInfo)) == sizeof(procInfo)) {
+			if((procInfo.pbi_flags & PROC_FLAG_TRACED) != 0) {
+				result = 0;
+				return;
+			}
+		}
+		
+		result = bsd_enableJIT();
+	});
+	return result;
 }
 
 bool checkpatchedexe() {
@@ -237,38 +271,73 @@ bool checkpatchedexe() {
 	return true;
 }
 
-extern void runAsRoot(const char* path, char* argv[]);
+pid_t __getppid()
+{
+	int32_t opt[4] = {
+		CTL_KERN,
+		KERN_PROC,
+		KERN_PROC_PID,
+		getpid(),
+	};
+	struct kinfo_proc info={0};
+	size_t len = sizeof(struct kinfo_proc);
+	if(sysctl(opt, 4, &info, &len, NULL, 0) == 0) {
+		if((info.kp_proc.p_flag & P_TRACED) != 0) {
+			return info.kp_proc.p_oppid;
+		}
+	}
 
-char* excludeProcesses[] = {
-	"/usr/sbin/dropbear",
-	"/usr/sbin/sshd",
-	"/usr/bin/fish",
-	"/usr/bin/dash",
-	"/usr/bin/bash",
-	"/usr/bin/zsh",
+    struct proc_bsdinfo procInfo;
+	//some process may be killed by sandbox if call systme getppid() so try this first
+	if (proc_pidinfo(getpid(), PROC_PIDTBSDINFO, 0, &procInfo, sizeof(procInfo)) == sizeof(procInfo)) {
+		return procInfo.pbi_ppid;
+	}
 
-	"/Applications/Terminal.app/Terminal",
-	"/Applications/MTerminal.app/MTerminal",
-};
+	return getppid();
+}
 
-//export for PatchLoader
-__attribute__((visibility("default"))) int PLRequiredJIT() {
-	return requireJIT();
+static uid_t _CFGetSVUID(bool *successful) {
+    uid_t uid = -1;
+    struct kinfo_proc kinfo;
+    u_int miblen = 4;
+    size_t  len;
+    int mib[miblen];
+    int ret;
+    mib[0] = CTL_KERN;
+    mib[1] = KERN_PROC;
+    mib[2] = KERN_PROC_PID;
+    mib[3] = getpid();
+    len = sizeof(struct kinfo_proc);
+    ret = sysctl(mib, miblen, &kinfo, &len, NULL, 0);
+    if (ret != 0) {
+        uid = -1;
+        *successful = false;
+    } else {
+        uid = kinfo.kp_eproc.e_pcred.p_svuid;
+        *successful = true;
+    }
+    return uid;
+}
+
+bool _CFCanChangeEUIDs(void) {
+    static bool canChangeEUIDs;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        uid_t euid = geteuid();
+        uid_t uid = getuid();
+        bool gotSVUID = false;
+        uid_t svuid = _CFGetSVUID(&gotSVUID);
+        canChangeEUIDs = (uid == 0 || uid != euid || svuid != euid || !gotSVUID);
+    });
+    return canChangeEUIDs;
 }
 
 #include <pwd.h>
 #include <libgen.h>
 #include <stdio.h>
 
-#define CONTAINER_PATH_PREFIX   "/private/var/mobile/Containers/Data/" // +/Application,PluginKitPlugin,InternalDaemon
-
-void redirectEnvPath(const char* rootdir)
+void redirect_path_env(const char* rootdir)
 {
-    // char executablePath[PATH_MAX]={0};
-    // uint32_t bufsize=sizeof(executablePath);
-    // if(_NSGetExecutablePath(executablePath, &bufsize)==0 && strstr(executablePath,"testbin2"))
-    //     printf("redirectNSHomeDir %s, %s\n\n", rootdir, getenv("CFFIXED_USER_HOME"));
-
     //for now libSystem should be initlized, container should be set.
 
     char* homedir = NULL;
@@ -284,6 +353,7 @@ We just keep this bug:
         homedir = getenv("CFFIXED_USER_HOME");
         if(homedir)
         {
+#define CONTAINER_PATH_PREFIX   "/private/var/mobile/Containers/Data/" // +/Application,PluginKitPlugin,InternalDaemon
             if(strncmp(homedir, CONTAINER_PATH_PREFIX, sizeof(CONTAINER_PATH_PREFIX)-1) == 0)
             {
                 return; //containerized
@@ -311,51 +381,91 @@ We just keep this bug:
         homedir = "/var/empty";
     }
 
-    char newhome[PATH_MAX]={0};
-    snprintf(newhome,sizeof(newhome),"%s/%s",rootdir,homedir);
-    setenv("CFFIXED_USER_HOME", newhome, 1);
+	if(homedir[0] == '/') {
+		char newhome[PATH_MAX*2]={0};
+		strlcpy(newhome, rootdir, sizeof(newhome));
+		strlcat(newhome, homedir, sizeof(newhome));
+		setenv("CFFIXED_USER_HOME", newhome, 1);
+	}
 }
 
-void redirectDirs(const char* rootdir)
+void redirect_paths(const char* rootdir)
 {
-    do { // only for jb process because some system process may crash when chdir
+    do {
         
         char executablePath[PATH_MAX]={0};
         uint32_t bufsize=sizeof(executablePath);
         if(_NSGetExecutablePath(executablePath, &bufsize) != 0)
             break;
         
-        char realexepath[PATH_MAX];
+        char realexepath[PATH_MAX]={0};
         if(!realpath(executablePath, realexepath))
             break;
             
-        char realjbroot[PATH_MAX];
+        char realjbroot[PATH_MAX+1]={0};
         if(!realpath(rootdir, realjbroot))
             break;
         
-        if(realjbroot[strlen(realjbroot)] != '/')
-            strcat(realjbroot, "/");
+        if(realjbroot[0] && realjbroot[strlen(realjbroot)-1] != '/')
+            strlcat(realjbroot, "/", sizeof(realjbroot));
         
         if(strncmp(realexepath, realjbroot, strlen(realjbroot)) != 0)
             break;
-    
-        pid_t ppid = getppid();
-        assert(ppid > 0);
 
-		//for jailbroken binaries
-		redirectEnvPath(rootdir);
-
-        if(ppid == 1) {
-			char pwd[PATH_MAX];
-			if(getcwd(pwd, sizeof(pwd)) == NULL)
-				break;
-			if(strcmp(pwd, "/") != 0)
-				break;
+        //for jailbroken binaries
+        redirect_path_env(rootdir);
 		
-			assert(chdir(rootdir)==0);
+		if(_CFCanChangeEUIDs()) {
+			// void loadPathHook();
+			// loadPathHook();
 		}
+    
+        pid_t ppid = __getppid();
+        assert(ppid > 0);
+        if(ppid != 1)
+            break;
+        
+        char pwd[PATH_MAX];
+        if(getcwd(pwd, sizeof(pwd)) == NULL)
+            break;
+        if(strcmp(pwd, "/") != 0)
+            break;
+    
+        assert(chdir(rootdir)==0);
         
     } while(0);
+}
+
+char* remove_trailing_slash(char *path) {
+    size_t len = strlen(path);
+    if (len > 0 && path[len - 1] == '/') {
+        path[len - 1] = '\0';
+    }
+    return path;
+}
+
+extern void runAsRoot(const char* path, char* argv[]);
+
+char* tweakDisabledProcesses[] = {
+	"/Applications/Terminal.app/Terminal",
+	"/Applications/MTerminal.app/MTerminal",
+};
+
+//export for PatchLoader
+__attribute__((visibility("default"))) int PLRequiredJIT() {
+	return requireJIT();
+}
+
+char* appleInternalIdentifiers[] = {
+	"com.apple.Terminal",
+};
+
+bool isAppleInternalIdentifier(const char* bundleIdentifier) {
+	for(int i=0; i<sizeof(appleInternalIdentifiers)/sizeof(appleInternalIdentifiers[0]); i++) {
+		if(strcmp(bundleIdentifier, appleInternalIdentifiers[i])==0)
+			return true;
+	}
+	return false;
 }
 
 // const char* bootstrapath=NULL;
@@ -364,6 +474,10 @@ static void __attribute__((__constructor__)) bootstrap()
     char executablePath[PATH_MAX]={0};
     uint32_t bufsize=sizeof(executablePath);
     ASSERT(_NSGetExecutablePath(executablePath, &bufsize) == 0);
+
+	char jbrootdir[PATH_MAX] = {0};
+	strlcat(jbrootdir, jbroot("/"), sizeof(jbrootdir));
+	remove_trailing_slash(jbrootdir);
 
 	const char* exepath = rootfs(executablePath);
 
@@ -381,10 +495,12 @@ static void __attribute__((__constructor__)) bootstrap()
 		if(cfBundleIdentifier)
 			bundleIdentifier = CFStringGetCStringPtr(cfBundleIdentifier, kCFStringEncodingASCII);
 	}
-	SYSLOG("bundleIdentifier=%s", bundleIdentifier?bundleIdentifier:"(null)");
 
-	if(!bundleIdentifier || !stringStartsWith(bundleIdentifier, "com.apple.")) {
-		redirectDirs(jbroot("/"));
+	bool isTrollStoredApp();
+	bool appFromTrollStore = isTrollStoredApp();
+
+	if(!bundleIdentifier || !stringStartsWith(bundleIdentifier, "com.apple.") || isAppleInternalIdentifier(bundleIdentifier) || appFromTrollStore) {
+		redirect_paths(jbrootdir);
 	}
 
     const char* preload = getenv("DYLD_INSERT_LIBRARIES");
@@ -396,7 +512,7 @@ static void __attribute__((__constructor__)) bootstrap()
 		}
     }
 
-    if(getppid() != 1) {
+    if(__getppid() != 1) {
         void fixsuid();
         fixsuid();
     }
@@ -435,21 +551,27 @@ static void __attribute__((__constructor__)) bootstrap()
     {
 		runAsRoot(jbroot("/basebin/uicache"), NXArgv);
     }
-	else if(strcmp(exepath, "/Applications/Preferences.app/Preferences")==0 || strcmp(exepath, "/Applications/TweakSettings.app/TweakSettings")==0)
-    {
-		void init_prefshook();
-		init_prefshook();
-    }
+
+	void init_prefs_objchook();
+	init_prefs_objchook();
+
+	bool blockTweaks = false;
+	for(int i=0; i<sizeof(tweakDisabledProcesses)/sizeof(tweakDisabledProcesses[0]); i++)
+	{
+		if(strcmp(exepath, tweakDisabledProcesses[i])==0) {
+			blockTweaks=true;
+			break;
+		}
+	}
 
 	//checkServer before loading roothidepatch
-	if(getppid()==1)
+	if(__getppid()==1)
 	{
 		if(bundleIdentifier)
 		{
 			if(stringStartsWith(bundleIdentifier, "com.apple.") 
-			&& strcmp(bundleIdentifier, "com.apple.springboard")!=0
-			&& strcmp(bundleIdentifier, "com.apple.Terminal")!=0
-			)
+				&& strcmp(bundleIdentifier, "com.apple.springboard")!=0
+				&& !blockTweaks )
 			{
 				void init_platformHook();
 				init_platformHook(); //try
@@ -461,6 +583,13 @@ static void __attribute__((__constructor__)) bootstrap()
 					launchBootstrapApp();
 					abort();
 				}
+
+				void varCleanInit();
+				varCleanInit();
+			}
+			else if(appFromTrollStore) {
+				void varCleanInit();
+				varCleanInit();
 			}
 		}
 	}
@@ -472,24 +601,19 @@ static void __attribute__((__constructor__)) bootstrap()
 		ASSERT(checkpatchedexe());
 	}
 
-	if(getppid()==1)
-	{
+	//fix frida: always enable JIT before checking tweakloader
+	if(requireJIT()==0 && __getppid()==1 && !blockTweaks) {
+
+		void init_prefs_inlinehook();
+		init_prefs_inlinehook();
+	
 		if(access(jbroot("/var/mobile/.tweakenabled"), F_OK)==0)
 		{
-			bool excluded = false;
-			for(int i=0; i<sizeof(excludeProcesses)/sizeof(excludeProcesses[0]); i++)
-			{
-				if(strcmp(exepath, excludeProcesses[i])==0) {
-					excluded=true;
-					break;
-				}
-			}
-
 			const char* tweakloader = jbroot("/usr/lib/TweakLoader.dylib");
-			if(!excluded && requireJIT()==0 && access(tweakloader, F_OK)==0) { //fix frida: always enable JIT before checking tweakloader
-				//currenly ellekit/oldabi uses JBROOT
+			if(access(tweakloader, F_OK)==0) {
+				//old version of ellekit/oldabi uses JBROOT
 				const char* oldJBROOT = getenv("JBROOT");
-				setenv("JBROOT", jbroot("/"), 1);
+				setenv("JBROOT", jbrootdir, 1);
 				dlopen(tweakloader, RTLD_NOW);
 				if(oldJBROOT) setenv("JBROOT", oldJBROOT, 1); else unsetenv("JBROOT");
 			}

@@ -82,16 +82,20 @@ void ensure_jbroot_symlink(const char* filepath)
 	if(access(filepath, F_OK) !=0 )
 		return;
 
-	char realfpath[PATH_MAX];
+	char realfpath[PATH_MAX]={0};
 	ASSERT(realpath(filepath, realfpath) != NULL);
 
-	char realdirpath[PATH_MAX+1];
+	char realdirpath[PATH_MAX+1]={0};
 	dirname_r(realfpath, realdirpath);
-	if(realdirpath[strlen(realdirpath)] != '/') strcat(realdirpath, "/");
+	if(realdirpath[0] && realdirpath[strlen(realdirpath)-1] != '/') {
+		strlcat(realdirpath, "/", sizeof(realdirpath));
+	}
 
-	char jbrootpath[PATH_MAX+1];
+	char jbrootpath[PATH_MAX+1]={0};
 	ASSERT(realpath(jbroot("/"), jbrootpath) != NULL);
-	if(jbrootpath[strlen(jbrootpath)] != '/') strcat(jbrootpath, "/");
+	if(jbrootpath[0] && jbrootpath[strlen(jbrootpath)-1] != '/') {
+		strlcat(jbrootpath, "/", sizeof(jbrootpath));
+	}
 
 	// JBLogDebug("%s : %s", realdirpath, jbrootpath);
 

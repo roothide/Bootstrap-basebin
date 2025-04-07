@@ -199,7 +199,7 @@ static void (**_libSystem_atfork_child_v2)(unsigned int flags, ...) = 0;
 
 #define RESOVLE_ATFORK(n)  {\
 *(void**)&n = DobbySymbolResolver("/usr/lib/system/libsystem_c.dylib", #n);\
-  SYSLOG("forkfunc %s = %p:%p", #n, n, n?*n:NULL);\
+    forklog("forkfunc %s = %p:%p", #n, n, n?*n:NULL);\
   }
 
 #include "dobby.h"
@@ -528,7 +528,7 @@ _do_fork(bool libsystem_atfork_handlers_only)
 	forklog("atfork inited");
 
     //make sure it's not reparented to launchd (cause we cannot detect reparent from user land)
-    if(forkfix_method_2 && getppid()==1 && kill(getpgrp(), 0)==0) {
+    if(forkfix_method_2 && __getppid()==1 && kill(getpgrp(), 0)==0) {
         //prevent sptm panic
         return -1;
     }
