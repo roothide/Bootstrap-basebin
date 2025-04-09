@@ -188,6 +188,11 @@ BOOL prefsRedirection(NSString** pidentifier, NSString** pcontainer)
         container = NSHomeDirectory();
     }
 
+    //cfprefsd may reject a non-sandbox apple app to read/write preferences with container=/var/mobile
+    if([container isEqualToString:@"/var/mobile"]) {
+        return NO;
+    }
+
     //migrating plist from previous versions
     struct passwd *pw = getpwuid(geteuid());
     if(pw && pw->pw_name) {
@@ -206,9 +211,6 @@ BOOL prefsRedirection(NSString** pidentifier, NSString** pcontainer)
     *pidentifier = identifier;
     return YES;
 }
-
-
-bool __thread gInSync = false;
 
 CFArrayRef _CFPreferencesCopyKeyListWithContainer(CFStringRef applicationID, CFStringRef userName, CFStringRef hostName, CFStringRef container);
 CFDictionaryRef _CFPreferencesCopyMultipleWithContainer(_Nullable CFArrayRef keysToFetch, CFStringRef applicationID, CFStringRef userName, CFStringRef hostName, CFStringRef container);
