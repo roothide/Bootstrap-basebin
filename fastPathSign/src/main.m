@@ -58,7 +58,10 @@ int apply_coretrust_bypass_wrapper(const char *inputPath, const char *outputPath
 
 
 int main(int argc, char *argv[]) {
-	if (argc < 2) return -1;
+	if (argc < 2) {
+        printf("Usage: %s <rootfs-based path to macho>\n", argv[0]);
+        return -1;
+    }
 
     char *input = argv[argc-1];
 

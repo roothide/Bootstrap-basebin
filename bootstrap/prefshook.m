@@ -46,6 +46,10 @@ BOOL prefsRedirection(NSString** pidentifier, NSString** pcontainer)
         return NO;
     }
 
+    if(container && [container isEqualToString:@"kCFPreferencesNoContainer"]) {
+        container = nil;
+    }
+
     NSString* bundleIdentifier = NSBundle.mainBundle.bundleIdentifier;
     if(!bundleIdentifier) {
         char executablePath[PATH_MAX]={0};

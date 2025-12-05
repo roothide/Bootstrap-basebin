@@ -252,6 +252,13 @@ int start_run_server()
 	return ret;
 }
 
+
+#define POSIX_SPAWN_PERSONA_FLAGS_OVERRIDE 1
+extern int posix_spawnattr_set_persona_np(const posix_spawnattr_t* __restrict, uid_t, uint32_t);
+extern int posix_spawnattr_set_persona_uid_np(const posix_spawnattr_t* __restrict, uid_t);
+extern int posix_spawnattr_set_persona_gid_np(const posix_spawnattr_t* __restrict, uid_t);
+
+
 int main(int argc, char *argv[], char *envp[]) {
 	@autoreleasepool {
 		NSLog(@"Hello bootstrapd! pid=%d, uid=%d\n", getpid(), getuid());
@@ -261,7 +268,15 @@ int main(int argc, char *argv[], char *envp[]) {
 		{
 			if(strcmp(argv[1], "daemon") == 0) {
 				argv[1] = "server";
-    			return posix_spawn(NULL, argv[0], NULL, NULL, argv, envp);
+
+				posix_spawnattr_t attr;
+				posix_spawnattr_init(&attr);
+
+				posix_spawnattr_set_persona_np(&attr, 99, POSIX_SPAWN_PERSONA_FLAGS_OVERRIDE);
+				posix_spawnattr_set_persona_uid_np(&attr, 0);
+				posix_spawnattr_set_persona_gid_np(&attr, 0);
+
+				return posix_spawn(NULL, argv[0], NULL, &attr, argv, envp);
 			}
 			else if(strcmp(argv[1], "server") == 0)
 			{
