@@ -8,9 +8,9 @@
 #include <mach-o/fat.h>
 #include <sys/stat.h>
 #include <roothide.h>
+#include "commlib.h"
 
-
-int realstore(const char* path, const char* extra_entitlements, const char* strip_entitlements);
+int realstore(const char* path, const char* extra_entitlements, const char* strip_entitlements, const char* teamID);
 
 // CSCommon.h
 typedef struct CF_BRIDGED_TYPE(id) __SecCode const* SecStaticCodeRef; /* code on disk */
@@ -184,6 +184,25 @@ NSDictionary* dumpEntitlementsFromBinaryAtPath(NSString *binaryPath)
     return entitlements;
 }
 
+NSString* getTeamIDFromBinaryAtPath(NSString *binaryPath)
+{
+	SecStaticCodeRef codeRef = getStaticCodeRef(binaryPath);
+	if(codeRef == NULL) {
+		return nil;
+	}
+	
+    CFDictionaryRef signingInfo = NULL;
+    OSStatus result = SecCodeCopySigningInformation(codeRef, kSecCSSigningInformation, &signingInfo);
+    if(result != errSecSuccess) return nil;
+        
+    NSString* teamID = (NSString*)CFDictionaryGetValue(signingInfo, CFSTR("teamid"));
+	
+	CFRelease(signingInfo);
+	CFRelease(codeRef);
+	
+	return teamID;
+}
+
 NSDictionary* infoDictionaryForAppPath(NSString* appPath)
 {
 	if(!appPath) return nil;
@@ -197,8 +216,6 @@ NSString* appMainExecutablePathForAppPath(NSString* appPath)
 	return [appPath stringByAppendingPathComponent:infoDictionaryForAppPath(appPath)[@"CFBundleExecutable"]];
 }
 
-
-
 BOOL isSameFile(NSString *path1, NSString *path2)
 {
 	struct stat sb1;
@@ -208,8 +225,7 @@ BOOL isSameFile(NSString *path1, NSString *path2)
 	return sb1.st_ino == sb2.st_ino;
 }
 
-
-BOOL isSubpathOf(NSString *parentPath, NSString *subPath) 
+BOOL isSubpathOf(NSString *subPath, NSString *parentPath) 
 {
     NSURL *parentURL = [NSURL fileURLWithPath:parentPath].URLByStandardizingPath;
     NSURL *subURL = [NSURL fileURLWithPath:subPath].URLByStandardizingPath;
@@ -230,100 +246,11 @@ BOOL isSubpathOf(NSString *parentPath, NSString *subPath)
     return YES;
 }
 
-void machoEnumerateArchs(FILE* machoFile, bool (^archEnumBlock)(struct mach_header_64* header, uint32_t offset))
-{
-	struct mach_header_64 mh={0};
-	if(fseek(machoFile,0,SEEK_SET)!=0)return;
-	if(fread(&mh,sizeof(mh),1,machoFile)!=1)return;
-	
-	if(mh.magic==FAT_MAGIC || mh.magic==FAT_CIGAM)//and || mh.magic==FAT_MAGIC_64 || mh.magic==FAT_CIGAM_64? with fat_arch_64
-	{
-		struct fat_header fh={0};
-		if(fseek(machoFile,0,SEEK_SET)!=0)return;
-		if(fread(&fh,sizeof(fh),1,machoFile)!=1)return;
-		
-		for(int i = 0; i < OSSwapBigToHostInt32(fh.nfat_arch); i++)
-		{
-			uint32_t archMetadataOffset = sizeof(fh) + sizeof(struct fat_arch) * i;
-
-			struct fat_arch fatArch={0};
-			if(fseek(machoFile, archMetadataOffset, SEEK_SET)!=0)break;
-			if(fread(&fatArch, sizeof(fatArch), 1, machoFile)!=1)break;
-
-			if(fseek(machoFile, OSSwapBigToHostInt32(fatArch.offset), SEEK_SET)!=0)break;
-			if(fread(&mh, sizeof(mh), 1, machoFile)!=1)break;
-
-			if(mh.magic != MH_MAGIC_64 && mh.magic != MH_CIGAM_64) continue; //require Macho64
-			
-			if(!archEnumBlock(&mh, OSSwapBigToHostInt32(fatArch.offset))) 
-				break;
-		}
-	}
-	else if(mh.magic == MH_MAGIC_64 || mh.magic == MH_CIGAM_64) //require Macho64
-	{
-		archEnumBlock(&mh, 0);
-	}
-}
-
-void machoGetInfo(FILE* candidateFile, bool *isMachoOut, bool *isLibraryOut)
-{
-	if (!candidateFile) return;
-
-	__block bool isMacho=false;
-	__block bool isLibrary = false;
-	
-	machoEnumerateArchs(candidateFile, ^bool(struct mach_header_64* header, uint32_t offset) {
-		switch(OSSwapLittleToHostInt32(header->filetype)) {
-			case MH_DYLIB:
-			case MH_BUNDLE:
-				isLibrary = true;
-			case MH_EXECUTE:
-				isMacho = true;
-				return false;
-
-			default:
-				return true;
-		}
-	});
-
-	if (isMachoOut) *isMachoOut = isMacho;
-	if (isLibraryOut) *isLibraryOut = isLibrary;
-}
-
 BOOL isMachoFile(NSString* filePath)
 {
-	FILE* file = fopen(filePath.fileSystemRepresentation, "r");
-	if(!file) return NO;
 	bool ismacho=false, islib=false;
-	machoGetInfo(file, &ismacho, &islib);
-	fclose(file);
+	machoGetInfo(filePath.fileSystemRepresentation, &ismacho, &islib);
 	return ismacho;
-}
-
-
-#define APP_PATH_PREFIX "/private/var/containers/Bundle/Application/"
-
-BOOL isDefaultInstallationPath(NSString* _path)
-{
-    if(!_path) return NO;
-
-    const char* path = _path.UTF8String;
-    
-    char rp[PATH_MAX];
-    if(!realpath(path, rp)) return NO;
-
-    if(strncmp(rp, APP_PATH_PREFIX, sizeof(APP_PATH_PREFIX)-1) != 0)
-        return NO;
-
-    char* p1 = rp + sizeof(APP_PATH_PREFIX)-1;
-    char* p2 = strchr(p1, '/');
-    if(!p2) return NO;
-
-    //is normal app or jailbroken app/daemon?
-    if((p2 - p1) != (sizeof("xxxxxxxx-xxxx-xxxx-yxxx-xxxxxxxxxxxx")-1))
-        return NO;
-
-    return YES;
 }
 
 NSArray* blockedResignBundles = @[
@@ -341,15 +268,14 @@ int signApp(NSString* appPath)
 	if([appPath containsString:@"/Applications/"]) {
 		//jailbroken apps or system apps
 
-		baseEntitlements = [NSDictionary dictionaryWithContentsOfFile:jbroot(@"/basebin/bootstrap.entitlements")];
+		baseEntitlements = [NSDictionary dictionaryWithContentsOfFile:jbroot(@"/basebin/entitlements/bootstrap.entitlements")];
 
-	} else if(isDefaultInstallationPath(appPath)) {
+	} else if(isDefaultInstallationPath(appPath.fileSystemRepresentation)) {
 
-		 if([NSFileManager.defaultManager fileExistsAtPath:[appPath stringByAppendingString:@"/../_TrollStore"]]
-		 	|| [NSFileManager.defaultManager fileExistsAtPath:[appPath stringByAppendingString:@"/../_TrollStoreLite"]])
+		 if(hasTrollstoreMarker(appPath.fileSystemRepresentation))
 		 {
 			//trollstored apps
-			baseEntitlements = [NSDictionary dictionaryWithContentsOfFile:jbroot(@"/basebin/bootstrap.entitlements")];
+			baseEntitlements = [NSDictionary dictionaryWithContentsOfFile:jbroot(@"/basebin/entitlements/bootstrap.entitlements")];
 		 } else {
 			baseEntitlements = @{@"get-task-allow":@YES};
 		 }
@@ -363,6 +289,9 @@ int signApp(NSString* appPath)
 	if(!mainExecutablePath) return 176;
 
 	if(![[NSFileManager defaultManager] fileExistsAtPath:mainExecutablePath]) return 174;
+
+	BOOL encryptedApp = [[NSFileManager defaultManager] fileExistsAtPath:[appPath stringByAppendingPathComponent:@"SC_Info"]];
+	NSString* appTeamID = getTeamIDFromBinaryAtPath(mainExecutablePath);
 
 	NSURL* fileURL;
 	NSDirectoryEnumerator *enumerator;
@@ -426,6 +355,10 @@ int signApp(NSString* appPath)
 					[extraEntitlements addEntriesFromDictionary:entitlementsToUse];
 				}
 			}
+			else if(encryptedApp) {
+				//only re-sign main executable for encrypted apps
+				continue;
+			}
 
 			if (!entitlementsToUse) entitlementsToUse = [NSMutableDictionary new];
 
@@ -460,7 +393,7 @@ int signApp(NSString* appPath)
 				}
 			}
 
-			NSString* specialEntitlementsPath = jbroot([NSString stringWithFormat:@"/basebin/entitlements/%@.extra", bundleId]);
+			NSString* specialEntitlementsPath = jbroot([NSString stringWithFormat:@"/basebin/entitlements/bundles/%@.extra", bundleId]);
 			if([NSFileManager.defaultManager fileExistsAtPath:specialEntitlementsPath])
 				extraEntitlements = [NSMutableDictionary dictionaryWithContentsOfFile:specialEntitlementsPath];
 
@@ -469,15 +402,14 @@ int signApp(NSString* appPath)
 
 
 			NSString* stripEntitlements = nil;
-			NSString* stripEntitlementsPath = jbroot([NSString stringWithFormat:@"/basebin/entitlements/%@.strip", bundleId]);
+			NSString* stripEntitlementsPath = jbroot([NSString stringWithFormat:@"/basebin/entitlements/bundles/%@.strip", bundleId]);
 			if([NSFileManager.defaultManager fileExistsAtPath:stripEntitlementsPath])
 				stripEntitlements = [NSString stringWithContentsOfFile:stripEntitlementsPath encoding:NSUTF8StringEncoding error:nil];
 
-			assert(realstore(bundleMainExecutablePath.UTF8String, entitlementsString.UTF8String, stripEntitlements.UTF8String) == 0);
+			assert(realstore(bundleMainExecutablePath.UTF8String, entitlementsString.UTF8String, stripEntitlements.UTF8String, appTeamID.UTF8String) == 0);
 			[signedMainExecutables addObject:bundleMainExecutablePath];
 		}
 	}
-
 
 	enumerator = [[NSFileManager defaultManager] enumeratorAtURL:[NSURL fileURLWithPath:appPath] includingPropertiesForKeys:@[NSURLIsRegularFileKey] options:0 errorHandler:nil];
 	while(fileURL = [enumerator nextObject])
@@ -486,9 +418,14 @@ int signApp(NSString* appPath)
         [fileURL getResourceValue:&isFile forKey:NSURLIsRegularFileKey error:nil];
         if (!isFile || ![isFile boolValue]) continue;
 
+		if(encryptedApp) {
+			//only re-sign main executable for encrypted apps
+			continue;
+		}
+
 		BOOL blockedFile=NO;
 		for(NSString* blockedBundlePath in blockedBundlePaths) {
-			if(isSubpathOf(blockedBundlePath, fileURL.path)) {
+			if(isSubpathOf(fileURL.path, blockedBundlePath)) {
 				// NSLog(@"skip blocked bundle %@", fileURL);
 				blockedFile=YES;
 				break;
@@ -511,7 +448,7 @@ int signApp(NSString* appPath)
 		NSData *entitlementsXML = [NSPropertyListSerialization dataWithPropertyList:baseEntitlements format:NSPropertyListXMLFormat_v1_0 options:0 error:nil];
 		NSString* entitlementsString = [[NSString alloc] initWithData:entitlementsXML encoding:NSUTF8StringEncoding];
 
-		assert(realstore(fileURL.path.UTF8String, entitlementsString.UTF8String, NULL) == 0);
+		assert(realstore(fileURL.path.UTF8String, entitlementsString.UTF8String, NULL, appTeamID.UTF8String) == 0);
 	}
 
 	return 0;
@@ -519,12 +456,17 @@ int signApp(NSString* appPath)
 
 int main(int argc, char *argv[], char *envp[]) {
 	@autoreleasepool {
-		assert(argc >= 2);
-		if(argc >= 3) {
-			assert(strcmp(argv[1],"executable")==0);
-			printf("%s\n", jbroot(argv[2]));
-			return realstore(jbroot(argv[2]), NULL, NULL);
+		if(argc < 2) {
+			printf("Usage: %s <path to app bundle or executable> [TeamID]\n", getprogname());
+			return 1;
 		}
-		return signApp([NSString stringWithUTF8String:jbroot(argv[1])]);
+
+        BOOL isDirectory = NO;
+		if(![NSFileManager.defaultManager fileExistsAtPath:@(argv[1]) isDirectory:&isDirectory]) {
+			printf("Can not access to '%s'\n", argv[1]);
+			return 1;
+		}
+
+		return isDirectory ? signApp(@(argv[1])) : realstore(argv[1], NULL, NULL, argv[2]);
 	}
 }

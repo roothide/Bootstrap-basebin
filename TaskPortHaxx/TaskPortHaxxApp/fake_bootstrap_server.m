@@ -12,7 +12,7 @@
 #import "Header.h"
 
 typedef boolean_t (*dispatch_mig_callback_t)(mach_msg_header_t *message, mach_msg_header_t *reply);
-int xpc_pipe_try_receive(mach_port_t p, xpc_object_t *message, mach_port_t *recvp, dispatch_mig_callback_t callout, size_t maxmsgsz, uint64_t flags);
+//int xpc_pipe_try_receive(mach_port_t p, xpc_object_t *message, mach_port_t *recvp, dispatch_mig_callback_t callout, size_t maxmsgsz, uint64_t flags);
 int xpc_receive_mach_msg(mach_msg_header_t *msg, uint64_t x1, uint64_t x2, uint64_t x3, xpc_object_t *request);
 void xpc_dictionary_get_audit_token(xpc_object_t, audit_token_t *);
 
@@ -36,6 +36,7 @@ boolean_t dispatch_mig_callback(mach_msg_header_t *request, mach_msg_header_t *r
         xpc_object_t reply = xpc_dictionary_create_reply(reqObj);
         char *name = (char *)xpc_dictionary_get_string(reqObj, "name");
         if (name && !strcmp(name, "port")) {
+            assert(MACH_PORT_VALID(dtsecurityTaskPort));
             xpc_dictionary_set_mach_send(reply, "port", dtsecurityTaskPort);
         } else {
             xpc_dictionary_set_int64(reply, "error", 0x9c);
@@ -47,7 +48,7 @@ boolean_t dispatch_mig_callback(mach_msg_header_t *request, mach_msg_header_t *r
         // use this to crash the client
         xpc_object_t reply = xpc_dictionary_create_reply(reqObj);
         // __XPC_IS_CRASHING_AFTER_AN_ATTEMPT_TO_CREATE_A_PROHIBITED_DOMAIN__ is not available on iOS 17.0
-        //xpc_dictionary_set_int64(reply, "error", 0x9c);
+        // xpc_dictionary_set_int64(reply, "error", 0x9c);
         // instead, we trip other cold errors
         xpc_dictionary_set_int64(reply, "req_pid", -1);
         xpc_dictionary_set_int64(reply, "rec_execcnt", -1);
@@ -59,9 +60,13 @@ boolean_t dispatch_mig_callback(mach_msg_header_t *request, mach_msg_header_t *r
 }
 
 void fake_bootstrap_server(mach_port_t server_port) {
+    printf("fake_bootstrap_server started on port 0x%x\n", server_port);
     kern_return_t kr;
     do {
-        kr = xpc_pipe_try_receive(server_port, NULL, NULL, dispatch_mig_callback, 0x4000, 0);
+        xpc_object_t request = NULL;
+        mach_port_t out_port = MACH_PORT_NULL;
+        kr = xpc_pipe_try_receive(server_port, &request, &out_port, dispatch_mig_callback, 0x4000, 0);
+        printf("xpc_pipe_try_receive returned: %08X, out_port: 0x%x, request=%s\n", kr, out_port, request?xpc_copy_description(request):"NULL");
         if (kr != KERN_SUCCESS) {
             printf("xpc_pipe_try_receive failed\n");
             continue;
@@ -78,7 +83,11 @@ mach_port_t setup_fake_bootstrap_server(void) {
 //    assert(kr == KERN_SUCCESS);
 //    kr = bootstrap_register(bootstrap_port, "com.kdt.taskporthaxx.fake_bootstrap_port", server_port);
     kr = bootstrap_check_in(bootstrap_port, "com.kdt.taskporthaxx.fake_bootstrap_port", &server_port);
-    assert(kr == KERN_SUCCESS);
+    if(kr != KERN_SUCCESS || !MACH_PORT_VALID(server_port)) {
+        printf("[%d] bootstrap_check_in failed: %08X:%s\n", getpid(), kr, mach_error_string(kr));
+        abort();
+    }
+    printf("Fake bootstrap server registered on port 0x%x\n", server_port);
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         fake_bootstrap_server(server_port);
     });

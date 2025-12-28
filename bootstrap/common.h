@@ -4,9 +4,7 @@
 #include <spawn.h>
 #include <stdbool.h>
 #include <string.h>
-#include "assert.h"
-
-extern char** environ;
+#include "commlib.h"
 
 extern char** NXArgv; // __NSGetArgv() not working on ctor
 extern int    NXArgc;
@@ -14,20 +12,17 @@ extern int    NXArgc;
 #define EXPORT __attribute__ ((visibility ("default")))
 
 #ifdef DEBUG
-void bootstrapLog(const char* format, ...);
-#define SYSLOG	bootstrapLog
+extern void bootstrapLog(const char* format, ...);
+extern void (*bootstrapLogFunction)(const char* format, ...);
+#define SYSLOG(...) do { if(bootstrapLogFunction)bootstrapLogFunction(__VA_ARGS__); } while(0)
 #else
 #define SYSLOG(...)
 #endif
 
-bool stringStartsWith(const char *str, const char* prefix);
-bool stringEndsWith(const char* str, const char* suffix);
+bool string_has_prefix(const char *str, const char* prefix);
+bool string_has_suffix(const char* str, const char* suffix);
 
 void fixsuid();
-
-pid_t __getppid();
-
-int requireJIT();
 
 extern struct mach_header_64* _dyld_get_prog_image_header();
 extern intptr_t _dyld_get_image_slide(struct mach_header_64* mh);

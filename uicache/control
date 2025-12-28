@@ -1,4 +1,4 @@
-Package: com.roothide.uicache
+Package: com.roothide.bootstrap.uicache
 Name: uicache
 Version: 0.0.1
 Architecture: iphoneos-arm

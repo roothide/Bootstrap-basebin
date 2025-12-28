@@ -3651,7 +3651,8 @@ int main(int argc, char *argv[]) {
                 ldid::Unsign(input.data(), input.size(), output, dummy_);
             else {
                 std::string identifier(flag_I ?: split.base.c_str());
-                if (flag_s) {
+                /*always keep identifier */ //if (flag_s) 
+                {
                     FatHeader fat_header(input.data(), input.size());
                     _foreach (mach_header, fat_header.GetMachHeaders()) {
                         struct linkedit_data_command *signature(NULL);

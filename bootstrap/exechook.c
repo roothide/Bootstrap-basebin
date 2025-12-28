@@ -15,152 +15,86 @@
 #include "common.h"
 #include "envbuf.h"
 
-
-// Derived from posix_spawnp in Apple libc
-int resolvePath(const char *file, const char *searchPath, int (^attemptHandler)(char *path))
+int posix_spawn_hook(pid_t *restrict pid, const char *restrict path, const posix_spawn_file_actions_t *restrict file_actions, const posix_spawnattr_t *restrict attrp, char *const argv[restrict], char *const envp[restrict])
 {
-	const char *env_path;
-	char *bp;
-	char *cur;
-	char *p;
-	char **memp;
-	int lp;
-	int ln;
-	int cnt;
-	int err = 0;
-	int eacces = 0;
-	struct stat sb;
-	char path_buf[PATH_MAX];
+	SYSLOG("posix_spawn_hook: %s\n", path);
 
-	env_path = searchPath;
-	if (!env_path) {
-		env_path = getenv("PATH");
-		if (!env_path) {
-			env_path = _PATH_DEFPATH;
-		}
+	if(!path) {
+		return posix_spawn(pid, path, file_actions, attrp, argv, envp);
 	}
 
-	/* If it's an absolute or relative path name, it's easy. */
-	if (index(file, '/')) {
-		bp = (char *)file;
-		cur = NULL;
-		goto retry;
-	}
-	bp = path_buf;
+	bool should_inject = true;
 
-	/* If it's an empty path name, fail in the usual POSIX way. */
-	if (*file == '\0')
-		return (ENOENT);
+	char executablePath[PATH_MAX]={0};
+	uint32_t bufsize=sizeof(executablePath);
+	ASSERT(_NSGetExecutablePath(executablePath, &bufsize) == 0);
 
-	if ((cur = alloca(strlen(env_path) + 1)) == NULL)
-		return ENOMEM;
-	strcpy(cur, env_path);
-	while ((p = strsep(&cur, ":")) != NULL) {
-		/*
-		 * It's a SHELL path -- double, leading and trailing colons
-		 * mean the current directory.
-		 */
-		if (*p == '\0') {
-			p = ".";
-			lp = 1;
-		} else {
-			lp = strlen(p);
-		}
-		ln = strlen(file);
-
-		/*
-		 * If the path is too long complain.  This is a possible
-		 * security issue; given a way to make the path too long
-		 * the user may spawn the wrong program.
-		 */
-		if (lp + ln + 2 > sizeof(path_buf)) {
-			err = ENAMETOOLONG;
-			goto done;
-		}
-		bcopy(p, path_buf, lp);
-		path_buf[lp] = '/';
-		bcopy(file, path_buf + lp + 1, ln);
-		path_buf[lp + ln + 1] = '\0';
-
-retry:		err = attemptHandler(bp);
-		switch (err) {
-		case E2BIG:
-		case ENOMEM:
-		case ETXTBSY:
-			goto done;
-		case ELOOP:
-		case ENAMETOOLONG:
-		case ENOENT:
-		case ENOTDIR:
-			break;
-		case ENOEXEC:
-			goto done;
-		default:
-			/*
-			 * EACCES may be for an inaccessible directory or
-			 * a non-executable file.  Call stat() to decide
-			 * which.  This also handles ambiguities for EFAULT
-			 * and EIO, and undocumented errors like ESTALE.
-			 * We hope that the race for a stat() is unimportant.
-			 */
-			if (stat(bp, &sb) != 0)
-				break;
-			if (err == EACCES) {
-				eacces = 1;
-				continue;
+	if(isSubPathOf(path, jbroot("/")))
+	{
+		if(string_has_suffix(executablePath, "/usr/libexec/xpcproxy"))
+		{
+			if(__builtin_available(iOS 16.0, *)) {
+				if(attrp) {
+					posix_spawnattr_set_launch_type_np(attrp, 0);
+				}
 			}
-			goto done;
+		}
+
+		if(string_has_prefix(rootfs(path), "/basebin/")) {
+			should_inject = false;
 		}
 	}
-	if (eacces)
-		err = EACCES;
 	else
-		err = ENOENT;
-done:
-	return (err);
-}
-
-void enumeratePathString(const char *pathsString, void (^enumBlock)(const char *pathString, bool *stop))
-{
-	char *pathsCopy = strdup(pathsString);
-	char *pathString = strtok(pathsCopy, ":");
-	while (pathString != NULL) {
-		bool stop = false;
-		enumBlock(pathString, &stop);
-		if (stop) break;
-		pathString = strtok(NULL, ":");
+	{
+		should_inject = false;
 	}
-	free(pathsCopy);
-}
 
-// extern const char* bootstrapath;
-int posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
-					   const posix_spawn_file_actions_t *restrict file_actions,
-					   const posix_spawnattr_t *restrict attrp,
-					   char *const argv[restrict],
-					   char *const envp[restrict])
-{
-    const char* preload = envbuf_getenv((const char **)envp, "DYLD_INSERT_LIBRARIES");
-    char **envc = envbuf_mutcopy((const char **)envp);
+    char **envc = envbuf_mutcopy(envp);
 
-	bool isBootstrapApp = stringEndsWith(path, "/Bootstrap.app/Bootstrap");
+	const char* preload = envbuf_getenv(envc, "DYLD_INSERT_LIBRARIES");
 
-	const char* bootstrapath = jbroot("/basebin/bootstrap.dylib");
-    if(!isBootstrapApp) if(!preload || !strstr(preload, "/basebin/bootstrap.dylib"))
-    {
-        int newlen = strlen(bootstrapath)+1;
-        if(preload && *preload) newlen += strlen(preload);
+	if(should_inject)
+	{
+		if(!preload || !strstr(preload, "/basebin/bootstrap.dylib"))
+		{
+			const char* bootstrapath = jbroot("/basebin/bootstrap.dylib");
+			if(preload && *preload) {
+				char newpreload[strlen(preload)+strlen(bootstrapath)+2];
+				snprintf(newpreload, sizeof(newpreload), "%s:%s", bootstrapath, preload);
+				envbuf_setenv(&envc, "DYLD_INSERT_LIBRARIES", newpreload, 1);
+			} else {
+				envbuf_setenv(&envc, "DYLD_INSERT_LIBRARIES", bootstrapath, 1);
+			}
+		}
+	}
+	else
+	{
+		if(preload && strstr(preload, "/basebin/bootstrap.dylib"))
+		{
+			if(strstr(preload, ":"))
+			{
+				char* newpreload = malloc(strlen(preload)+1);
+				newpreload[0] = 0;
 
-        char newpreload[newlen];
-        strcpy(newpreload, bootstrapath);
+				string_enumerate_components(preload, ":", ^(const char *lib, bool *stop) {
+					if (!strstr(lib, "/basebin/bootstrap.dylib")) {
+						if (newpreload[0]) {
+							strcat(newpreload, ":");
+						}
+						strcat(newpreload, lib);
+					}
+				});
 
-        if(preload && *preload) {
-            strcat(newpreload, ":");
-            strcat(newpreload, preload);
-        }
+				envbuf_setenv(&envc, "DYLD_INSERT_LIBRARIES", newpreload, 1);
 
-        envbuf_setenv(&envc, "DYLD_INSERT_LIBRARIES", newpreload, 1);
-    }
+				free(newpreload);
+			}
+			else
+			{
+				envbuf_unsetenv(&envc, "DYLD_INSERT_LIBRARIES");
+			}
+		}
+	}
 	
     int retval = posix_spawn(pid, path, file_actions, attrp, argv, envc);
     envbuf_free(envc);

@@ -14,6 +14,8 @@
 #include <CoreFoundation/CoreFoundation.h>
 
 #include "common.h"
+#include "libbsd.h"
+#include "ipc.h"
 
 //#define FORK_DEBUG
 
@@ -476,10 +478,12 @@ void parent_fixup(pid_t childPid)
 	char msg = ' ';
 	read(childToParentPipe[0], &msg, sizeof(msg));
 	
-	int bsd_enableJIT2(pid_t pid);
+	//disable ipc log during fork()
+	bool ipclog_status = set_ipclog_enabled(false);
 	if(bsd_enableJIT2(childPid) != 0) {
         kill(childPid, SIGKILL);
     }
+    set_ipclog_enabled(ipclog_status);
 
 	// Tell child we are done, this will make it resume
 	write(parentToChildPipe[1], &msg, sizeof(msg));
@@ -528,7 +532,7 @@ _do_fork(bool libsystem_atfork_handlers_only)
 	forklog("atfork inited");
 
     //make sure it's not reparented to launchd (cause we cannot detect reparent from user land)
-    if(forkfix_method_2 && __getppid()==1 && kill(getpgrp(), 0)==0) {
+    if(forkfix_method_2 && get_real_ppid()==1 && kill(getpgrp(), 0)==0 && is_app_coalition()) {
         //prevent sptm panic
         return -1;
     }

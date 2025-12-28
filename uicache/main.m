@@ -7,8 +7,8 @@
 #include <sys/stat.h>
 #include <objc/runtime.h>
 #include <roothide.h>
-
-#include "../bootstrapd/libbsd.h"
+#include "commlib.h"
+#include "libbsd.h"
 
 #define APP_PATH	@"/Applications"
 
@@ -324,32 +324,6 @@ NSString *constructTeamIdentifierForEntitlements(NSDictionary *entitlements) {
 	return nil;
 }
 
-#define APP_PATH_PREFIX "/private/var/containers/Bundle/Application/"
-
-BOOL isDefaultInstallationPath(NSString* _path)
-{
-	if(!_path) return NO;
-
-	const char* path = _path.UTF8String;
-	
-	char rp[PATH_MAX];
-	if(!realpath(path, rp)) return NO;
-
-	if(strncmp(rp, APP_PATH_PREFIX, sizeof(APP_PATH_PREFIX)-1) != 0)
-		return NO;
-
-	char* p1 = rp + sizeof(APP_PATH_PREFIX)-1;
-	char* p2 = strchr(p1, '/');
-	if(!p2) return NO;
-
-	//is normal app or jailbroken app/daemon? 
-	if((p2 - p1) != (sizeof("xxxxxxxx-xxxx-xxxx-yxxx-xxxxxxxxxxxx")-1))
-		return NO;
-
-	return YES;
-}
-
-
 void* _CTServerConnectionCreate(CFAllocatorRef, void *, void *);
 int64_t _CTServerConnectionSetCellularUsagePolicy(CFTypeRef* ct, NSString* identifier, NSDictionary* policies);
 
@@ -392,11 +366,6 @@ NSArray* patchRequiredAppPlugins = @[
     @"com.apple.shortcuts.Run-Workflow",
 ];
 
-NSArray* appleInternalIdentifiers = @[
-	@"com.apple.Terminal",
-];
-
-
 //sometimes launching the app may lose those environment variables(if not being containerized in lsd registry?)
 NSDictionary *constructEnvironmentVariablesForContainerPath(NSString *mainBundleIdentifier, NSString *mainBundlePath, NSString *containerPath, BOOL isContainerized) 
 {
@@ -404,12 +373,11 @@ NSDictionary *constructEnvironmentVariablesForContainerPath(NSString *mainBundle
 
 	//Ignore the app from trollstore as TrollStore will reset its data container path when rebuilding icon cache
 	//and its home directory will be redirected to jbroot by bootstrap.dylib (if tweak enabled)
-	if([NSFileManager.defaultManager fileExistsAtPath:[mainBundlePath stringByAppendingString:@"/../_TrollStore"]]
-		|| [NSFileManager.defaultManager fileExistsAtPath:[mainBundlePath stringByAppendingString:@"/../_TrollStoreLite"]]) {
+	if(hasTrollstoreMarker(mainBundlePath.fileSystemRepresentation)) {
 		using_jbroot = NO;
 	} else if(![NSFileManager.defaultManager fileExistsAtPath:[mainBundlePath stringByAppendingPathComponent:@".jbroot"]]) {
 		using_jbroot = NO;
-	} else if([mainBundleIdentifier hasPrefix:@"com.apple."] && ![appleInternalIdentifiers containsObject:mainBundleIdentifier]) {
+	} else if([mainBundleIdentifier hasPrefix:@"com.apple."] && !is_apple_internal_identifier(mainBundleIdentifier.UTF8String)) {
 		using_jbroot = NO;
 	}
 
@@ -422,7 +390,26 @@ NSDictionary *constructEnvironmentVariablesForContainerPath(NSString *mainBundle
 	}.mutableCopy;
 }
 
-int execBinary(const char* path, char** argv)
+NSString* getTeamIDFromBinaryAtPath(NSString *binaryPath)
+{
+	SecStaticCodeRef codeRef = getStaticCodeRef(binaryPath);
+	if(codeRef == NULL) {
+		return nil;
+	}
+	
+    CFDictionaryRef signingInfo = NULL;
+    OSStatus result = SecCodeCopySigningInformation(codeRef, kSecCSSigningInformation, &signingInfo);
+    if(result != errSecSuccess) return nil;
+        
+    NSString* teamID = (NSString*)CFDictionaryGetValue(signingInfo, CFSTR("teamid"));
+	
+	CFRelease(signingInfo);
+	CFRelease(codeRef);
+	
+	return teamID;
+}
+
+int execBinary(const char* path, const char** argv)
 {
 	pid_t pid=0;
 	int ret = posix_spawn(&pid, path, NULL, NULL, (char* const*)argv, /*environ* ignore preload lib*/ NULL);
@@ -451,14 +438,14 @@ int spawner(NSString* executablePath)
 	posix_spawnattr_setflags(&attr, POSIX_SPAWN_START_SUSPENDED);
 
 	pid_t pid=0;
-	char* args[] = {(char*)executablePath.UTF8String,(char*)executablePath.UTF8String,NULL};
-	int ret = posix_spawn(&pid, args[0], NULL, &attr, args, NULL);
+	const char* args[] = {executablePath.fileSystemRepresentation, executablePath.fileSystemRepresentation,NULL};
+	int ret = posix_spawn(&pid, args[0], NULL, &attr, (char*const*)args, NULL);
 	if(ret != 0) {
 		NSLog(@"Error: %d %s", ret, strerror(ret));
 		return -1;
 	}
 	if(pid) kill(pid, SIGKILL);
-	NSLog(@"pid: %d of %@", pid, executablePath);
+	printf("sapwned pid: %d of %s\n", pid, executablePath.fileSystemRepresentation);
 	return 0;
 }
 
@@ -472,7 +459,8 @@ void activator(NSString* bundlePath)
 		NSString *filePath = fileURL.path;
 		if ([filePath.lastPathComponent isEqualToString:@"Info.plist"]) 
         {
-            if(![fm fileExistsAtPath:[[filePath stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"SC_Info"]])
+			NSString* dirPath = filePath.stringByDeletingLastPathComponent;
+            if(![fm fileExistsAtPath:[dirPath stringByAppendingPathComponent:@"SC_Info"]])
                 continue;
 
 			NSDictionary *infoDict = [NSDictionary dictionaryWithContentsOfFile:filePath];
@@ -484,19 +472,15 @@ void activator(NSString* bundlePath)
 
 			if ([infoDict[@"CFBundlePackageType"] isEqualToString:@"FMWK"]) continue;
 
-			NSString *bundleMainExecutablePath = [[filePath stringByDeletingLastPathComponent] stringByAppendingPathComponent:bundleExecutable];
-			if (![fm fileExistsAtPath:bundleMainExecutablePath]) continue;
+			NSString *bundleExecutablePath = [dirPath stringByAppendingPathComponent:bundleExecutable];
+			if (![fm fileExistsAtPath:bundleExecutablePath]) continue;
 
 
 			// if ([infoDict[@"NSExtension"][@"NSExtensionPointIdentifier"] isEqualToString:@"com.apple.widget-extension"]) continue;
             
-			NSLog(@"bundle=%@ type=%@", bundleId, infoDict[@"NSExtension"][@"NSExtensionPointIdentifier"]);
+			// NSLog(@"active bundle=%@, package type=%@, extension type=%@", bundleId, infoDict[@"CFBundlePackageType"], infoDict[@"NSExtension"][@"NSExtensionPointIdentifier"]);
 
-			if ([infoDict[@"CFBundlePackageType"] isEqualToString:@"APPL"]) {
-				spawner(bundleMainExecutablePath);
-			} else {
-				spawner(bundleMainExecutablePath);
-			}
+			spawner(bundleExecutablePath);
         }
     }
 }
@@ -526,8 +510,10 @@ int patchonly=0;
 
 void registerPath(NSString *path, BOOL forceSystem)
 {
-	const char* sbtoken = bsd_getsbtoken();
-	assert(sbtoken != NULL);
+	const char* __sbtoken = bsd_getsbtoken();
+	assert(__sbtoken != NULL);
+	NSString* sbtoken = @(__sbtoken);
+	free((void*)__sbtoken);
 
 	LSApplicationWorkspace *workspace = [LSApplicationWorkspace defaultWorkspace];
 
@@ -545,6 +531,7 @@ void registerPath(NSString *path, BOOL forceSystem)
 	}
 
 	NSString *appExecutablePath = [path stringByAppendingPathComponent:appInfoPlist[@"CFBundleExecutable"]];
+	NSString* appTeamID = getTeamIDFromBinaryAtPath(appExecutablePath);
 
 	BOOL allowURLSchemes = [NSFileManager.defaultManager fileExistsAtPath:jbroot(@"/var/mobile/.allow_url_schemes")];
 
@@ -567,89 +554,99 @@ void registerPath(NSString *path, BOOL forceSystem)
 		appInfoPlist[@"CFBundleURLTypes"] = urltypes.copy;
 	}
 
-    BOOL isAppleBundle = [appBundleID hasPrefix:@"com.apple."];
+    BOOL isAppleBundle = [appBundleID hasPrefix:@"com.apple."] && !is_apple_internal_identifier(appBundleID.UTF8String);
 
 	NSString* executableName = appInfoPlist[@"CFBundleExecutable"];
-	// if([executableName hasPrefix:@"."]) executableName = [executableName substringFromIndex:1];
 
 	NSString* jbrootpath = [path stringByAppendingPathComponent:@".jbroot"];
 	BOOL jbrootexists = [NSFileManager.defaultManager fileExistsAtPath:jbrootpath];
 
-	//try
-	unlink([path stringByAppendingPathComponent:@".preload"].UTF8String);
-	unlink([path stringByAppendingPathComponent:@".prelib"].UTF8String);
+	struct stat preloadst = {0};
+	assert(stat(jbroot(@"/basebin/preload.dylib").fileSystemRepresentation, &preloadst) == 0);
 	
-	NSString* rebuildFile = [path stringByAppendingPathComponent:@".rebuild"];
+	NSString* rebuildFilePath = [path stringByAppendingPathComponent:@".rebuild"];
 
 	if(jbrootexists)
 	{
-		if(!isAppleBundle
-			 && ![NSFileManager.defaultManager fileExistsAtPath:[path stringByAppendingString:@"/../_TrollStore"]]
-			  && ![NSFileManager.defaultManager fileExistsAtPath:[path stringByAppendingString:@"/../_TrollStoreLite"]])
+		if(!isAppleBundle && !hasTrollstoreMarker(path.fileSystemRepresentation))
 		{
 			freeplay(appBundleID, path);
 		}
 
-		BOOL requiredRebuild = NO;
+		NSMutableDictionary* rebuildStatus = [NSMutableDictionary dictionaryWithContentsOfFile:rebuildFilePath];
 
-		NSMutableDictionary* rebuildStatus = [NSMutableDictionary dictionaryWithContentsOfFile:rebuildFile];
+		struct stat st={0}; //st_dev may change after reboot
+		assert(stat(appExecutablePath.fileSystemRepresentation, &st) == 0);
 
-		struct stat st={0};
-		if(stat(appExecutablePath.fileSystemRepresentation, &st) == 0)
+		if(!rebuildStatus
+			|| [rebuildStatus[@"st_ino"] unsignedLongLongValue] != st.st_ino
+			|| [rebuildStatus[@"st_mtime"] longValue] != st.st_mtimespec.tv_sec 
+			|| [rebuildStatus[@"st_mtimensec"] longValue] != st.st_mtimespec.tv_nsec)
 		{
-			requiredRebuild = YES;
+			// printf(@"rebuild %ld=%d, %llu=%llu, %ld=%ld, %ld=%ld\n", 
+			// [rebuildStatus[@"st_dev"] longValue], st.st_dev
+			// , [rebuildStatus[@"st_ino"] unsignedLongLongValue], st.st_ino
+			// , [rebuildStatus[@"st_mtime"] longValue], st.st_mtimespec.tv_sec 
+			// , [rebuildStatus[@"st_mtimensec"] longValue], st.st_mtimespec.tv_nsec);
 
-			if(rebuildStatus 
-				//dev may change after reboot// && [rebuildStatus[@"st_dev"] longValue]==st.st_dev
-				&& [rebuildStatus[@"st_ino"] unsignedLongLongValue]==st.st_ino
-				&& [rebuildStatus[@"st_mtime"] longValue]==st.st_mtimespec.tv_sec 
-				&& [rebuildStatus[@"st_mtimensec"] longValue]==st.st_mtimespec.tv_nsec) {
-				requiredRebuild = NO;
-			} else {
-				// NSLog(@"rebuild %ld,%d,%llu,%llu / %ld:%ld %ld:%ld", 
-				// [rebuildStatus[@"st_dev"] longValue], st.st_dev
-				// , [rebuildStatus[@"st_ino"] unsignedLongLongValue], st.st_ino
-				// , [rebuildStatus[@"st_mtime"] longValue], st.st_mtimespec.tv_sec 
-				// , [rebuildStatus[@"st_mtimensec"] longValue], st.st_mtimespec.tv_nsec);
-			}
-		}
+			printf("resign app: %s\n", path.fileSystemRepresentation);
 
-		if(!rebuildStatus) rebuildStatus = [NSMutableDictionary new];
-
-		if(requiredRebuild)
-		{
-			//NSLog(@"patch macho: %@", appExecutablePath);
 			int patch_app_exe(const char* file);
-			assert(patch_app_exe(appExecutablePath.UTF8String)==0);
+			assert(patch_app_exe(appExecutablePath.fileSystemRepresentation)==0);
 
-			char* argv[] = {"/basebin/rebuildapp", (char*)rootfs(path).UTF8String, NULL};
+			const char* argv[] = {"/basebin/appatch", path.fileSystemRepresentation, NULL};
 			assert(execBinary(jbroot(argv[0]), argv) == 0);
 			
-			assert(stat(appExecutablePath.fileSystemRepresentation, &st) == 0); //update mtime
-
-			[rebuildStatus addEntriesFromDictionary:@{
-				@"st_dev":@(st.st_dev), 
-				@"st_ino":@(st.st_ino), 
-				@"st_mtime":@(st.st_mtimespec.tv_sec), 
-				@"st_mtimensec":@(st.st_mtimespec.tv_nsec),
-				@"sb_token":@(sbtoken)
-			}];
+			assert(stat(appExecutablePath.fileSystemRepresentation, &st) == 0); //update
 		}
 
-		[rebuildStatus addEntriesFromDictionary:@{@"sb_token":@(sbtoken)}];
-		assert([rebuildStatus writeToFile:rebuildFile atomically:YES]);
+		if(!rebuildStatus
+			|| [rebuildStatus[@"preload_st_ino"] unsignedLongLongValue] != preloadst.st_ino
+			|| [rebuildStatus[@"preload_st_mtime"] longValue] != preloadst.st_mtimespec.tv_sec 
+			|| [rebuildStatus[@"preload_st_mtimensec"] longValue] != preloadst.st_mtimespec.tv_nsec)
+		{
+			printf("updating preload in %s\n", path.fileSystemRepresentation);
 
-		// NSString* newExecutableName = @".preload";
-		// appInfoPlist[@"CFBundleExecutable"] = newExecutableName;
+			// printf("preload %ld=%d, %llu=%llu, %ld=%ld, %ld=%ld\n", 
+			// [rebuildStatus[@"st_dev"] longValue], preloadst.st_dev
+			// , [rebuildStatus[@"st_ino"] unsignedLongLongValue], preloadst.st_ino
+			// , [rebuildStatus[@"st_mtime"] longValue], preloadst.st_mtimespec.tv_sec 
+			// , [rebuildStatus[@"st_mtimensec"] longValue], preloadst.st_mtimespec.tv_nsec);
+
+			//try
+			unlink([path stringByAppendingPathComponent:@".prelib"].fileSystemRepresentation);
+			unlink([path stringByAppendingPathComponent:@".preload"].fileSystemRepresentation);
+
+			NSString* prelibPath = [path stringByAppendingPathComponent:@".prelib"];
+			assert([NSFileManager.defaultManager copyItemAtPath:jbroot(@"/basebin/preload.dylib") toPath:prelibPath error:nil]);
+
+			const char* argv[] = {"/basebin/appatch", prelibPath.fileSystemRepresentation, appTeamID.UTF8String, NULL};
+			assert(execBinary(jbroot(argv[0]), argv) == 0);
+		}
+
+		NSDictionary* rebuildStatusNew = @{
+			@"st_dev":@(st.st_dev), 
+			@"st_ino":@(st.st_ino), 
+			@"st_mtime":@(st.st_mtimespec.tv_sec), 
+			@"st_mtimensec":@(st.st_mtimespec.tv_nsec),
+			@"preload_st_dev":@(preloadst.st_dev), 
+			@"preload_st_ino":@(preloadst.st_ino), 
+			@"preload_st_mtime":@(preloadst.st_mtimespec.tv_sec), 
+			@"preload_st_mtimensec":@(preloadst.st_mtimespec.tv_nsec),
+			@"sb_token":sbtoken,
+			@"jbrand": @(jbrand()),
+			@"jbroot": @(jbroot("/")),
+		};
+		
+		assert([rebuildStatusNew writeToFile:rebuildFilePath atomically:YES]);
 
 		appInfoPlist[@"SBAppUsesLocalNotifications"] = @1;
-
-		link(jbroot("/basebin/preload"), [path stringByAppendingPathComponent:@".preload"].UTF8String);
-		link(jbroot("/basebin/preload.dylib"), [path stringByAppendingPathComponent:@".prelib"].UTF8String);
 	}
 	else
 	{
-		unlink(rebuildFile.UTF8String);
+		unlink(rebuildFilePath.fileSystemRepresentation);
+		unlink([path stringByAppendingPathComponent:@".prelib"].fileSystemRepresentation);
+		unlink([path stringByAppendingPathComponent:@".preload"].fileSystemRepresentation);
 	}
 
     if(!isAppleBundle) {
@@ -657,7 +654,7 @@ void registerPath(NSString *path, BOOL forceSystem)
     }
 
 	BOOL isRemovableSystemApp = [[NSFileManager defaultManager] fileExistsAtPath:[@"/System/Library/AppSignatures" stringByAppendingPathComponent:appBundleID]];
-	BOOL registerAsUser = isDefaultInstallationPath(path) && !isRemovableSystemApp && !forceSystem;
+	BOOL registerAsUser = isDefaultInstallationPath(path.fileSystemRepresentation) && !isRemovableSystemApp && !forceSystem;
 
 	NSMutableDictionary *dictToRegister = [NSMutableDictionary dictionary];
 
@@ -689,7 +686,7 @@ void registerPath(NSString *path, BOOL forceSystem)
 		dictToRegister[@"EnvironmentVariables"] = constructEnvironmentVariablesForContainerPath(appBundleID, path, nil, NO);
 	}
 
-	dictToRegister[@"IsDeletable"] = @(registerAsUser || isRemovableSystemApp || isDefaultInstallationPath(path));
+	dictToRegister[@"IsDeletable"] = @(registerAsUser || isRemovableSystemApp || isDefaultInstallationPath(path.fileSystemRepresentation));
 	dictToRegister[@"Path"] = path;
 	
 	dictToRegister[@"SignerOrganization"] = @"Apple Inc.";
@@ -750,74 +747,80 @@ void registerPath(NSString *path, BOOL forceSystem)
 		}
 
 		//try
-		unlink([pluginPath stringByAppendingPathComponent:@".preload"].UTF8String);
-		unlink([pluginPath stringByAppendingPathComponent:@".prelib"].UTF8String);
-		unlink([pluginPath stringByAppendingPathComponent:@".jbroot"].UTF8String);
+		unlink([pluginPath stringByAppendingPathComponent:@".jbroot"].fileSystemRepresentation);
 
-		NSString* rebuildFile = [pluginPath stringByAppendingPathComponent:@".rebuild"];
+		NSString* rebuildFilePath = [pluginPath stringByAppendingPathComponent:@".rebuild"];
 			
 		if(jbrootexists && [patchRequiredAppPlugins containsObject:pluginBundleID] && pluginExecutablePath && pluginExecutablePath.length)
 		{
-			NSLog(@"patch app plugin: %@ %@", pluginBundleID, pluginExecutablePath);
 			[NSFileManager.defaultManager copyItemAtPath:jbrootpath toPath:[pluginPath stringByAppendingPathComponent:@".jbroot"] error:nil];
 
-			BOOL requiredRebuild = NO;
-			NSMutableDictionary* rebuildStatus = [NSMutableDictionary dictionaryWithContentsOfFile:rebuildFile];
+			NSDictionary* rebuildStatus = [NSDictionary dictionaryWithContentsOfFile:rebuildFilePath];
 
-			struct stat st={0};
-			if(stat(appExecutablePath.fileSystemRepresentation, &st) == 0)
+			struct stat st={0}; //st_dev may change after reboot
+			assert(stat(pluginExecutablePath.fileSystemRepresentation, &st) == 0);
+
+			if(!rebuildStatus
+				|| [rebuildStatus[@"st_ino"] unsignedLongLongValue] != st.st_ino
+				|| [rebuildStatus[@"st_mtime"] longValue] != st.st_mtimespec.tv_sec 
+				|| [rebuildStatus[@"st_mtimensec"] longValue] != st.st_mtimespec.tv_nsec)
 			{
-				requiredRebuild = YES;
+				// printf("rebuild %ld=%d, %llu=%llu, %ld=%ld, %ld=%ld\n", 
+				// [rebuildStatus[@"st_dev"] longValue], st.st_dev
+				// , [rebuildStatus[@"st_ino"] unsignedLongLongValue], st.st_ino
+				// , [rebuildStatus[@"st_mtime"] longValue], st.st_mtimespec.tv_sec 
+				// , [rebuildStatus[@"st_mtimensec"] longValue], st.st_mtimespec.tv_nsec);
 
-				if(rebuildStatus 
-					//dev may change after reboot// && [rebuildStatus[@"st_dev"] longValue]==st.st_dev
-					&& [rebuildStatus[@"st_ino"] unsignedLongLongValue]==st.st_ino
-					&& [rebuildStatus[@"st_mtime"] longValue]==st.st_mtimespec.tv_sec 
-					&& [rebuildStatus[@"st_mtimensec"] longValue]==st.st_mtimespec.tv_nsec) {
-					requiredRebuild = NO;
-				} else {
-					// NSLog(@"rebuild %ld,%d,%llu,%llu / %ld:%ld %ld:%ld", 
-					// [rebuildStatus[@"st_dev"] longValue], st.st_dev
-					// , [rebuildStatus[@"st_ino"] unsignedLongLongValue], st.st_ino
-					// , [rebuildStatus[@"st_mtime"] longValue], st.st_mtimespec.tv_sec 
-					// , [rebuildStatus[@"st_mtimensec"] longValue], st.st_mtimespec.tv_nsec);
-				}
-			}
+				printf("resign plugin executable: %s\n", pluginExecutablePath.fileSystemRepresentation);
 
-			if(!rebuildStatus) rebuildStatus = [NSMutableDictionary new];
-
-			if(requiredRebuild)
-			{
-				//NSLog(@"patch macho: %@", pluginExecutablePath);
 				int patch_app_exe(const char* file);
-				assert(patch_app_exe(pluginExecutablePath.UTF8String)==0);
+				assert(patch_app_exe(pluginExecutablePath.fileSystemRepresentation)==0);
 
-				char* argv[] = {"/basebin/rebuildapp", "executable", (char*)rootfs(pluginExecutablePath).UTF8String, NULL};
+				const char* argv[] = {"/basebin/appatch", pluginExecutablePath.fileSystemRepresentation, NULL};
 				assert(execBinary(jbroot(argv[0]), argv) == 0);
 
-				assert(stat(appExecutablePath.fileSystemRepresentation, &st) == 0); //update mtime
-
-				[rebuildStatus addEntriesFromDictionary:@{
-					@"st_dev":@(st.st_dev), 
-					@"st_ino":@(st.st_ino), 
-					@"st_mtime":@(st.st_mtimespec.tv_sec), 
-					@"st_mtimensec":@(st.st_mtimespec.tv_nsec),
-					@"sb_token":@(sbtoken)
-				}];
+				assert(stat(pluginExecutablePath.fileSystemRepresentation, &st) == 0); //update
 			}
 
-			[rebuildStatus addEntriesFromDictionary:@{@"sb_token":@(sbtoken)}];
-			assert([rebuildStatus writeToFile:rebuildFile atomically:YES]);
+			if(!rebuildStatus
+				|| [rebuildStatus[@"preload_st_ino"] unsignedLongLongValue] != preloadst.st_ino
+				|| [rebuildStatus[@"preload_st_mtime"] longValue] != preloadst.st_mtimespec.tv_sec 
+				|| [rebuildStatus[@"preload_st_mtimensec"] longValue] != preloadst.st_mtimespec.tv_nsec)
+			{
+				printf("updating preload in %s\n", pluginPath.fileSystemRepresentation);
 
-			// NSString* newExecutableName = @".preload";
-			// appInfoPlist[@"CFBundleExecutable"] = newExecutableName;
+				//try
+				unlink([pluginPath stringByAppendingPathComponent:@".prelib"].fileSystemRepresentation);
+				unlink([pluginPath stringByAppendingPathComponent:@".preload"].fileSystemRepresentation);
 
-			link(jbroot("/basebin/preload"), [pluginPath stringByAppendingPathComponent:@".preload"].UTF8String);
-			link(jbroot("/basebin/preload.dylib"), [pluginPath stringByAppendingPathComponent:@".prelib"].UTF8String);
+				NSString* prelibPath = [pluginPath stringByAppendingPathComponent:@".prelib"];
+				assert([NSFileManager.defaultManager copyItemAtPath:jbroot(@"/basebin/preload.dylib") toPath:prelibPath error:nil]);
+
+				const char* argv[] = {"/basebin/appatch", prelibPath.fileSystemRepresentation, appTeamID.UTF8String, NULL};
+				assert(execBinary(jbroot(argv[0]), argv) == 0);
+			}
+
+			NSDictionary* rebuildStatusNew = @{
+				@"st_dev":@(st.st_dev), 
+				@"st_ino":@(st.st_ino), 
+				@"st_mtime":@(st.st_mtimespec.tv_sec), 
+				@"st_mtimensec":@(st.st_mtimespec.tv_nsec),
+				@"preload_st_dev":@(preloadst.st_dev), 
+				@"preload_st_ino":@(preloadst.st_ino), 
+				@"preload_st_mtime":@(preloadst.st_mtimespec.tv_sec), 
+				@"preload_st_mtimensec":@(preloadst.st_mtimespec.tv_nsec),
+				@"sb_token":sbtoken,
+				@"jbrand": @(jbrand()),
+				@"jbroot": @(jbroot("/")),
+			};
+			
+			assert([rebuildStatusNew writeToFile:rebuildFilePath atomically:YES]);
 		}
 		else
 		{
-			unlink(rebuildFile.UTF8String);
+			unlink(rebuildFilePath.fileSystemRepresentation);
+			unlink([pluginPath stringByAppendingPathComponent:@".prelib"].fileSystemRepresentation);
+			unlink([pluginPath stringByAppendingPathComponent:@".preload"].fileSystemRepresentation);
 		}
 
 		// Misc
@@ -971,8 +974,6 @@ void infoForBundleID(NSString *bundleID) {
 	}
 }
 
-extern char*const* environ;
-
 void registerAll(void) {
 	if (force) {
 		[[LSApplicationWorkspace defaultWorkspace] _LSPrivateRebuildApplicationDatabasesForSystemApps:YES internal:YES user:NO];
@@ -1003,11 +1004,11 @@ void registerAll(void) {
 	LSApplicationWorkspace *workspace = [LSApplicationWorkspace defaultWorkspace];
 	for (LSApplicationProxy *app in [workspace allApplications]) {
 		NSString *appPath = app.bundleURL.path;
-		//printf("apppath=%s\n", appPath.UTF8String);
+		//printf("apppath=%s\n", appPath.fileSystemRepresentation);
 		//ios app default storage directory, others are jailbroken apps
 		if ( ![appPath hasPrefix:@"/Applications/"]
 			&& ![appPath hasPrefix:@"/Developer/Applications/"]
-			&& !isDefaultInstallationPath(appPath)
+			&& !isDefaultInstallationPath(appPath.fileSystemRepresentation)
 			) {
 			registeredApps[app.bundleIdentifier] = app.bundleURL;
 		}
@@ -1021,18 +1022,18 @@ void registerAll(void) {
 			|| ![installedApps[bundleID] isEqual:registeredApps[bundleID]]
 		) {
 			NSString* bundlePath = [installedApps[bundleID] path];
-			if (verbose) printf(_("registering %s : %s\n"), bundleID.UTF8String, bundlePath.UTF8String);
+			if (verbose) printf(_("registering %s : %s\n"), bundleID.UTF8String, bundlePath.fileSystemRepresentation);
 			
 			pid_t pid;
-			char *const args[] = {"/basebin/uicache", "-p", (char*)rootfs(bundlePath.UTF8String), NULL};
-			assert(posix_spawn(&pid, jbroot(args[0]), NULL, NULL, args, environ) == 0);
+			const char* args[] = {"/basebin/uicache", "-p", rootfs(bundlePath.fileSystemRepresentation), NULL};
+			assert(posix_spawn(&pid, jbroot(args[0]), NULL, NULL, (char*const*)args, environ) == 0);
 
 			int status=0;
 			while(waitpid(pid, &status, 0) != -1) {
 				usleep(100*1000);
 			};
 			if(!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
-				fprintf(stderr, _("Error: Failed to register %s\n"), bundlePath.UTF8String);
+				fprintf(stderr, _("Error: Failed to register %s\n"), bundlePath.fileSystemRepresentation);
 			}
 		}
 	}
@@ -1042,7 +1043,7 @@ void registerAll(void) {
 		if (![installedApps objectForKey:bundleID])
 		{
 			NSString* bundlePath = [registeredApps[bundleID] path];
-			if (verbose) printf(_("unregistering %s : %s\n"), bundleID.UTF8String, bundlePath.UTF8String);
+			if (verbose) printf(_("unregistering %s : %s\n"), bundleID.UTF8String, bundlePath.fileSystemRepresentation);
 			//using bundleID to unregister
 			unregisterApp(bundleID);
 		}

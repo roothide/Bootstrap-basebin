@@ -3,15 +3,9 @@
 #include <roothide.h>
 #include <sandbox.h>
 #include <spawn.h>
-#include "assert.h"
-#include "bootstrapd.h"
+#include "common.h"
 #include "libbsd.h"
 #include "ipc.h"
-
-extern const char** environ;
-
-#define BSD_PID_PATH jbroot("/basebin/.bootstrapd.pid")
-
 
 NSString* gSandboxExtensions = nil;
 NSString* gSandboxExtensionsExt = nil;
@@ -41,7 +35,7 @@ NSString *generateSandboxExtensions(BOOL ext)
 
 int handleRequest(int conn, pid_t pid, int reqId, NSDictionary* msg)
 {
-    NSLog(@"handleRequest %d from %d : %@", reqId, pid, msg);
+    SYSLOG("handleRequest %d from %d : %s", reqId, pid, msg.debugDescription.UTF8String);
 
 	switch(reqId)
 	{
@@ -62,7 +56,7 @@ int handleRequest(int conn, pid_t pid, int reqId, NSDictionary* msg)
 		{
 			int result = 0;
 			pid_t _pid = [msg[@"pid"] intValue];
-			NSLog(@"BSD_REQ_ENABLE_JIT2 %d -> %d", pid, _pid);
+			SYSLOG("BSD_REQ_ENABLE_JIT2 %d -> %d", pid, _pid);
 			if(_pid > 0) {
 				int enableJIT(pid_t);
 				result = enableJIT(_pid);
@@ -120,7 +114,7 @@ int handleRequest(int conn, pid_t pid, int reqId, NSDictionary* msg)
 		} break;
 
 		default:
-			NSLog(@"unknow request!");
+			SYSLOG("unknow request!");
 			reply(conn, nil);
 			abort();
 			break;
@@ -129,22 +123,6 @@ int handleRequest(int conn, pid_t pid, int reqId, NSDictionary* msg)
 
 	return 0;
 }
-
-
-int jitest(int count, int time)
-{
-	for(int i=0; i<count; i++)
-	{
-		if(time) usleep(time);
-
-		NSLog(@"test %d", i);
-
-		bsd_enableJIT();
-	}
-
-	return 0;
-}
-
 
 #define _dup2 dup2
 #define _open open
@@ -202,37 +180,6 @@ _daemon(nochdir, noclose)
 	return (0);
 }
 
-
-int stopServer(bool force)
-{
-	int result = -1;
-	FILE* fp = fopen(BSD_PID_PATH, "r");
-	if(fp) {
-		pid_t pid=0;
-		fscanf(fp, "%d", &pid);
-		NSLog(@"server pid=%d", pid);
-		if(pid > 0) {
-
-			result = bsd_stopServer();
-				
-			if(force) {
-				sleep(1);
-				kill(pid, SIGKILL);
-				NSLog(@"kill status=%d", result);
-				unlink(BSD_PID_PATH);
-			}
-		}
-		fclose(fp);
-	} else {
-		NSLog(@"server not running!");
-	}
-	return result;
-}
-
-void sigtest(int signo) {
-	NSLog(@"signo=%d", signo);
-}
-
 int start_run_server()
 {
 	if(getpid()==getpgrp()) {
@@ -246,22 +193,55 @@ int start_run_server()
 	gSandboxExtensionsExt = generateSandboxExtensions(YES);
 
 	int ret = run_ipc_server(handleRequest);
-	NSLog(@"server return");
+	SYSLOG("server return");
 	unlink(BSD_PID_PATH);
 
 	return ret;
 }
 
+int stopServer(bool force)
+{
+	int result = -1;
+	FILE* fp = fopen(BSD_PID_PATH, "r");
+	if(fp) {
+		pid_t pid=0;
+		fscanf(fp, "%d", &pid);
+		SYSLOG("server pid=%d", pid);
+		if(pid > 0) {
 
-#define POSIX_SPAWN_PERSONA_FLAGS_OVERRIDE 1
-extern int posix_spawnattr_set_persona_np(const posix_spawnattr_t* __restrict, uid_t, uint32_t);
-extern int posix_spawnattr_set_persona_uid_np(const posix_spawnattr_t* __restrict, uid_t);
-extern int posix_spawnattr_set_persona_gid_np(const posix_spawnattr_t* __restrict, uid_t);
+			result = bsd_stopServer();
+				
+			if(force) {
+				sleep(1);
+				kill(pid, SIGKILL);
+				SYSLOG("kill status=%d", result);
+				unlink(BSD_PID_PATH);
+			}
+		}
+		fclose(fp);
+	} else {
+		SYSLOG("server not running!");
+	}
+	return result;
+}
 
+void CommLog(const char* format, ...)
+{
+    va_list ap;
+    va_start(ap, format);
+	char* logbuf = NULL;
+	vasprintf(&logbuf, format, ap);
+	SYSLOG("%s", logbuf);
+	free(logbuf);
+    va_end(ap);
+}
 
 int main(int argc, char *argv[], char *envp[]) {
+
+	CommLogFunction = CommLog;
+
 	@autoreleasepool {
-		NSLog(@"Hello bootstrapd! pid=%d, uid=%d\n", getpid(), getuid());
+		SYSLOG("Hello bootstrapd! pid=%d, uid=%d\n", getpid(), getuid());
 		printf("Hello bootstrapd! pid=%d, uid=%d\n", getpid(), getuid());
 
 		if(argc >= 2) 
@@ -289,7 +269,7 @@ int main(int argc, char *argv[], char *envp[]) {
 					if(pid > 0) {
 						int killed = kill(pid, 0);
 						if(killed==0) {
-							NSLog(@"server is running (%d)", pid);
+							SYSLOG("server is running (%d)", pid);
 							if(force) {
 								ASSERT(stopServer(true)==0);
 							} else {
@@ -306,63 +286,9 @@ int main(int argc, char *argv[], char *envp[]) {
 				fclose(fp);
 				return start_run_server();
 			}
-			else if(strcmp(argv[1], "check") == 0)
-			{
-				int result=-1;
-				FILE* fp = fopen(BSD_PID_PATH, "r");
-				if(fp) {
-					pid_t pid=0;
-					fscanf(fp, "%d", &pid);
-					NSLog(@"server pid=%d", pid);
-					if(pid > 0) {
-						result = kill(pid, 0);
-						NSLog(@"server status=%d", result);
-					}
-					fclose(fp);
-				} else {
-					NSLog(@"server not running!");
-				}
-				return result;
-			}
-			else if(strcmp(argv[1], "stop") == 0)
-			{
-				bool force = argc>=3 && strcmp(argv[2],"-f")==0;
-				return stopServer(force);
-			}
-			else if(strcmp(argv[1], "jitest") == 0)
-			{
-				int count=1; int time=0;
-				if(argc >= 3) count = atoi(argv[2]);
-				if(argc >= 4) time = atoi(argv[3]);
-				jitest(count, time);
-				NSLog(@"client return!\n");
-			}
-			else if(strcmp(argv[1], "usreboot") == 0)
-			{
-				int userspaceReboot(void);
-				userspaceReboot();
-			}
-			else if(strcmp(argv[1], "openssh") == 0)
-			{
-				ASSERT(argc >= 3);
-				if(strcmp(argv[2],"start")==0) {
-					return bsd_opensshctl(true);
-				} else if(strcmp(argv[2],"stop")==0) {
-					return bsd_opensshctl(false);
-				} else if(strcmp(argv[2],"check")==0) {
-					return bsd_opensshcheck();
-				} else abort();
-			}
-			else if(strcmp(argv[1], "sbtoken") == 0)
-			{
-				NSLog(@"sbtoken=%s", bsd_getsbtoken());
-			}
-			else {
-				printf("unknown command\n");
-				abort();
-			}
 		}
 
-		return 0;
+		printf("xpcproxy cannot be run directly.\n");
+		return -1;
 	}
 }

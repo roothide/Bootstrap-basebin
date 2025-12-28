@@ -6,27 +6,23 @@ THEOS_PACKAGE_SCHEME = roothide
 
 include $(THEOS)/makefiles/common.mk
 
-TOOL_NAME = preload
-
-preload_FILES = preload.m ../bootstrapd/ipc.m ../bootstrapd/libbsd.m
-preload_CFLAGS = -fobjc-arc
-preload_CODESIGN_FLAGS = -Sentitlements.plist
+LIBRARY_NAME = preload
+preload_FILES = prelib.m dyld_bypass_validation.m
+preload_CFLAGS = -fobjc-arc -Wno-unused-variable -Wno-unused-but-set-variable -I../common
+preload_LDFLAGS = -L../common/lib -lcommon -install_name preload
 preload_INSTALL_PATH = /basebin
 
-include $(THEOS_MAKE_PATH)/tool.mk
-
-LIBRARY_NAME = prelib
-prelib_FILES = prelib.m
-prelib_CFLAGS = -fobjc-arc -Wno-unused-variable -Wno-unused-but-set-variable
-prelib_LFGLAGS = 
-prelib_CODESIGN_FLAGS =
-prelib_INSTALL_PATH = /basebin
-
 include $(THEOS_MAKE_PATH)/library.mk
+
+after-all::
+	! strings - $(THEOS_OBJ_DIR)/preload.dylib | grep @loader_path/.jbroot/
+
+	mkdir -p ../.build/
+	cp $(THEOS_OBJ_DIR)/preload.dylib ../.build/
 
 clean::
 	rm -rf ./packages/*
 	
 before-package::
-	mv ./.theos/_/basebin/prelib.dylib ./.theos/_/basebin/preload.dylib
+	cp -a ../rebuildApps.sh $(THEOS_STAGING_DIR)/DEBIAN/postinst
 	

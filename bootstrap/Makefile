@@ -9,18 +9,21 @@ include $(THEOS)/makefiles/common.mk
 
 LIBRARY_NAME = bootstrap
 
-bootstrap_FILES = $(wildcard *.c *.x *.m *.S) ../bootstrapd/ipc.m ../bootstrapd/libbsd.m
-bootstrap_CFLAGS = -fobjc-arc -Wno-deprecated-declarations -Wno-unused-variable -Wno-unused-but-set-variable -Wno-unused-value -Wno-format-invalid-specifier
-bootstrap_LDFLAGS = -L./ -ldobby -lc++
+bootstrap_FILES = $(wildcard *.c *.x *.m *.S)
+bootstrap_CFLAGS = -I../common -fobjc-arc -Wno-deprecated-declarations -Wno-unused-variable -Wno-unused-but-set-variable -Wno-unused-value -Wno-format-invalid-specifier
+bootstrap_LDFLAGS = -L../common/lib -lcommon -ldobby -lc++
 bootstrap_INSTALL_PATH = /basebin
 
 include $(THEOS_MAKE_PATH)/library.mk
 
+after-all::
+ifneq ($(DEBUG), 1)
+	strip -N $(THEOS_OBJ_DIR)/bootstrap.dylib
+	ldid -S $(THEOS_OBJ_DIR)/bootstrap.dylib
+endif
+	mkdir -p ../.build/
+	cp $(THEOS_OBJ_DIR)/bootstrap.dylib ../.build/
+
 clean::
 	rm -rf ./packages/*
-	
-ifneq ($(DEBUG), 1)
-before-package::
-	strip -N ./.theos/_/basebin/bootstrap.dylib
-	ldid -S ./.theos/_/basebin/bootstrap.dylib
-endif
+

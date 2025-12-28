@@ -7,13 +7,17 @@
 
 @import Darwin;
 #include <crt_externs.h>
+#include <xpc/xpc.h>
+#include "commlib.h"
 
 #define DTSECURITY_WAIT_FOR_DEBUGGER 0
 
+#define IS_ARM64E_DEVICE() (*(uint32_t *)getpagesize == 0xd503237f)
+
 #ifdef __arm64e__
-#   define xpaci(x) __asm__ volatile("xpaci %0" : "+r"(x))
+// #   define xpaci(x) __asm__ volatile("xpaci %0" : "+r"(x))
 #else
-#   define xpaci(x) (x &= ~0xFFFFFF8000000000)
+#   define xpaci(x) (x & ~0xFFFFFF8000000000)
 #endif
 
 #define msgh_request_port    msgh_local_port
@@ -34,9 +38,9 @@
 #define PT_ATTACHEXC 14
 
 uintptr_t brX8Address, changeLRAddress, paciaAddress;
-BOOL wantsDetach;
 mach_port_t dtsecurityTaskPort;
-extern char **environ;
+
+// extern char **environ;
 
 int ptrace(int _request, pid_t _pid, caddr_t _addr, int _data);
 
@@ -53,11 +57,11 @@ kern_return_t bootstrap_check_in(mach_port_t bootstrap_port, const char *service
 kern_return_t bootstrap_register(mach_port_t bp, const char *service_name, mach_port_t sp);
 kern_return_t bootstrap_look_up(mach_port_t bp, const char *service_name, mach_port_t *sp);
 
-#define POSIX_SPAWN_PERSONA_FLAGS_OVERRIDE 1
-int posix_spawnattr_set_persona_np(const posix_spawnattr_t* __restrict, uid_t, uint32_t);
-int posix_spawnattr_set_persona_uid_np(const posix_spawnattr_t* __restrict, uid_t);
-int posix_spawnattr_set_persona_gid_np(const posix_spawnattr_t* __restrict, uid_t);
-int posix_spawnattr_set_launch_type_np(posix_spawnattr_t *attr, uint8_t launch_type);
+// #define POSIX_SPAWN_PERSONA_FLAGS_OVERRIDE 1
+// int posix_spawnattr_set_persona_np(const posix_spawnattr_t* __restrict, uid_t, uint32_t);
+// int posix_spawnattr_set_persona_uid_np(const posix_spawnattr_t* __restrict, uid_t);
+// int posix_spawnattr_set_persona_gid_np(const posix_spawnattr_t* __restrict, uid_t);
+// int posix_spawnattr_set_launch_type_np(posix_spawnattr_t *attr, uint8_t launch_type);
 int posix_spawnattr_set_ptrauth_task_port_np(posix_spawnattr_t * __restrict attr, mach_port_t port);
 int posix_spawnattr_setexceptionports_np(posix_spawnattr_t *attr,
          exception_mask_t mask, mach_port_t new_port,
@@ -67,11 +71,16 @@ int posix_spawnattr_set_registered_ports_np(posix_spawnattr_t *__restrict attr, 
 mach_port_t setup_fake_bootstrap_server(void);
 mach_port_t setup_exception_server(void);
 pid_t spawn_exploit_process(mach_port_t exception_port);
-int spawn_stage1_prepare_process(void);
 
+#define __DARWIN_OPAQUE_ARM_THREAD_STATE64 0
+#define __DARWIN_ARM_THREAD_STATE64_FLAGS_NO_PTRAUTH 0x1
 #define __DARWIN_ARM_THREAD_STATE64_FLAGS_IB_SIGNED_LR 0x2
 #define __DARWIN_ARM_THREAD_STATE64_FLAGS_KERNEL_SIGNED_PC 0x4
 #define __DARWIN_ARM_THREAD_STATE64_FLAGS_KERNEL_SIGNED_LR 0x8
+#define __DARWIN_ARM_THREAD_STATE64_USER_DIVERSIFIER_MASK 0xff000000
+#define __DARWIN_ARM_THREAD_STATE64_SIGRETURN_PC_MASK 0x000f0000
+#define __DARWIN_ARM_THREAD_STATE64_SIGRETURN_LR_MASK 0x00f00000
+
 typedef struct {
     uint64_t __x[29];       /* General purpose registers x0-x28 */
     uint64_t __fp; /* Frame pointer x29 */
@@ -105,12 +114,12 @@ pid_t launchTest(NSString *excPortName, NSString *arg1, BOOL suspended);
 
 kern_return_t _launch_job_routine(int selector, xpc_object_t request, id *result);
 xpc_object_t _CFXPCCreateXPCObjectFromCFObject(id object);
-xpc_object_t xpc_pipe_create_from_port(mach_port_t port, uint32_t flags);
-int xpc_pipe_receive(mach_port_t port, xpc_object_t *msg);
-int xpc_pipe_routine_reply(xpc_object_t reply);
+//xpc_object_t xpc_pipe_create_from_port(mach_port_t port, uint32_t flags);
+//int xpc_pipe_receive(mach_port_t port, xpc_object_t *msg);
+//int xpc_pipe_routine_reply(xpc_object_t reply);
 int _xpc_pipe_interface_routine(xpc_pipe_t pipe, uint64_t routine, xpc_object_t msg,
                                 xpc_object_t XPC_GIVES_REFERENCE *reply, uint64_t flags);
-char *xpc_copy_description(xpc_object_t object);
+//char *xpc_copy_description(xpc_object_t object);
 void *_os_alloc_once(struct _os_alloc_once_s *slot, size_t sz,
                             os_function_t init);
 
@@ -126,8 +135,6 @@ int load_trust_cache(NSString *tcPath);
 - (NSDate *)systemStartTime;
 @end
 
-uint64_t signed_pointer;
-uint32_t signed_diversifier;
 @interface NSUserDefaults(Private)
 @property(nonatomic) NSUInteger signedPointer;
 @property(nonatomic) uint32_t signedDiversifier;

@@ -3,126 +3,11 @@
 #include <spawn.h>
 #include <roothide.h>
 #include "envbuf.h"
-#include "assert.h"
 #include "common.h"
 
 bool sshenable=false;
 int restartick=0;
 pid_t sshdpid=0;
-
-extern const char** environ;
-
-int spawn(pid_t* pidp, const char* path, char*const* argv, char*const* envp, void(^std_out)(char*), void(^std_err)(char*))
-{
-    SYSLOG("spawn %s", path);
-    
-    __block pid_t pid=0;
-    posix_spawnattr_t attr;
-    posix_spawnattr_init(&attr);
-
-    posix_spawn_file_actions_t action;
-    posix_spawn_file_actions_init(&action);
-
-    int outPipe[2];
-    pipe(outPipe);
-    posix_spawn_file_actions_addclose(&action, outPipe[0]);
-    posix_spawn_file_actions_adddup2(&action, outPipe[1], STDOUT_FILENO);
-    posix_spawn_file_actions_addclose(&action, outPipe[1]);
-    
-    int errPipe[2];
-    pipe(errPipe);
-    posix_spawn_file_actions_addclose(&action, errPipe[0]);
-    posix_spawn_file_actions_adddup2(&action, errPipe[1], STDERR_FILENO);
-    posix_spawn_file_actions_addclose(&action, errPipe[1]);
-
-    
-    dispatch_semaphore_t lock = dispatch_semaphore_create(0);
-    
-    dispatch_queue_t queue = dispatch_queue_create("spawnPipeQueue", DISPATCH_QUEUE_CONCURRENT);
-    
-    dispatch_source_t stdOutSource = dispatch_source_create(DISPATCH_SOURCE_TYPE_READ, outPipe[0], 0, queue);
-    dispatch_source_t stdErrSource = dispatch_source_create(DISPATCH_SOURCE_TYPE_READ, errPipe[0], 0, queue);
-    
-    int outFD = outPipe[0];
-    int errFD = errPipe[0];
-    
-    dispatch_source_set_cancel_handler(stdOutSource, ^{
-        close(outFD);
-        dispatch_semaphore_signal(lock);
-        SYSLOG("stdout canceled [%d]", pid);
-    });
-    dispatch_source_set_cancel_handler(stdErrSource, ^{
-        close(errFD);
-        dispatch_semaphore_signal(lock);
-        SYSLOG("stderr canceled [%d]", pid);
-    });
-    
-    dispatch_source_set_event_handler(stdOutSource, ^{
-        char buffer[BUFSIZ]={0};
-        ssize_t bytes = read(outFD, buffer, sizeof(buffer)-1);
-        if (bytes <= 0) {
-            dispatch_source_cancel(stdOutSource);
-            return;
-        }
-        SYSLOG("spawn[%d] stdout: %s", pid, buffer);
-        if(std_out) std_out(buffer);
-    });
-    dispatch_source_set_event_handler(stdErrSource, ^{
-        char buffer[BUFSIZ]={0};
-        ssize_t bytes = read(errFD, buffer, sizeof(buffer)-1);
-        if (bytes <= 0) {
-            dispatch_source_cancel(stdErrSource);
-            return;
-        }
-        SYSLOG("spawn[%d] stderr: %s", pid, buffer);
-        if(std_err) std_err(buffer);
-    });
-    
-    dispatch_resume(stdOutSource);
-    dispatch_resume(stdErrSource);
-    
-    int spawnError = posix_spawn(&pid, path, &action, &attr, argv, envp);
-    SYSLOG("spawn ret=%d, pid=%d", spawnError, pid);
-    
-    posix_spawnattr_destroy(&attr);
-    posix_spawn_file_actions_destroy(&action);
-    
-    close(outPipe[1]);
-    close(errPipe[1]);
-    
-    if(spawnError != 0)
-    {
-        SYSLOG("posix_spawn error %d:%s\n", spawnError, strerror(spawnError));
-        dispatch_source_cancel(stdOutSource);
-        dispatch_source_cancel(stdErrSource);
-        return spawnError;
-    }
-
-    FILE* fp = fopen(jbroot("/basebin/.sshd.pid"), "w");
-    ASSERT(fp != NULL);
-    fprintf(fp, "%d", pid);
-    fclose(fp);
-    
-    if(pidp) *pidp = pid;
-    
-    //wait stdout
-    dispatch_semaphore_wait(lock, DISPATCH_TIME_FOREVER);
-    //wait stderr
-    dispatch_semaphore_wait(lock, DISPATCH_TIME_FOREVER);
-    
-    int status=0;
-    while(waitpid(pid, &status, 0) != -1)
-    {
-        if (WIFSIGNALED(status)) {
-            return 128 + WTERMSIG(status);
-        } else if (WIFEXITED(status)) {
-            return WEXITSTATUS(status);
-        }
-        //keep waiting?return status;
-    };
-    return -1;
-}
-
 
 int openssh_start()
 {
@@ -162,7 +47,15 @@ int openssh_start()
             char **envc = envbuf_mutcopy(environ);
             envbuf_setenv(&envc, "DYLD_INSERT_LIBRARIES", jbroot("/basebin/bootstrap.dylib"), 1);
             
-            int ret = spawn(&sshdpid, jbroot(argv[0]), (char*const*)argv, (char*const*)envc, NULL, NULL);
+            int ret = spawn(jbroot(argv[0]), (char*const*)argv, (char*const*)envc, ^(pid_t pid) {
+                FILE* fp = fopen(jbroot("/basebin/.sshd.pid"), "w");
+                ASSERT(fp != NULL);
+                fprintf(fp, "%d", pid);
+                fclose(fp);
+
+                sshdpid = pid;
+
+            }, nil, nil);
 
             envbuf_free(envc);
 

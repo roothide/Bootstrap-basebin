@@ -3,22 +3,20 @@
 #include <sys/syslog.h>
 
 #include "common.h"
-#include "../bootstrapd/libbsd.h"
+#include "libbsd.h"
 
+#if DEBUG
+void (*bootstrapLogFunction)(const char* format, ...) = NULL;
 void bootstrapLog(const char* format, ...)
 {
+    openlog("bootstrap",LOG_PID,LOG_AUTH);
     va_list ap;
     va_start(ap, format);
-    NSString* log = [[NSString alloc] initWithFormat:@(format) arguments:ap];
+    vsyslog(LOG_DEBUG, format, ap);
     va_end(ap);
-
-    // fprintf(stderr, "%s\n", log.UTF8String);
-    // fflush(stderr);
-
-    openlog("bootstrap",LOG_PID,LOG_AUTH);
-    syslog(LOG_DEBUG, "%s", log.UTF8String);
     closelog();
 }
+#endif
 
 @interface LSApplicationWorkspace : NSObject
 +(instancetype)defaultWorkspace;
@@ -54,21 +52,16 @@ void varCleanInit()
 
         [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidEnterBackgroundNotification object:nil
              queue:queue usingBlock:^(NSNotification* note) {
-            SYSLOG("varClean UIApplicationDidEnterBackgroundNotification %@", note);
+            SYSLOG("varClean UIApplicationDidEnterBackgroundNotification %s", note.debugDescription.UTF8String);
             bsd_varClean();
         }];
 
         [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationWillTerminateNotification object:nil
             queue:queue usingBlock:^(NSNotification* note) {
-           SYSLOG("varClean UIApplicationWillTerminateNotification %@", note);
+           SYSLOG("varClean UIApplicationWillTerminateNotification %s", note.debugDescription.UTF8String);
            bsd_varClean();
         }];
 
         SYSLOG("varClean init in main queue");
     });
-}
-
-bool isTrollStoredApp()
-{
-    return [NSFileManager.defaultManager fileExistsAtPath:[NSString stringWithFormat:@"%@/../_TrollStore", NSBundle.mainBundle.bundlePath]];
 }

@@ -33,8 +33,6 @@ NSArray* stockPrefsIdentifiers = @[
 ];
 
 
-bool isAppleInternalIdentifier(const char*);
-
 BOOL prefsRedirection(NSString** pidentifier, NSString** pcontainer)
 {
     SYSLOG("prefsRedirection:%@ container=%@ bundleIdentifier=%@ homedir=%@", *pidentifier, *pcontainer, NSBundle.mainBundle.bundleIdentifier, NSHomeDirectory());
@@ -85,7 +83,7 @@ BOOL prefsRedirection(NSString** pidentifier, NSString** pcontainer)
             __identifier = bundleIdentifier;
         }
         
-        if(!isAppleInternalIdentifier(__identifier.UTF8String)
+        if(!is_apple_internal_identifier(__identifier.UTF8String)
             && ([stockPrefsIdentifiers containsObject:__identifier]
                             || [__identifier hasPrefix:@"com.apple."]
                             || [__identifier hasPrefix:@"group.com.apple."]
@@ -114,7 +112,7 @@ BOOL prefsRedirection(NSString** pidentifier, NSString** pcontainer)
             identifier = identifier.stringByDeletingPathExtension;
         }
         
-        if(!isAppleInternalIdentifier(identifier.UTF8String)
+        if(!is_apple_internal_identifier(identifier.UTF8String)
             && ([stockPrefsIdentifiers containsObject:identifier]
                         || [identifier hasPrefix:@"com.apple."]
                         || [identifier hasPrefix:@"group.com.apple."]
@@ -145,7 +143,7 @@ BOOL prefsRedirection(NSString** pidentifier, NSString** pcontainer)
 
         if(![identifier isEqualToString:bundleIdentifier])
         {
-            if(!isAppleInternalIdentifier(identifier.UTF8String)
+            if(!is_apple_internal_identifier(identifier.UTF8String)
                 && ([stockPrefsIdentifiers containsObject:identifier]
                                 || [identifier hasPrefix:@"com.apple."]
                                 || [identifier hasPrefix:@"group.com.apple."]
@@ -206,11 +204,11 @@ BOOL prefsRedirection(NSString** pidentifier, NSString** pcontainer)
         {
             BOOL copy=[fm copyItemAtPath:plistPath toPath:plistNewPath error:nil];
             BOOL remove=[fm removeItemAtPath:plistPath error:nil];
-            NSLog(@"prefshook: copy=%d remove=%d %@ -> %@", copy, remove, plistPath, plistNewPath);
+            SYSLOG("prefshook: copy=%d remove=%d %@ -> %@", copy, remove, plistPath, plistNewPath);
         }
     }
 
-    NSLog(@"prefshook: prefs redirect to %@ : %@", identifier, container);
+    SYSLOG("prefshook: prefs redirect to %@ : %@", identifier, container);
     *pcontainer = container;
     *pidentifier = identifier;
     return YES;
@@ -221,7 +219,7 @@ CFDictionaryRef _CFPreferencesCopyMultipleWithContainer(_Nullable CFArrayRef key
 
 void SynchronizePlist(NSString* identifier, NSString* container)
 {
-    NSLog(@"SynchronizePlist: %@ : %@", identifier, container);
+    SYSLOG("SynchronizePlist: %@ : %@", identifier, container);
 
     if (sandbox_check(getpid(), "process-fork", SANDBOX_CHECK_NO_REPORT, NULL) == 0)
     {
@@ -376,7 +374,7 @@ Boolean _CFPreferencesSynchronizeWithContainer(CFStringRef applicationID, CFStri
 Boolean (*orig_CFPreferencesSynchronizeWithContainer)(CFStringRef applicationID, CFStringRef userName, CFStringRef hostName, CFStringRef container);
 Boolean new_CFPreferencesSynchronizeWithContainer(CFStringRef applicationID, CFStringRef userName, CFStringRef hostName, CFStringRef container)
 {
-    NSLog(@"prefshook: _CFPreferencesSynchronizeWithContainer: %@ userName=%@ hostName=%@ container=%@", applicationID, userName, hostName, container);
+    SYSLOG("prefshook: _CFPreferencesSynchronizeWithContainer: %@ userName=%@ hostName=%@ container=%@", applicationID, userName, hostName, container);
 
     Boolean ret = orig_CFPreferencesSynchronizeWithContainer(applicationID, userName, hostName, container);
 

@@ -1,5 +1,5 @@
-Package: com.roothide.rebuildapp
-Name: rebuildapp
+Package: com.roothide.bootstrap.appatch
+Name: appatch
 Version: 0.0.1
 Architecture: iphoneos-arm
 Description: An awesome tool of some sort!!

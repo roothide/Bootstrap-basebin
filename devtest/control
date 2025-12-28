@@ -1,4 +1,4 @@
-Package: com.roothide.devtest
+Package: com.roothide.bootstrap.devtest
 Name: devtest
 Version: 0.0.1
 Architecture: iphoneos-arm

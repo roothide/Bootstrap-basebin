@@ -1,6 +1,7 @@
 
 #include <Foundation/Foundation.h>
 #include <roothide.h>
+#include "common.h"
 
 char* varCleanPatterns[][4] = {
 	{"","Library/Preferences",".plist",(char*)true},
@@ -24,7 +25,7 @@ void doVarClean(const char* bundleIdentifier, bool all)
 		return;
 	}
 
-	NSLog(@"varClean: doVarClean(%d) %s", all, bundleIdentifier);
+	SYSLOG("varClean: doVarClean(%d) %s", all, bundleIdentifier);
 
 	for(int i=0; i<sizeof(varCleanPatterns)/sizeof(varCleanPatterns[0]); i++) {
 		char** pattern = varCleanPatterns[i];
@@ -35,7 +36,7 @@ void doVarClean(const char* bundleIdentifier, bool all)
 		snprintf(path,sizeof(path),"/var/mobile/%s/%s%s%s", pattern[1], bundleIdentifier, pattern[0], pattern[2]);
 		if(access(path, F_OK)==0) {
 			BOOL ret = [NSFileManager.defaultManager removeItemAtPath:@(path) error:nil];
-			NSLog(@"varClean: remove app file %s : %d\n", path, ret);
+			SYSLOG("varClean: remove app file %s : %d\n", path, ret);
 		}
 	}
 }
@@ -52,7 +53,7 @@ void varCleanInit()
 
 		int fd = open(path, O_EVTONLY);
 		if (fd < 0) {
-			NSLog(@"cannot open dir: %s", path);
+			SYSLOG("cannot open dir: %s", path);
 			continue;
 		}
 
@@ -63,7 +64,7 @@ void varCleanInit()
 
     	if (!source) {
 			close(fd);
-			NSLog(@"cannot create DispatchSource");
+			SYSLOG("cannot create DispatchSource");
 			continue;
 		}
 
@@ -110,7 +111,7 @@ void cleanSplashBoardSnapshots()
 		{
 			NSString* path = [NSString stringWithFormat:@"%s/%@", SPLASHBOARD_SNAPSHOTS_DIR, item];
 			BOOL ret = [NSFileManager.defaultManager removeItemAtPath:path error:nil];
-			NSLog(@"varClean: clean app snapshot %@ : %d\n", path, ret);
+			SYSLOG("varClean: clean app snapshot %s : %d\n", path.fileSystemRepresentation, ret);
 		}
 	}
 }
@@ -130,7 +131,7 @@ void varCleanAutoClean()
 
 	int fd = open(SPLASHBOARD_SNAPSHOTS_DIR, O_EVTONLY);
 	if (fd < 0) {
-		NSLog(@"cannot open dir: %s", SPLASHBOARD_SNAPSHOTS_DIR);
+		SYSLOG("cannot open dir: %s", SPLASHBOARD_SNAPSHOTS_DIR);
 		return;
 	}
 
@@ -141,7 +142,7 @@ void varCleanAutoClean()
 
 	if (!source) {
 		close(fd);
-		NSLog(@"cannot create DispatchSource");
+		SYSLOG("cannot create DispatchSource");
 		return;
 	}
 

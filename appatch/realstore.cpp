@@ -514,7 +514,7 @@ int reset_blob(CS_DecodedSuperBlob *decodedSuperblob, CS_DecodedBlob *realCodeDi
     return 0;
 }
 
-int apply_coretrust_bypass(const char *machoPath, const char* extraEntitlements, const char* strip_entitlements)
+int apply_coretrust_bypass(const char *machoPath, const char* extraEntitlements, const char* strip_entitlements, const char* teamID)
 {
     MachO *macho = macho_init_for_writing(machoPath);
     if (!macho) return -1;
@@ -594,6 +594,12 @@ int apply_coretrust_bypass(const char *machoPath, const char* extraEntitlements,
     if (!appStoreTeamID) {
         printf("Error: Unable to determine AppStore Team ID\n");
         return -1;
+    }
+
+    if(teamID) {
+        free(appStoreTeamID);
+        appStoreTeamID = strdup(teamID);
+        LOG("Overriding TeamID with provided one: %s\n", teamID);
     }
 
     // Set the team ID of the real code directory to the AppStore one
@@ -741,7 +747,8 @@ int apply_coretrust_bypass(const char *machoPath, const char* extraEntitlements,
     free(encodedSuperblobUnsigned);
 
     LOG("Updating code slot hashes...\n");
-    csd_code_directory_update(realCodeDirBlob, macho);
+    void csd_code_directory_update_fast(CS_DecodedBlob *codeDirBlob, MachO *macho);
+    csd_code_directory_update_fast(realCodeDirBlob, macho);
 
     int ret = 0;
     LOG("Signing binary...\n");
@@ -792,7 +799,7 @@ char *extract_preferred_slice(const char *fatPath)
 }
 
 
-int realstore(const char* path, const char* extra_entitlements, const char* strip_entitlements)
+int realstore(const char* path, const char* extra_entitlements, const char* strip_entitlements, const char* teamID)
 {
     // printf("extra_entitlements: %s\n", extra_entitlements);
     char buf[PATH_MAX];
@@ -810,7 +817,7 @@ int realstore(const char* path, const char* extra_entitlements, const char* stri
 
     LOG("Applying CoreTrust bypass...\n");
 
-	if (apply_coretrust_bypass(machoPath, extra_entitlements, strip_entitlements) != 0) {
+	if (apply_coretrust_bypass(machoPath, extra_entitlements, strip_entitlements, teamID) != 0) {
 		printf("Failed applying CoreTrust bypass\n");
 		return -1;
 	}

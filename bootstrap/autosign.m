@@ -77,13 +77,13 @@ void sign_check(void) {
 
 void ensure_jbroot_symlink(const char* filepath)
 {
-	// JBLogDebug("ensure_jbroot_symlink: %s", filepath);
+	SYSLOG("ensure_jbroot_symlink: %s", filepath);
 
 	if(access(filepath, F_OK) !=0 )
 		return;
 
 	char realfpath[PATH_MAX]={0};
-	ASSERT(realpath(filepath, realfpath) != NULL);
+	assert(realpath(filepath, realfpath) != NULL);
 
 	char realdirpath[PATH_MAX+1]={0};
 	dirname_r(realfpath, realdirpath);
@@ -92,18 +92,18 @@ void ensure_jbroot_symlink(const char* filepath)
 	}
 
 	char jbrootpath[PATH_MAX+1]={0};
-	ASSERT(realpath(jbroot("/"), jbrootpath) != NULL);
+	assert(realpath(jbroot("/"), jbrootpath) != NULL);
 	if(jbrootpath[0] && jbrootpath[strlen(jbrootpath)-1] != '/') {
 		strlcat(jbrootpath, "/", sizeof(jbrootpath));
 	}
 
-	// JBLogDebug("%s : %s", realdirpath, jbrootpath);
-
-	if(strncmp(realdirpath, jbrootpath, strlen(jbrootpath)) != 0)
+	if(strncmp(realdirpath, jbrootpath, strlen(jbrootpath)) != 0) {
+        SYSLOG("ensure_jbroot_symlink skip path not inside jbroot: %s", realdirpath);
 		return;
+	}
 
 	struct stat jbrootst;
-	ASSERT(stat(jbrootpath, &jbrootst) == 0);
+	assert(stat(jbrootpath, &jbrootst) == 0);
 	
 	char sympath[PATH_MAX];
 	snprintf(sympath,sizeof(sympath),"%s/.jbroot", realdirpath);
@@ -120,7 +120,7 @@ void ensure_jbroot_symlink(const char* filepath)
 					return;
 			}
 
-			ASSERT(unlink(sympath) == 0);
+			assert(unlink(sympath) == 0);
 			
 		} else {
 			//not a symlink? just let it go
@@ -129,70 +129,10 @@ void ensure_jbroot_symlink(const char* filepath)
 	}
 
 	if(symlink(jbrootpath, sympath) ==0 ) {
-		// JBLogError("update .jbroot @ %s\n", sympath);
+		SYSLOG("update .jbroot @ %s\n", sympath);
 	} else {
-		// JBLogError("symlink error @ %s\n", sympath);
+		SYSLOG("symlink error @ %s\n", sympath);
 	}
-}
-
-void machoEnumerateArchs(FILE* machoFile, bool (^archEnumBlock)(struct mach_header_64* header, uint32_t offset))
-{
-	struct mach_header_64 mh={0};
-	if(fseek(machoFile,0,SEEK_SET)!=0)return;
-	if(fread(&mh,sizeof(mh),1,machoFile)!=1)return;
-	
-	if(mh.magic==FAT_MAGIC || mh.magic==FAT_CIGAM)//and || mh.magic==FAT_MAGIC_64 || mh.magic==FAT_CIGAM_64? with fat_arch_64
-	{
-		struct fat_header fh={0};
-		if(fseek(machoFile,0,SEEK_SET)!=0)return;
-		if(fread(&fh,sizeof(fh),1,machoFile)!=1)return;
-		
-		for(int i = 0; i < OSSwapBigToHostInt32(fh.nfat_arch); i++)
-		{
-			uint32_t archMetadataOffset = sizeof(fh) + sizeof(struct fat_arch) * i;
-
-			struct fat_arch fatArch={0};
-			if(fseek(machoFile, archMetadataOffset, SEEK_SET)!=0)break;
-			if(fread(&fatArch, sizeof(fatArch), 1, machoFile)!=1)break;
-
-			if(fseek(machoFile, OSSwapBigToHostInt32(fatArch.offset), SEEK_SET)!=0)break;
-			if(fread(&mh, sizeof(mh), 1, machoFile)!=1)break;
-
-			if(mh.magic != MH_MAGIC_64 && mh.magic != MH_CIGAM_64) continue; //require Macho64
-			
-			if(!archEnumBlock(&mh, OSSwapBigToHostInt32(fatArch.offset))) 
-				break;
-		}
-	}
-	else if(mh.magic == MH_MAGIC_64 || mh.magic == MH_CIGAM_64) //require Macho64
-	{
-		archEnumBlock(&mh, 0);
-	}
-}
-
-void machoGetInfo(FILE* candidateFile, bool *isMachoOut, bool *isLibraryOut)
-{
-	if (!candidateFile) return;
-
-	__block bool isMacho=false;
-	__block bool isLibrary = false;
-	
-	machoEnumerateArchs(candidateFile, ^bool(struct mach_header_64* header, uint32_t offset) {
-		switch(OSSwapLittleToHostInt32(header->filetype)) {
-			case MH_DYLIB:
-			case MH_BUNDLE:
-				isLibrary = true;
-			case MH_EXECUTE:
-				isMacho = true;
-				return false;
-
-			default:
-				return true;
-		}
-	});
-
-	if (isMachoOut) *isMachoOut = isMacho;
-	if (isLibraryOut) *isLibraryOut = isLibrary;
 }
 
 int autosign(char* path)
@@ -202,14 +142,9 @@ int autosign(char* path)
 
 	const char* jbpath = rootfs(path);
 
-	if(stringStartsWith(jbpath, "/usr/lib/frida/frida-agent.dylib")) // xxx.dpkg-new
-		return 0;
-
-    FILE* fp = fopen(path, "rb");
-    if(fp) {
-        bool ismacho=false,islib=false;
-        machoGetInfo(fp, &ismacho, &islib);
-        
+	bool ismacho=false,islib=false;
+	if(machoGetInfo(path, &ismacho, &islib))
+    {
         if(ismacho) 
         {
 			SYSLOG("autosign: sign %s\n", jbpath);
@@ -217,7 +152,7 @@ int autosign(char* path)
             if(!islib)
             {
                 char sent[PATH_MAX];
-                snprintf(sent,sizeof(sent),"-S%s", jbroot("/basebin/bootstrap.entitlements"));
+                snprintf(sent,sizeof(sent),"-S%s", jbroot("/basebin/entitlements/bootstrap.entitlements"));
 
                 char* args[] = {"ldid", "-M", sent, path, NULL};
 				int status = execBinary(jbroot("/basebin/ldid"), args);
@@ -258,9 +193,7 @@ int autosign(char* path)
 
             ensure_jbroot_symlink(path);
         }
-
-        fclose(fp);
-    }
+	}
 
     return 0;
 }
@@ -335,17 +268,12 @@ int dpkghook_new_execvp(const char *name, char * const *argv)
 	/Library/dpkg/info/<package>.{prerm,postinst,postrm}
 	*/
 	const char* path = jbroot(name);
-	FILE* fp = fopen(path, "rb");
-    if(fp) {
-        bool ismacho=false,islib=false;
-        machoGetInfo(fp, &ismacho, &islib);
-        
-        if(ismacho)
-        {
-            ensure_jbroot_symlink(path);
-        }
-
-        fclose(fp);
+	bool ismacho=false,islib=false;
+	machoGetInfo(path, &ismacho, &islib);
+	
+	if(ismacho)
+	{
+		ensure_jbroot_symlink(path);
 	}
 
 	// sign_apps();

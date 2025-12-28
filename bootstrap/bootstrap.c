@@ -8,6 +8,7 @@
 #include <sys/stat.h>
 #include <sys/param.h>
 #include <sys/sysctl.h>
+#include <sys/proc_info.h>
 #include <sys/syslimits.h>
 #include <spawn.h>
 #include <paths.h>
@@ -19,14 +20,9 @@
 #include "common.h"
 #include "sandbox.h"
 #include "libproc.h"
-#include "libproc_private.h"
-#include "../bootstrapd/libbsd.h"
+#include "libbsd.h"
 
 #include <CoreFoundation/CoreFoundation.h>
-
-#define DYLD_INTERPOSE(_replacement,_replacee) \
-   __attribute__((used)) static struct{ const void* replacement; const void* replacee; } _interpose_##_replacee \
-			__attribute__ ((section ("__DATA,__interpose"))) = { (const void*)(unsigned long)&_replacement, (const void*)(unsigned long)&_replacee };
 
 pid_t fork_hook()
 {
@@ -51,10 +47,6 @@ int daemon_hook(int __nochdir, int __noclose)
     int _daemon(int,int);
     return _daemon(__nochdir, __noclose);
 }
-
-
-
-int resolvePath(const char *file, const char *searchPath, int (^attemptHandler)(char *path));
 
 int posix_spawnp_hook(pid_t *restrict pid, const char *restrict file,
 					   const posix_spawn_file_actions_t *restrict file_actions,
@@ -197,104 +189,12 @@ int execvp_hook(const char *name, char * const *argv)
 	return execvP_hook(name, path, argv);
 }
 
-
 //dopamine interface
 EXPORT int jbdswDebugMe()
 {
 	return requireJIT();
 }
 
-
-DYLD_INTERPOSE(posix_spawn_hook, posix_spawn)
-DYLD_INTERPOSE(posix_spawnp_hook, posix_spawnp)
-DYLD_INTERPOSE(execve_hook, execve)
-DYLD_INTERPOSE(execle_hook, execle)
-DYLD_INTERPOSE(execlp_hook, execlp)
-DYLD_INTERPOSE(execv_hook, execv)
-DYLD_INTERPOSE(execl_hook, execl)
-DYLD_INTERPOSE(execvp_hook, execvp)
-DYLD_INTERPOSE(execvP_hook, execvP)
-#ifdef __arm64e__
-DYLD_INTERPOSE(fork_hook, fork)
-DYLD_INTERPOSE(vfork_hook, vfork)
-DYLD_INTERPOSE(forkpty_hook, forkpty)
-DYLD_INTERPOSE(daemon_hook, daemon)
-#endif
-
-
-/* pbi_flags values */
-#define PROC_FLAG_TRACED        2       /* process currently being traced, possibly by gdb */
-int requireJIT()
-{
-	static int result = -1;
-	
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-		int32_t opt[4] = {
-			CTL_KERN,
-			KERN_PROC,
-			KERN_PROC_PID,
-			getpid(),
-		};
-		struct kinfo_proc info={0};
-		size_t len = sizeof(struct kinfo_proc);
-		if(sysctl(opt, 4, &info, &len, NULL, 0) == 0) {
-			if((info.kp_proc.p_flag & P_TRACED) != 0) {
-				result = 0;
-				return;
-			}
-		}
-		
-		struct proc_bsdinfo procInfo={0};
-		if (proc_pidinfo(getpid(), PROC_PIDTBSDINFO, 0, &procInfo, sizeof(procInfo)) == sizeof(procInfo)) {
-			if((procInfo.pbi_flags & PROC_FLAG_TRACED) != 0) {
-				result = 0;
-				return;
-			}
-		}
-		
-		result = bsd_enableJIT();
-	});
-	return result;
-}
-
-bool checkpatchedexe() {
-	char executablePath[PATH_MAX]={0};
-	uint32_t bufsize=sizeof(executablePath);
-	ASSERT(_NSGetExecutablePath(executablePath, &bufsize) == 0);
-	
-	char patcher[PATH_MAX];
-	snprintf(patcher, sizeof(patcher), "%s.roothidepatch", executablePath);
-	if(access(patcher, F_OK)==0) 
-		return false;
-
-	return true;
-}
-
-pid_t __getppid()
-{
-	int32_t opt[4] = {
-		CTL_KERN,
-		KERN_PROC,
-		KERN_PROC_PID,
-		getpid(),
-	};
-	struct kinfo_proc info={0};
-	size_t len = sizeof(struct kinfo_proc);
-	if(sysctl(opt, 4, &info, &len, NULL, 0) == 0) {
-		if((info.kp_proc.p_flag & P_TRACED) != 0) {
-			return info.kp_proc.p_oppid;
-		}
-	}
-
-    struct proc_bsdinfo procInfo;
-	//some process may be killed by sandbox if call systme getppid() so try this first
-	if (proc_pidinfo(getpid(), PROC_PIDTBSDINFO, 0, &procInfo, sizeof(procInfo)) == sizeof(procInfo)) {
-		return procInfo.pbi_ppid;
-	}
-
-	return getppid();
-}
 
 static uid_t _CFGetSVUID(bool *successful) {
     uid_t uid = -1;
@@ -420,7 +320,7 @@ void redirect_paths(const char* rootdir)
 			// loadPathHook();
 		}
     
-        pid_t ppid = __getppid();
+        pid_t ppid = get_real_ppid();
         assert(ppid > 0);
         if(ppid != 1)
             break;
@@ -456,30 +356,26 @@ __attribute__((visibility("default"))) int PLRequiredJIT() {
 	return requireJIT();
 }
 
-char* appleInternalIdentifiers[] = {
-	"com.apple.Terminal",
-};
-
-bool isAppleInternalIdentifier(const char* bundleIdentifier) {
-	for(int i=0; i<sizeof(appleInternalIdentifiers)/sizeof(appleInternalIdentifiers[0]); i++) {
-		if(strcmp(bundleIdentifier, appleInternalIdentifiers[i])==0)
-			return true;
-	}
-	return false;
-}
-
-// const char* bootstrapath=NULL;
 static void __attribute__((__constructor__)) bootstrap()
 {
     char executablePath[PATH_MAX]={0};
     uint32_t bufsize=sizeof(executablePath);
     ASSERT(_NSGetExecutablePath(executablePath, &bufsize) == 0);
 
-	char jbrootdir[PATH_MAX] = {0};
-	strlcat(jbrootdir, jbroot("/"), sizeof(jbrootdir));
-	remove_trailing_slash(jbrootdir);
+	//do nothing extra inside xpcproxy (do not enable syslog in xpcproxy)
+	if(string_has_suffix(executablePath, "/usr/libexec/xpcproxy")) {
+		return;
+	}
+
+#if DEBUG
+	CommLogFunction = bootstrapLog;
+	bootstrapLogFunction = bootstrapLog;
+	SYSLOG("Bootstrap loaded...");
+#endif
 
 	const char* exepath = rootfs(executablePath);
+
+	assert(!string_has_prefix(exepath, "/basebin/"));
 
     // SYSLOG("bootstrap....%s\n", exepath);
 	// SYSLOG("HOME=%s\n%s\n%s", getenv("HOME"), getenv("CFFIXED_USER_HOME"), getenv("TMPDIR"));
@@ -487,6 +383,7 @@ static void __attribute__((__constructor__)) bootstrap()
 	// struct dl_info di={0};
     // dladdr((void*)bootstrap, &di);
 	// bootstrapath = strdup(di.dli_fname);
+
 
 	const char* bundleIdentifier = NULL;
 	CFBundleRef mainBundle = CFBundleGetMainBundle();
@@ -496,10 +393,12 @@ static void __attribute__((__constructor__)) bootstrap()
 			bundleIdentifier = CFStringGetCStringPtr(cfBundleIdentifier, kCFStringEncodingASCII);
 	}
 
-	bool isTrollStoredApp();
-	bool appFromTrollStore = isTrollStoredApp();
+	bool appFromTrollStore = hasTrollstoreMarker(executablePath);
 
-	if(!bundleIdentifier || !stringStartsWith(bundleIdentifier, "com.apple.") || isAppleInternalIdentifier(bundleIdentifier) || appFromTrollStore) {
+	if(!bundleIdentifier || !string_has_prefix(bundleIdentifier, "com.apple.") || is_apple_internal_identifier(bundleIdentifier) || appFromTrollStore) {
+		char jbrootdir[PATH_MAX] = {0};
+		strlcat(jbrootdir, jbroot("/"), sizeof(jbrootdir));
+		remove_trailing_slash(jbrootdir);
 		redirect_paths(jbrootdir);
 	}
 
@@ -507,12 +406,12 @@ static void __attribute__((__constructor__)) bootstrap()
     if(!preload || !strstr(preload,"/basebin/bootstrap.dylib"))
     {
 		if (sandbox_check(getpid(), "process-fork", SANDBOX_CHECK_NO_REPORT, NULL) == 0) {
-			void __interpose();
-			__interpose();
+			void _dynamic_interpose();
+			_dynamic_interpose();
 		}
     }
 
-    if(__getppid() != 1) {
+    if(get_real_ppid() != 1) {
         void fixsuid();
         fixsuid();
     }
@@ -565,18 +464,16 @@ static void __attribute__((__constructor__)) bootstrap()
 	}
 
 	//checkServer before loading roothidepatch
-	if(__getppid()==1)
+	if(get_real_ppid()==1)
 	{
 		if(bundleIdentifier)
 		{
-			if(stringStartsWith(bundleIdentifier, "com.apple.") 
-				&& strcmp(bundleIdentifier, "com.apple.springboard")!=0
-				&& !blockTweaks )
+			if(string_has_prefix(bundleIdentifier, "com.apple.") && !blockTweaks)
 			{
 				void init_platformHook();
 				init_platformHook(); //try
 			} 
-			else if(stringStartsWith(exepath, "/Applications/"))
+			else if(string_has_prefix(exepath, "/Applications/"))
 			{
 				if(bsd_checkServer() != 0) {
 					void launchBootstrapApp();
@@ -602,7 +499,7 @@ static void __attribute__((__constructor__)) bootstrap()
 	}
 
 	//fix frida: always enable JIT before checking tweakloader
-	if(requireJIT()==0 && __getppid()==1 && !blockTweaks) {
+	if(requireJIT()==0 && !blockTweaks && get_real_ppid()==1 && is_app_coalition()) {
 
 		void init_prefs_inlinehook();
 		init_prefs_inlinehook();
@@ -611,14 +508,33 @@ static void __attribute__((__constructor__)) bootstrap()
 		{
 			const char* tweakloader = jbroot("/usr/lib/TweakLoader.dylib");
 			if(access(tweakloader, F_OK)==0) {
-				//old version of ellekit/oldabi uses JBROOT
-				const char* oldJBROOT = getenv("JBROOT");
-				setenv("JBROOT", jbrootdir, 1);
 				dlopen(tweakloader, RTLD_NOW);
-				if(oldJBROOT) setenv("JBROOT", oldJBROOT, 1); else unsetenv("JBROOT");
 			}
 		}
 	}
 
-	unsetenv("DYLD_INSERT_LIBRARIES");
+	if(preload && strstr(preload,"/basebin/bootstrap.dylib") && !strstr(preload,":")) {
+		unsetenv("DYLD_INSERT_LIBRARIES");
+	}
 }
+
+
+#define DYLD_INTERPOSE(_replacement,_replacee) \
+	__attribute__((used)) static struct{ const void* replacement; const void* replacee; } _interpose_##_replacee \
+	__attribute__ ((section ("__DATA,__interpose"))) = { (const void*)(unsigned long)&_replacement, (const void*)(unsigned long)&_replacee };
+
+DYLD_INTERPOSE(posix_spawn_hook, posix_spawn)
+DYLD_INTERPOSE(posix_spawnp_hook, posix_spawnp)
+DYLD_INTERPOSE(execve_hook, execve)
+DYLD_INTERPOSE(execle_hook, execle)
+DYLD_INTERPOSE(execlp_hook, execlp)
+DYLD_INTERPOSE(execv_hook, execv)
+DYLD_INTERPOSE(execl_hook, execl)
+DYLD_INTERPOSE(execvp_hook, execvp)
+DYLD_INTERPOSE(execvP_hook, execvP)
+#ifdef __arm64e__
+DYLD_INTERPOSE(fork_hook, fork)
+DYLD_INTERPOSE(vfork_hook, vfork)
+DYLD_INTERPOSE(forkpty_hook, forkpty)
+DYLD_INTERPOSE(daemon_hook, daemon)
+#endif

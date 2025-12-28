@@ -489,3 +489,51 @@ void csd_code_directory_update(CS_DecodedBlob *codeDirBlob, MachO *macho)
         csd_blob_write(codeDirBlob, offsetOfBlobToReplace, codeDir.hashSize, pageHash);
     }
 }
+
+void csd_code_directory_update_fast(CS_DecodedBlob *codeDirBlob, MachO *macho)
+{
+    CS_CodeDirectory codeDir;
+    csd_blob_read(codeDirBlob, 0, sizeof(CS_CodeDirectory), &codeDir);
+    CODE_DIRECTORY_APPLY_BYTE_ORDER(&codeDir, BIG_TO_HOST_APPLIER);
+
+    uint32_t codeSignatureOffset = 0;
+    // There is an edge case where random hashes end up incorrect, so we rehash every page (except the final one) to be sure
+    macho_find_code_signature_bounds(macho, &codeSignatureOffset, NULL);
+    // printf("codeSignatureOffset=%x\n", codeSignatureOffset);
+    
+    uint32_t pageSize = (uint32_t)(pow(2.0, (double)(codeDir.pageSize)));
+    uint64_t finalPageBoundary = align_to_size(codeSignatureOffset, pageSize);
+    int pageCount = (finalPageBoundary / pageSize);
+
+    uint64_t headersize = macho->machHeader.sizeofcmds + sizeof(macho->machHeader);
+    uint64_t headerPageCount = align_to_size(headersize, pageSize) / pageSize;
+    
+    __block uint32_t linkeditOffset = 0;
+    macho_enumerate_load_commands(macho, ^(struct load_command loadCommand, uint64_t offset, void *cmd, bool *stop) {
+        if (loadCommand.cmd == LC_SEGMENT_64) {
+            struct segment_command_64 *segmentCommand = (struct segment_command_64 *)cmd;
+            SEGMENT_COMMAND_64_APPLY_BYTE_ORDER(segmentCommand, LITTLE_TO_HOST_APPLIER);
+            if (strcmp(segmentCommand->segname, "__LINKEDIT") == 0) {
+                linkeditOffset = segmentCommand->fileoff;
+                *stop = true;
+            }
+        }
+    });
+
+    uint32_t linkeditStartPage = linkeditOffset / pageSize;
+
+    assert(pageCount == codeDir.nCodeSlots);
+    for(int i=0; i<pageCount; i++)
+    {
+        if(i >= headerPageCount && i < linkeditStartPage) {
+            continue;
+        }
+
+        uint32_t offsetOfBlobToReplace = codeDir.hashOffset + (i * codeDir.hashSize);
+
+        uint8_t pageHash[codeDir.hashSize];
+        assert(csd_code_directory_calculate_page_hash(&codeDir, macho, i, pageHash));
+        // printf("page hash [%d] @ %x : ",i, i*pageSize); print_hash(pageHash, codeDir.hashSize);printf("\n");
+        csd_blob_write(codeDirBlob, offsetOfBlobToReplace, codeDir.hashSize, pageHash);
+    }
+}

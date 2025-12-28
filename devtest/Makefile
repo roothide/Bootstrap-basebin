@@ -11,6 +11,10 @@ devtest_INSTALL_PATH = /basebin
 
 include $(THEOS_MAKE_PATH)/tool.mk
 
+after-all::
+	mkdir -p ../.build/
+	cp $(THEOS_OBJ_DIR)/devtest ../.build/
+
 clean::
 	rm -rf ./packages/*
 	

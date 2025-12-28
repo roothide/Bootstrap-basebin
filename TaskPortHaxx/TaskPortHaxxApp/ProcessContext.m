@@ -5,9 +5,60 @@
 //  Created by Duy Tran on 7/11/25.
 //
 
-#import "ProcessContext.h"
 #import "Header.h"
+#import "ProcessContext.h"
 #include "mach_excServer.h"
+
+
+char* EXCNAMES[] = {
+"EXC_BAD_ACCESS",
+"EXC_BAD_INSTRUCTION",
+"EXC_ARITHMETIC",
+"EXC_EMULATION",
+"EXC_SOFTWARE",
+"EXC_BREAKPOINT",
+"EXC_SYSCALL",
+"EXC_MACH_SYSCALL",
+"EXC_RPC_ALERT",
+"EXC_CRASH",
+"EXC_RESOURCE",
+"EXC_GUARD",
+"EXC_CORPSE_NOTIFY",
+};
+
+char* SIGNAMES[] = {
+"SIGHUP",
+"SIGINT",
+"SIGQUIT",
+"SIGILL",
+"SIGTRAP",
+"SIGABRT",
+"SIGEMT",
+"SIGFPE",
+"SIGKILL",
+"SIGBUS",
+"SIGSEGV",
+"SIGSYS",
+"SIGPIPE",
+"SIGALRM",
+"SIGTERM",
+"SIGURG",
+"SIGSTOP",
+"SIGTSTP",
+"SIGCONT",
+"SIGCHLD",
+"SIGTTIN",
+"SIGTTOU",
+"SIGIO",
+"SIGXCPU",
+"SIGXFSZ",
+"SIGVTALRM",
+"SIGPROF",
+"SIGWINCH",
+"SIGINFO",
+"SIGUSR1",
+"SIGUSR2",
+};
 
 void DumpRegisters(const arm_thread_state64_internal *old_state) {
     printf("Registers:\n"
@@ -27,7 +78,6 @@ void DumpRegisters(const arm_thread_state64_internal *old_state) {
            old_state->__fp, old_state->__lr, old_state->__pc, old_state->__sp, old_state->__cpsr);
 }
 
-#define __DARWIN_ARM_THREAD_STATE64_FLAGS_NO_PTRAUTH 1
 @implementation ProcessContext
 
 - (instancetype)initWithExceptionPortName:(NSString *)portName {
@@ -40,8 +90,11 @@ void DumpRegisters(const arm_thread_state64_internal *old_state) {
     kern_return_t kr = mach_port_allocate(mach_task_self(), MACH_PORT_RIGHT_RECEIVE, &_exceptionPort);
     kr = mach_port_insert_right(mach_task_self(), _exceptionPort, _exceptionPort, MACH_MSG_TYPE_MAKE_SEND);
     kr = bootstrap_register(bootstrap_port, portName.UTF8String, _exceptionPort);
-    assert(kr == KERN_SUCCESS);
-    printf("%s registered on port 0x%x\n", portName.UTF8String, _exceptionPort);
+    if(kr != KERN_SUCCESS) {
+        printf("[%d] bootstrap_register %s failed: %s\n", getpid(), portName.UTF8String, mach_error_string(kr));
+        abort();
+    }
+    printf("[%s] %s registered on port 0x%x\n", _name, portName.UTF8String, _exceptionPort);
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         [self exceptionServer];
     });
@@ -49,6 +102,8 @@ void DumpRegisters(const arm_thread_state64_internal *old_state) {
 }
 
 - (void)spawnProcess:(NSString *)name suspended:(BOOL)suspended {
+    self.catched = NO;
+    self.name = strdup(name.lastPathComponent.UTF8String);
     self.pid = launchTest(self.exceptionPortName, name, suspended);
 }
 
@@ -137,34 +192,38 @@ void DumpRegisters(const arm_thread_state64_internal *old_state) {
     // libswiftDistributed.dylib`swift_distributed_execute_target:
     // 0x20d1f0e58 <+352>: br     x8
     if (!_newState) {
-        dispatch_semaphore_wait(_outputReadySemaphore, DISPATCH_TIME_FOREVER);
+        // dispatch_semaphore_wait(_outputReadySemaphore, DISPATCH_TIME_FOREVER);
+        abort();
     }
     
-    if (argCount > 8) {
-        uint64_t sp = _newState->__sp; xpaci(sp);
-        for (int i = 8; i < argCount; i++) {
-            [self write64:sp + sizeof(uint64_t[i-8]) value:args[i]];
-        }
-        argCount = 8;
-    }
+    // if (argCount > 8) {
+    //     uint64_t sp = _newState->__sp; xpaci(sp);
+    //     for (int i = 8; i < argCount; i++) {
+    //         [self write64:sp + sizeof(uint64_t[i-8]) value:args[i]];
+    //     }
+    //     argCount = 8;
+    // }
+    assert(argCount <= 8);
     
-    xpaci(pc);
-    _newState->__x[8] = pc;
     memcpy(&_newState->__x[0], args, argCount * sizeof(uint64_t));
     
-    printf("Calling function %s\n", name);
+    printf("[%s] Calling function %p %s(", self.name, (void*)pc, name);
+    for(int i = 0; i < argCount; i++) {
+        printf("0x%llx%s", args[i], (i + 1 < argCount) ? ", " : "");
+    }
+    printf(")\n");
     
-    _newState->__pc = brX8Address;
-    if (_newState->__flags & __DARWIN_ARM_THREAD_STATE64_FLAGS_NO_PTRAUTH) {
-        xpaci(_newState->__pc);
-        _newState->__lr = 0xFFFFFF00;
-    } else {
+    if(IS_ARM64E_DEVICE() && (_newState->__flags & __DARWIN_ARM_THREAD_STATE64_FLAGS_NO_PTRAUTH)==0) {
+        _newState->__x[8] = pc;
+        _newState->__pc = brX8Address;
         _newState->__flags &= ~__DARWIN_ARM_THREAD_STATE64_FLAGS_KERNEL_SIGNED_PC;
+    } else {
+        _newState->__pc = pc;
     }
     
     [self resume];
     
-    printf("- function returned x0=0x%llx\n", _newState->__x[0]);
+    printf("- function [%s] returned x0=0x%llx(%lld)\n", name, _newState->__x[0], _newState->__x[0]);
     return _newState->__x[0];
 }
 
@@ -174,8 +233,13 @@ void DumpRegisters(const arm_thread_state64_internal *old_state) {
     // libdispatch.dylib`__dispatch_event_loop_cancel_waiter.cold.2:
     // 0x18e527978 <+0>:  ldr    x8, [x0, #0x40]
     
+if(IS_ARM64E_DEVICE() && (_newState->__flags & __DARWIN_ARM_THREAD_STATE64_FLAGS_NO_PTRAUTH)==0) {
     // x0=0 to cause a null deref to bring control back to us
-    RemoteArbCall(self, changeLRAddress, 0, newLR);
+    // RemoteArbCall(self, changeLRAddress, 0, newLR);
+    [self arbCall:"changeLRAddress" pc:changeLRAddress args:(uint64_t[]){0,newLR} argCount:2];
+} else {
+    _newState->__lr = newLR;
+}
 }
 
 - (void)resume {
@@ -200,6 +264,39 @@ exception:(exception_type_t)exception code:(mach_exception_data_t)code
 codeCnt:(mach_msg_type_number_t)codeCnt flavor:(int *)flavor
 old_state:(const arm_thread_state64_internal *)old_state old_stateCnt:(mach_msg_type_number_t)old_stateCnt
 new_state:(arm_thread_state64_internal *)new_state new_stateCnt:(mach_msg_type_number_t *)new_stateCnt {
+
+    BOOL pacException = NO;
+    BOOL hasPAC = !(old_state->__flags & __DARWIN_ARM_THREAD_STATE64_FLAGS_NO_PTRAUTH);
+    uint64_t ptrL = (uint64_t)(code[1] & 0xFFFFFFFFF);
+    uint64_t ptrR = (uint64_t)(_lastPC & 0xFFFFFFFFF);
+    if (hasPAC && exception == EXC_BAD_ACCESS && codeCnt == 2 &&
+        (code[0] == 1 || code[0] == 257) &&
+        (ptrL == ptrR || code[1] == 0xffffffffffffffff)) {
+        pacException = YES;
+    }
+
+if(!pacException)
+{
+    printf("[%s] exception=%s ncode=%d code=%lld(0x%llx) subcode=%lld(0x%llx)\n", self.name, EXCNAMES[exception-1], codeCnt, code[0], code[0], code[1], code[1]);
+    printf("\tpc=%p/%p lr=%p/%p flags=0x%08X\n", (void*)old_state->__pc, (void*)xpaci(old_state->__pc), (void*)old_state->__lr, (void*)xpaci(old_state->__lr), old_state->__flags);
+
+    if (exception == EXC_SOFTWARE && codeCnt == 2 && code[0] == EXC_SOFT_SIGNAL) {
+        int signum = (int)code[1];
+        printf("\n*********** Got Signal: (%d) %s\n\n", signum, SIGNAMES[signum-1]);
+    }
+} else {
+    static int pacExceptionCount = 0;
+    pacExceptionCount++;
+    if(old_state->__flags>>24 == 0xAA) {
+        printf("[%s] ******** pac diversifier bypassed in %d tries\n", self.name, pacExceptionCount);
+        pacExceptionCount = 0;
+    }
+}
+
+    if(exception == EXC_CRASH) {
+        printf("[%s] **************** Process crashed!\n", self.name);
+    }
+
     if (*flavor != ARM_THREAD_STATE64) {
         printf("Unsupported thread state flavor: %d\n", *flavor);
         return KERN_FAILURE;
@@ -210,18 +307,14 @@ new_state:(arm_thread_state64_internal *)new_state new_stateCnt:(mach_msg_type_n
     _newState = new_state;
     
     if (_numExceptionsHandled == 0) {
+        printf("[%s] Got task port: %d, image=%s\n", self.name, task, basename(proc_get_path(self.pid, NULL)));
         DumpRegisters(old_state);
-        printf("Got task port: %d\n", task);
         _taskPort = task;
     }
     
     if (_numExceptionsHandled > 0) {
-        BOOL hasPAC = !(old_state->__flags & __DARWIN_ARM_THREAD_STATE64_FLAGS_NO_PTRAUTH);
-        uint64_t ptrL = (uint64_t)(code[1] & 0xFFFFFFFFF);
-        uint64_t ptrR = (uint64_t)(_lastPC & 0xFFFFFFFFF);
-        if (hasPAC && exception == EXC_BAD_ACCESS && codeCnt == 2 &&
-            (code[0] == 1 || code[0] == 257) &&
-            (ptrL == ptrR || code[1] == 0xffffffffffffffff)) {
+
+        if(pacException) {
             new_state->__pc = _lastPC;
             new_state->__flags &= ~__DARWIN_ARM_THREAD_STATE64_FLAGS_KERNEL_SIGNED_PC;
             return KERN_SUCCESS;
@@ -230,15 +323,15 @@ new_state:(arm_thread_state64_internal *)new_state new_stateCnt:(mach_msg_type_n
         dispatch_semaphore_signal(_outputReadySemaphore);
         if (_expectedLR == (uint64_t)-1) {
             // skip lr check
-            printf("Skipping check for lr value: 0x%llx\n", old_state->__lr);
-        } else if ((uint32_t)old_state->__lr != (uint32_t)_expectedLR || wantsDetach) {
-            wantsDetach = NO;
-            printf("Process might have crashed! unexpected lr value: 0x%llx (expected: 0x%llx)\n", old_state->__lr, _expectedLR);
+            printf("[%s] Skipping check for lr value: 0x%llx\n", self.name, old_state->__lr);
+        } else if ((uint32_t)old_state->__lr != (uint32_t)_expectedLR) {
+            printf("[%s] Process might have crashed! unexpected lr value: 0x%llx (expected: 0x%llx)\n", self.name, old_state->__lr, (uint64_t)_expectedLR);
             DumpRegisters(old_state);
             return KERN_FAILURE;
         }
     }
     
+    self.catched = YES;
     dispatch_semaphore_wait(_inputReadySemaphore, DISPATCH_TIME_FOREVER);
     _lastPC = new_state->__pc;
     

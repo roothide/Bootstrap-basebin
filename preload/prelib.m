@@ -1,12 +1,12 @@
 #include <stdlib.h>
 #include <dlfcn.h>
+#include <sys/sysctl.h>
 #include <sys/syslimits.h>
 #include <mach-o/dyld.h>
 #include <Foundation/Foundation.h>
 
-#include "sandbox.h"
-
-extern char*const* environ;
+#include <sandbox.h>
+#include "commlib.h"
 
 void unsandbox(const char* sbtoken) {
 	char extensionsCopy[strlen(sbtoken)];
@@ -18,17 +18,48 @@ void unsandbox(const char* sbtoken) {
 	}
 }
 
-bool checkpatchedexe() {
-	char executablePath[PATH_MAX]={0};
-	uint32_t bufsize=sizeof(executablePath);
-	assert(_NSGetExecutablePath(executablePath, &bufsize) == 0);
-	
-	char patcher[PATH_MAX];
-	snprintf(patcher, sizeof(patcher), "%s.roothidepatch", executablePath);
-	if(access(patcher, F_OK)==0) 
-		return false;
+extern struct mach_header_64* _dyld_get_prog_image_header();
 
-	return true;
+bool check_executable_encrypted()
+{
+	struct mach_header_64* mh = _dyld_get_prog_image_header();
+	if(!mh) return false;
+
+	struct load_command* cmd = (struct load_command*)((uintptr_t)mh + sizeof(struct mach_header_64));
+	for(uint32_t i=0; i<mh->ncmds; i++) {
+		if(cmd->cmd == LC_ENCRYPTION_INFO_64) {
+			struct encryption_info_command_64* encCmd = (struct encryption_info_command_64*)cmd;
+			if(encCmd->cryptid != 0) {
+				return true;
+			} else {
+				return false;
+			}
+		}
+		cmd = (struct load_command*)((uintptr_t)cmd + cmd->cmdsize);
+	}
+	return false;
+}
+
+NSDictionary* g_rebuildStatus = nil;
+
+uint64_t jbrand()
+{
+	NSNumber* jbrand = g_rebuildStatus[@"jbrand"];
+	return jbrand.unsignedLongLongValue;
+}
+
+const char* jbroot(const char* path)
+{
+	NSString* jbrootPath = g_rebuildStatus[@"jbroot"];
+	NSString* newPath = [jbrootPath stringByAppendingPathComponent:@(path)];
+	return strdup(newPath.fileSystemRepresentation);
+}
+
+NSString* __attribute__((overloadable)) jbroot(NSString* path)
+{
+	NSString* jbrootPath = g_rebuildStatus[@"jbroot"];
+	NSString* newPath = [jbrootPath stringByAppendingPathComponent:path];
+	return newPath;
 }
 
 static void __attribute__((__constructor__)) preload()
@@ -38,6 +69,8 @@ static void __attribute__((__constructor__)) preload()
 
     NSString* rebuildFile = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@".rebuild"];
 	NSDictionary* rebuildStatus = [NSDictionary dictionaryWithContentsOfFile:rebuildFile];
+
+	g_rebuildStatus = rebuildStatus;
 
 	const char* sbtoken = [rebuildStatus[@"sb_token"] UTF8String];
 	if(sbtoken) {
@@ -57,6 +90,14 @@ static void __attribute__((__constructor__)) preload()
     
 	if(!found) 
 	{
+		if(check_executable_encrypted())
+		{
+			assert(requireJIT()==0);
+
+			void init_bypassDyldLibValidation();
+			init_bypassDyldLibValidation();
+		}
+		
 		if(!dlopen("@executable_path/.jbroot/basebin/bootstrap.dylib", RTLD_NOW)) {
 			assert(checkpatchedexe());
 		}

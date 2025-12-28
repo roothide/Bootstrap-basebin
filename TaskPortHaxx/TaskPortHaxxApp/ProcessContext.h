@@ -7,9 +7,11 @@
 
 @import Foundation;
 #import "Header.h"
-#define RemoteArbCall(instance, _pc, ...) [instance arbCall:#_pc pc:(uint64_t)(_pc) args:(uint64_t[]){__VA_ARGS__} argCount:sizeof((uint64_t[]){__VA_ARGS__})/sizeof(uint64_t)]
+#define RemoteArbCall(instance, _pc, ...) (instance.lr=0xFFFFFF00,instance.expectedLR=0xFFFFFF00,[instance arbCall:#_pc pc:(uint64_t)(_pc) args:(uint64_t[]){__VA_ARGS__} argCount:sizeof((uint64_t[]){__VA_ARGS__})/sizeof(uint64_t)])
 
 @interface ProcessContext : NSObject
+@property(nonatomic, assign) char* name;
+@property(nonatomic, assign) BOOL catched;
 @property(nonatomic, strong) NSString *exceptionPortName;
 @property(nonatomic, assign) pid_t pid;
 @property(nonatomic, assign) mach_port_t taskPort;

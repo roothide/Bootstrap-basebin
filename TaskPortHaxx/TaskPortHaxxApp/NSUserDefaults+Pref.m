@@ -7,13 +7,30 @@
 
 @import Foundation;
 #import "Header.h"
+#include <roothide.h>
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wobjc-protocol-method-implementation"
 
 @implementation NSUserDefaults(Pref)
+-(id)objectForKey:(NSString*)key {
+    NSString *configFilePath = jbroot(@"/tmp/TaskPortHaxx/Cache.plist");
+    NSDictionary* defaults = [NSDictionary dictionaryWithContentsOfFile:configFilePath];
+    return [defaults objectForKey:key];
+}
+
+-(void)setObject:(NSObject*)value forKey:(NSString*)key {
+    NSString *configFilePath = jbroot(@"/tmp/TaskPortHaxx/Cache.plist");
+    NSMutableDictionary* defaults = [NSMutableDictionary dictionaryWithContentsOfFile:configFilePath];
+    if(!defaults) defaults = [[NSMutableDictionary alloc] init];
+    [defaults setValue:value forKey:key];
+    [defaults writeToFile:configFilePath atomically:YES];
+}
 - (void)setSignedPointer:(NSUInteger)signedPointer {
-    [self setObject:@(signed_pointer = signedPointer) forKey:@"signedPointer"];
+    [self setObject:@(signedPointer) forKey:@"signedPointer"];
 }
 - (NSUInteger)signedPointer {
-    return signed_pointer = [[self objectForKey:@"signedPointer"] unsignedIntegerValue];
+    return [[self objectForKey:@"signedPointer"] unsignedIntegerValue];
 }
 - (void)setSignedDiversifier:(uint32_t)signedDiversifier {
     [self setObject:@(signedDiversifier) forKey:@"signedDiversifier"];
@@ -34,3 +51,5 @@
     return [[self objectForKey:@"offsetAMFI"] unsignedIntegerValue];
 }
 @end
+
+#pragma clang diagnostic pop

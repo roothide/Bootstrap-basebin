@@ -7,34 +7,22 @@
 
 @import Foundation;
 #import "Header.h"
-
-int spawn_stage1_prepare_process(void) {
-    pid_t pid;
-    posix_spawnattr_t attr;
-    posix_spawnattr_init(&attr);
-    posix_spawnattr_set_persona_np(&attr, /*persona_id=*/99, POSIX_SPAWN_PERSONA_FLAGS_OVERRIDE);
-    posix_spawnattr_set_persona_uid_np(&attr, 0);
-    posix_spawnattr_set_persona_gid_np(&attr, 0);
-    char *argv[] = {**_NSGetArgv(), "updatebrain-prepare", NULL};
-    int ret = posix_spawn(&pid, argv[0], NULL, &attr, argv, environ);
-    if (ret) {
-        perror("posix_spawn");
-        return 1;
-    }
-    printf("Spawned stage1 prepare process with PID %d\n", pid);
-    // Wait for it to exit
-    int status;
-    waitpid(pid, &status, 0);
-    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
-        printf("Stage1 prepare process failed\n");
-    }
-    return status;
-}
+#import <mach-o/dyld.h>
 
 pid_t launchTest(NSString *excPortName, NSString *arg1, BOOL suspended) {
-    NSString *bundleID = NSBundle.mainBundle.bundleIdentifier;
-    NSString *execPath = NSBundle.mainBundle.executablePath;
+    printf("Launching %s, port=%s, suspend=%d\n", arg1.UTF8String, excPortName.UTF8String, suspended);
+	uint32_t execPathSize = PATH_MAX;
+    char executablePath[execPathSize];
+	_NSGetExecutablePath(executablePath, &execPathSize);
+    
+    NSString *execPath = @(executablePath);
+    NSString *bundleID = @"com.kdt.taskporthaxx.xpcproxy";
+
+
     NSDictionary *plist = @{
+#if DTSECURITY_WAIT_FOR_DEBUGGER
+        @"WaitForDebugger": @(suspended),
+#endif
         @"ProcessType": @"SystemApp",
         @"EnableTransactions": @NO,
         @"_ManagedBy": @"com.apple.runningboard",
@@ -49,14 +37,14 @@ pid_t launchTest(NSString *excPortName, NSString *arg1, BOOL suspended) {
                    bundleID, arc4random_uniform(10000)],
         @"MaterializeDatalessFiles": @YES,
         //@"Program": execPath,
-        @"ProgramArguments": arg1 ? @[ execPath, arg1 ] : @[ execPath ],
+        @"ProgramArguments": arg1 ? @[ execPath, @"xpcproxy", arg1 ] : @[ execPath ],
         @"MachServices": @{},
         @"EnvironmentVariables": @{
             @"TMPDIR": @"/var/tmp",
             @"HOME": @"/var/root",
             @"CFFIXED_USER_HOME": @"/var/root",
             @"HAXX_EXCEPTION_PORT_NAME": excPortName,
-            @"HAXX_START_SUSPENDED": @(suspended),
+            @"HAXX_START_SUSPENDED": suspended ? @"1" : @"0",
         },
         @"_AdditionalProperties": arg1 ? @{} : @{
             @"RunningBoard": @{
@@ -84,7 +72,7 @@ pid_t launchTest(NSString *excPortName, NSString *arg1, BOOL suspended) {
     
     xpc_object_t result;
     kern_return_t kr = _launch_job_routine(0x3e8, xpcDict, &result);
-    printf("Launch job routine returned: %s\n", mach_error_string(kr));
+    printf("Launch job(%s) routine returned: %s -> %s\n\n", arg1.UTF8String, mach_error_string(kr), xpc_copy_description(result));
     
     pid_t launched_pid = -1;
     if (kr == KERN_SUCCESS && result && xpc_get_type(result) == XPC_TYPE_DICTIONARY) {

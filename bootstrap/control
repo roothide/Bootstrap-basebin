@@ -1,4 +1,4 @@
-Package: com.roothide.bootstrap.dylib
+Package: com.roothide.bootstrap.bootstrap-dylib
 Name: bootstrap
 Version: 0.0.1
 Architecture: iphoneos-arm

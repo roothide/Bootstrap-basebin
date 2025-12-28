@@ -3,64 +3,16 @@
 #include <choma/FAT.h>
 #include <choma/MachO.h>
 #include <choma/FileStream.h>
+#include <choma/MachOByteOrder.h>
 #include <choma/Host.h>
 #include <copyfile.h>
 
-#define LOG(...)
-
-char *extract_preferred_slice(const char *fatPath)
-{
-    FAT *fat = fat_init_from_path(fatPath);
-    if (!fat) return NULL;
-    MachO *macho = fat_find_preferred_slice(fat);
-    if (!macho) return NULL;
-    
-    char *temp = strdup("/tmp/XXXXXX");
-    int fd = mkstemp(temp);
-
-    MemoryStream *outStream = file_stream_init_from_path(temp, 0, 0, FILE_STREAM_FLAG_WRITABLE | FILE_STREAM_FLAG_AUTO_EXPAND);
-    MemoryStream *machoStream = macho_get_stream(macho);
-    memory_stream_copy_data(machoStream, 0, outStream, 0, memory_stream_get_size(machoStream));
-
-    fat_free(fat);
-    memory_stream_free(outStream);
-    close(fd);
-    return temp;
-}
-
-int apply_coretrust_bypass_wrapper(const char *inputPath, const char *outputPath)
-{
-    char *machoPath = extract_preferred_slice(inputPath);
-    if(!machoPath) {
-        printf("extracted failed %s\n", inputPath);
-        return -1;
-    }
-    LOG("extracted best slice to %s\n", machoPath);
-
-    int r = apply_coretrust_bypass(machoPath);
-    if (r != 0) {
-        free(machoPath);
-        return r;
-    }
-
-    r = copyfile(machoPath, outputPath, 0, COPYFILE_ALL | COPYFILE_MOVE | COPYFILE_UNLINK);
-    if (r == 0) {
-        chmod(outputPath, 0755);
-        LOG("Signed file! CoreTrust bypass eta now!!\n");
-    }
-    else {
-        perror("copyfile");
-    }
-
-    free(machoPath);
-    return r;
-}
-
+#define LOG(...) //printf(__VA_ARGS__)
 
 int main(int argc, char *argv[]) {
 	if (argc < 2) {
         printf("Usage: %s <rootfs-based path to macho>\n", argv[0]);
-        return -1;
+        return 1;
     }
 
     char *input = argv[argc-1];
@@ -68,65 +20,154 @@ int main(int argc, char *argv[]) {
     struct stat st;
     assert(stat(input, &st) == 0);
 
-    // NSDictionary *customEntitlements = nil;
-    // if (argc == 4) {
-    //     if (!strcmp(argv[1], "--entitlements")) {
-    //         NSString *entitlementsPath = [NSString stringWithUTF8String:argv[2]];
-    //         customEntitlements = [NSDictionary dictionaryWithContentsOfFile:entitlementsPath];
-    //     }
-    // }
+    FAT *fat = fat_init_from_path(input);
+    if (!fat) return 2;
 
-    // int r = codesign_sign_adhoc(input, true, customEntitlements);
-	// if (r != 0) {
-	// 	printf("Failed adhoc signing (%d) Continuing anyways...\n", r);
-	// }
-    // else {
-    //     printf("AdHoc signed file!\n");
-    // }
+    char *tempOut = strdup("/tmp/XXXXXX");
+    int fdOut = mkstemp(tempOut);
+    assert(fdOut >= 0);
+    close(fdOut);
 
-	char *machoPath = extract_preferred_slice(input);
-	LOG("Extracted best slice to %s\n", machoPath);
+    LOG("temp output file: %s\n", tempOut);
 
-    LOG("Applying CoreTrust bypass...\n");
+    int archHeaderSize = 0;
+    void* archHeaderBuffer = NULL;
 
-	if (apply_coretrust_bypass(machoPath) != 0) {
-		printf("Failed applying CoreTrust bypass\n");
-		return -1;
-	}
+    struct fat_header fatHeader={0};
+    fat_read_at_offset(fat, 0, sizeof(fatHeader), &fatHeader);
+    FAT_HEADER_APPLY_BYTE_ORDER(&fatHeader, BIG_TO_HOST_APPLIER);
 
-   if (copyfile(machoPath, input, 0, COPYFILE_ALL | COPYFILE_MOVE | COPYFILE_UNLINK) == 0) {
-        assert(chown(input, st.st_uid, st.st_gid)==0);
-        assert(chmod(input, st.st_mode)==0);
-        LOG("Applied CoreTrust Bypass!\n");
+    LOG("FAT magic: %08X, nfat_arch: %d\n", fatHeader.magic, fatHeader.nfat_arch);
+
+    MemoryStream *outStream = file_stream_init_from_path(tempOut, 0, 0, FILE_STREAM_FLAG_WRITABLE | FILE_STREAM_FLAG_AUTO_EXPAND);
+    assert(outStream);
+
+    if (fatHeader.magic == FAT_MAGIC || fatHeader.magic == FAT_MAGIC_64)
+    {
+        assert(fatHeader.nfat_arch == fat->slicesCount);
+
+        memory_stream_write(outStream, 0, sizeof(fatHeader), &fatHeader);
+
+        if(fatHeader.magic==FAT_MAGIC) {
+            archHeaderSize = fatHeader.nfat_arch * sizeof(struct fat_arch);
+            archHeaderBuffer = malloc(archHeaderSize);
+            fat_read_at_offset(fat, sizeof(fatHeader), archHeaderSize, archHeaderBuffer);
+            for(int i=0; i<fatHeader.nfat_arch; i++) {
+                FAT_ARCH_APPLY_BYTE_ORDER(&((struct fat_arch*)archHeaderBuffer)[i], BIG_TO_HOST_APPLIER);
+            }
+        }
+        else if(fatHeader.magic==FAT_MAGIC_64) {
+            archHeaderSize = fatHeader.nfat_arch * sizeof(struct fat_arch_64);
+            archHeaderBuffer = malloc(archHeaderSize);
+            fat_read_at_offset(fat, sizeof(fatHeader), archHeaderSize, archHeaderBuffer);
+            for(int i=0; i<fatHeader.nfat_arch; i++) {
+                FAT_ARCH_64_APPLY_BYTE_ORDER(&((struct fat_arch_64*)archHeaderBuffer)[i], BIG_TO_HOST_APPLIER);
+            }
+        }
+
+        memory_stream_write(outStream, sizeof(fatHeader), archHeaderSize, archHeaderBuffer);
     }
-    else {
+
+    for(int i=0; i<fat->slicesCount; i++)
+    {
+        MachO *macho = fat->slices[i];
+
+        char *temp = strdup("/tmp/XXXXXX");
+        int fd = mkstemp(temp);
+        assert(fd >= 0);
+        close(fd);
+
+        LOG("Processing slice[%d] 0x%08X/0x%08X %s\n", i, macho->machHeader.cputype, macho->machHeader.cpusubtype, temp);
+
+        MemoryStream *machoStream = macho_get_stream(macho);
+        MemoryStream *tempFileStream = file_stream_init_from_path(temp, 0, 0, FILE_STREAM_FLAG_WRITABLE | FILE_STREAM_FLAG_AUTO_EXPAND);
+        memory_stream_copy_data(machoStream, 0, tempFileStream, 0, memory_stream_get_size(machoStream));
+        memory_stream_free(tempFileStream);
+
+        if(macho->machHeader.cputype == CPU_TYPE_ARM64)
+        {
+            LOG("Applying CoreTrust bypass to slice[%d] 0x%08X/0x%08X ...\n", i, macho->machHeader.cputype, macho->machHeader.cpusubtype);
+            if (apply_coretrust_bypass(temp) != 0) {
+                printf("Failed applying CoreTrust bypass\n");
+                return 3;
+            }
+        }
+
+        MemoryStream *inStream = file_stream_init_from_path(temp, 0, 0, FILE_STREAM_SIZE_AUTO);
+        assert(inStream);
+
+        LOG("inStream size: 0x%zx, outStream size: 0x%zx\n", memory_stream_get_size(inStream), memory_stream_get_size(outStream));
+
+        uint64_t alignMask = 0;
+        uint64_t alignedSize = 0;
+
+        if(fatHeader.magic==FAT_MAGIC) {
+            alignMask = 1 << ((struct fat_arch*)archHeaderBuffer)[i].align;
+            alignedSize = (memory_stream_get_size(outStream) + alignMask - 1) & (-alignMask);
+            ((struct fat_arch*)archHeaderBuffer)[i].size = memory_stream_get_size(inStream);
+            ((struct fat_arch*)archHeaderBuffer)[i].offset = alignedSize;
+        }
+        else if(fatHeader.magic==FAT_MAGIC_64) {
+            alignMask = 1 << ((struct fat_arch_64*)archHeaderBuffer)[i].align;
+            alignedSize = (memory_stream_get_size(outStream) + alignMask - 1) & (-alignMask);
+            ((struct fat_arch_64*)archHeaderBuffer)[i].size = memory_stream_get_size(inStream);
+            ((struct fat_arch_64*)archHeaderBuffer)[i].offset = alignedSize;
+        }
+
+        if(archHeaderBuffer)
+        {
+            LOG("alignMask=0x%llx, alignedSize=0x%llx, file size=0x%llX\n", alignMask, alignedSize, memory_stream_get_size(outStream));
+            int filesize = memory_stream_get_size(outStream);
+            for(int pad=filesize; pad<alignedSize; pad++) {
+                uint8_t zero = 0;
+                memory_stream_write(outStream, pad, 1, &zero);
+            }
+            assert(memory_stream_get_size(outStream) == alignedSize);
+        }
+
+        memory_stream_copy_data(inStream, 0, outStream, memory_stream_get_size(outStream), memory_stream_get_size(inStream));
+        memory_stream_free(inStream);
+        assert(unlink(temp) == 0);
+        free(temp);
+    }
+
+    if (archHeaderBuffer)
+    {
+        if(fatHeader.magic==FAT_MAGIC) {
+            for(int i=0; i<fatHeader.nfat_arch; i++) {
+                FAT_ARCH_APPLY_BYTE_ORDER(&((struct fat_arch*)archHeaderBuffer)[i], HOST_TO_BIG_APPLIER);
+            }
+        }
+        else if(fatHeader.magic==FAT_MAGIC_64) {
+            for(int i=0; i<fatHeader.nfat_arch; i++) {
+                FAT_ARCH_64_APPLY_BYTE_ORDER(&((struct fat_arch_64*)archHeaderBuffer)[i], HOST_TO_BIG_APPLIER);
+            }
+        }
+
+        memory_stream_write(outStream, sizeof(fatHeader), archHeaderSize, archHeaderBuffer);
+
+        FAT_HEADER_APPLY_BYTE_ORDER(&fatHeader, HOST_TO_BIG_APPLIER);
+        memory_stream_write(outStream, 0, sizeof(fatHeader), &fatHeader);
+
+        free(archHeaderBuffer);
+        archHeaderBuffer = NULL;
+        archHeaderSize = 0;
+    }
+
+    memory_stream_free(outStream);
+
+    fat_free(fat);
+
+    if (copyfile(tempOut, input, 0, COPYFILE_ALL | COPYFILE_MOVE | COPYFILE_UNLINK) != 0) {
         perror("copyfile");
-		return -1;
+        return 4;
     }
 
-    //keep owner, but codesign cached...
+    assert(chown(input, st.st_uid, st.st_gid)==0);
+    assert(chmod(input, st.st_mode)==0);
+    LOG("Applied CoreTrust Bypass!\n");
 
-    // int src = open(machoPath, O_RDONLY);
-    // assert(src != -1);
+    free(tempOut);
 
-    // int dst = open(input, O_RDWR);
-    // assert(dst != -1);
-
-    // ftruncate(dst, 0);
-
-    // int readlen;
-    // char readbuf[128];
-    // while( (readlen=read(src, readbuf, sizeof(readbuf))) > 0)
-    //     write(dst, readbuf, readlen);
-
-    // close(dst);
-    // close(src);
-
-    // assert(remove(machoPath) == 0);
-    
-    // //SecCode may strip suid so we need to restore it
-    // assert(chmod(input, st.st_mode) == 0);
-
-	free(machoPath);
-	return 0;
+    return 0;
 }

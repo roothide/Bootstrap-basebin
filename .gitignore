@@ -1,2 +1,4 @@
 
 installdeb2
+/bootstrapd/micro_inetd
+/.build

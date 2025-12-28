@@ -1,0 +1,5 @@
+#!/bin/sh
+
+plutil -xml /basebin/LaunchDaemons/com.roothide.bootstrap.bootstrapd.plist
+sed -i "s|@JBROOT@|$(jbroot)|g" /basebin/LaunchDaemons/com.roothide.bootstrap.bootstrapd.plist
+sed -i "s|@JBRAND@|$(jbrand)|g" /basebin/LaunchDaemons/com.roothide.bootstrap.bootstrapd.plist

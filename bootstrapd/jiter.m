@@ -3,41 +3,6 @@
 #include <signal.h>
 #include <pthread.h>
 #include "common.h"
-#include "libproc.h"
-#include "libproc_private.h"
-
-
-/* Status values. */
-#define SIDL    1               /* Process being created by fork. */
-#define SRUN    2               /* Currently runnable. */
-#define SSLEEP  3               /* Sleeping on an address. */
-#define SSTOP   4               /* Process debugging or suspension. */
-#define SZOMB   5               /* Awaiting collection by parent. */
-
-int proc_paused(pid_t pid, bool* paused)
-{
-	*paused = false;
-
-	struct proc_bsdinfo procInfo={0};
-	int ret = proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &procInfo, sizeof(procInfo));
-	if(ret != sizeof(procInfo)) {
-		SYSLOG("bsdinfo failed, %d,%s\n", errno, strerror(errno));
-		return -1;
-	}
-
-	if(procInfo.pbi_status == SSTOP)
-	{
-		SYSLOG("%d pstat=%x flag=%x xstat=%x\n", ret, procInfo.pbi_status, procInfo.pbi_flags, procInfo.pbi_xstatus);
-		*paused = true;
-	}
-	else if(procInfo.pbi_status != SRUN) {
-		SYSLOG("unexcept %d pstat=%x\n", ret, procInfo.pbi_status);
-		return -1;
-	}
-
-	return 0;
-}
-
 
 #define PT_DETACH       11      /* stop tracing a process */
 #define PT_ATTACHEXC    14      /* attach to running process with signal exception */
