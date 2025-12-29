@@ -14,17 +14,21 @@
 
 @implementation NSUserDefaults(Pref)
 -(id)objectForKey:(NSString*)key {
-    NSString *configFilePath = jbroot(@"/tmp/TaskPortHaxx/Cache.plist");
+    NSString *configFilePath = jbroot(@TASKPORTHAXX_CACHE_DIR"/Cache.plist");
     NSDictionary* defaults = [NSDictionary dictionaryWithContentsOfFile:configFilePath];
     return [defaults objectForKey:key];
 }
 
 -(void)setObject:(NSObject*)value forKey:(NSString*)key {
-    NSString *configFilePath = jbroot(@"/tmp/TaskPortHaxx/Cache.plist");
+    NSFileManager *fm = NSFileManager.defaultManager;
+    if(![fm fileExistsAtPath:jbroot(@TASKPORTHAXX_CACHE_DIR)]) {
+        assert([fm createDirectoryAtPath:jbroot(@TASKPORTHAXX_CACHE_DIR) withIntermediateDirectories:YES attributes:nil error:nil]);
+    }
+    NSString *configFilePath = jbroot(@TASKPORTHAXX_CACHE_DIR"/Cache.plist");
     NSMutableDictionary* defaults = [NSMutableDictionary dictionaryWithContentsOfFile:configFilePath];
     if(!defaults) defaults = [[NSMutableDictionary alloc] init];
     [defaults setValue:value forKey:key];
-    [defaults writeToFile:configFilePath atomically:YES];
+    assert([defaults writeToFile:configFilePath atomically:YES]);
 }
 - (void)setSignedPointer:(NSUInteger)signedPointer {
     [self setObject:@(signedPointer) forKey:@"signedPointer"];

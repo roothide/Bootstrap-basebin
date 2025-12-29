@@ -82,12 +82,23 @@ int main(int argc, char * argv[]) {
     }
 #endif
 
-    if (strcmp(argv[1], "xpcproxy") == 0) {
+    if (argv[1] && strcmp(argv[1], "xpcproxy")==0)
+    {
+        assert(argc==3);
+
         char *path = argv[2];
         char *portName = getenv("HAXX_EXCEPTION_PORT_NAME");
         assert(child_execve(portName, path) == 0);
     }
 
+    if (argv[1] && strcmp(argv[1], "prepare")==0)
+    {
+        assert(argc==3);
+        int child_stage1_prepare(NSString* execDir);
+        return child_stage1_prepare(@(argv[2]));
+    }
+
+    assert(argc <= 2);
 
     TaskPortHaxx* worker = [TaskPortHaxx new];
 

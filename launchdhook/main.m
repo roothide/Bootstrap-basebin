@@ -73,7 +73,7 @@ xpc_object_t new_xpc_dictionary_get_value(xpc_object_t xdict, const char *key)
 			}
 		}
 		char* desc=NULL;
-		FileLogDebug("launch LaunchDaemons = %s", xpc_copy_description(origXvalue));
+		// FileLogDebug("launch LaunchDaemons = %s", xpc_copy_description(origXvalue));
 		if(desc) free(desc);
 	}
 	else if (strcmp(key, "Paths") == 0) {

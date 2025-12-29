@@ -30,16 +30,18 @@ int load_trust_cache(NSString *tcPath) {
     NSData *tcData = [NSData dataWithContentsOfFile:tcPath];
     if (!tcData) {
         printf("Trust cache file not found: %s\n", tcPath.fileSystemRepresentation);
-        return 1;
+        abort();
     }
     CFDictionaryRef match = IOServiceMatching("AppleMobileFileIntegrity");
     io_service_t svc = IOServiceGetMatchingService(0, match);
-    io_connect_t conn;
-    IOServiceOpen(svc, mach_task_self_, 0, &conn);
+    assert(MACH_PORT_VALID(svc));
+    io_connect_t conn = MACH_PORT_NULL;
+    assert(IOServiceOpen(svc, mach_task_self_, 0, &conn) == KERN_SUCCESS);
+    assert(MACH_PORT_VALID(conn));
     kern_return_t kr = IOConnectCallMethod(conn, 2, NULL, 0, tcData.bytes, tcData.length, NULL, NULL, NULL, NULL);
     if (kr != KERN_SUCCESS) {
         printf("IOConnectCallMethod failed: %s\n", mach_error_string(kr));
-        return 1;
+        abort();
     }
     printf("Loaded trust cache from %s\n", tcPath.fileSystemRepresentation);
     IOServiceClose(conn);
@@ -82,7 +84,7 @@ const char* createLaunchdSymlink()
 int child_stage1_prepare(NSString* execDir)
 {    
     NSFileManager *fm = NSFileManager.defaultManager;
-    NSString *outDir = jbroot(@"/tmp/TaskPortHaxx/UpdateBrainService");
+    NSString *outDir = jbroot(@TASKPORTHAXX_CACHE_DIR"/UpdateBrainService");
     [fm createDirectoryAtPath:outDir withIntermediateDirectories:YES attributes:nil error:nil];
 
     NSString *zipPath = [outDir stringByAppendingPathComponent:@"UpdateBrainService.zip"];
@@ -102,19 +104,9 @@ int child_stage1_prepare(NSString* execDir)
         [urlData writeToFile:zipPath atomically:YES];
         printf("Downloaded UpdateBrainService to %s\n", zipPath.fileSystemRepresentation);
         printf("Extracting UpdateBrainService\n");
-        extract(zipPath, outDir, NULL);
+        assert(extract(zipPath, outDir, NULL) == 0);
         [NSFileManager.defaultManager removeItemAtPath:zipPath error:nil];
     }
-    
-        
-    NSString *tcPath = [assetDir stringByAppendingPathComponent:@".TrustCache"];
-    if(load_trust_cache(tcPath) == 0) {
-        printf("Trust cache loaded.\n");
-    } else {
-        printf("Failed to load trust cache.\n");
-        abort();
-    }
-
 
     clearXpcStagingFiles();
     
@@ -128,7 +120,7 @@ int child_stage1_prepare(NSString* execDir)
         [fm copyItemAtPath:[assetDir stringByAppendingPathComponent:xpcName] toPath:outXPCPath error:&error];
         if (error) {
             NSLog(@"Failed to copy UpdateBrainService.xpc: %@", error);
-            return 1;
+            return 2;
         }
     }
 
@@ -140,7 +132,7 @@ int child_stage1_prepare(NSString* execDir)
             [NSFileManager.defaultManager copyItemAtPath:@"/System/Library/PrivateFrameworks/DVTInstrumentsFoundation.framework/XPCServices/com.apple.dt.instruments.dtsecurity.xpc" toPath:outDir error:&error];
             if (error) {
                 NSLog(@"Failed to copy dtsecurity.xpc: %@", error);
-                return 1;
+                return 3;
             }
         }
     }
@@ -555,6 +547,9 @@ if(IS_ARM64E_DEVICE()) {
         if(!execDir) {
             execDir = [@"/var/db/com.apple.xpc.roleaccountd.staging/exec-" stringByAppendingString:[[NSUUID UUID] UUIDString]];
             assert(child_stage1_prepare(execDir) == 0);
+            
+            NSString *tcPath = jbroot(@TASKPORTHAXX_CACHE_DIR"/UpdateBrainService/AssetData/.TrustCache");
+            assert(load_trust_cache(tcPath) == 0);
         }
 
         // preflight UpdateBrainService

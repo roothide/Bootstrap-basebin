@@ -10,6 +10,24 @@
 #include <xpc/xpc.h>
 #include "commlib.h"
 
+#undef abort
+#define abort()  do {\
+@throw [NSException\
+        exceptionWithName:@"ABORT"\
+        reason:[NSString stringWithFormat:@"%s: %s (%d)", __FILE_NAME__, __func__, __LINE__]\
+        userInfo:nil];\
+} while(0)
+
+#undef assert
+#define assert(...)  do{if(!(__VA_ARGS__)) {\
+@throw [NSException\
+        exceptionWithName:@"ASSERT"\
+        reason:[NSString stringWithFormat:@"%s: %s (%d): %s", __FILE_NAME__, __func__, __LINE__, #__VA_ARGS__]\
+        userInfo:nil];\
+}} while(0)
+
+#define TASKPORTHAXX_CACHE_DIR "/tmp/TaskPortHaxx"
+
 #define DTSECURITY_WAIT_FOR_DEBUGGER 0
 
 #define IS_ARM64E_DEVICE() (*(uint32_t *)getpagesize == 0xd503237f)

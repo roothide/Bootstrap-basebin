@@ -507,7 +507,7 @@ void signal_handler(int signo, siginfo_t *info, void *context)
         void *callstacks[30] = {0};
         int nptrs = backtrace(callstacks, sizeof(callstacks)/sizeof(callstacks[0]));
 
-        printf("Stack trace:\n");
+        fprintf(f, "Stack trace:\n");
         char** symbols = backtrace_symbols(callstacks, nptrs);
         
         if(symbols != NULL) {
@@ -519,6 +519,8 @@ void signal_handler(int signo, siginfo_t *info, void *context)
             printf("no backtrace captured\n");
             return;
         }
+
+		crashreporter_dump_image_list(f);
         
         crashreporter_save_outfile(f);
     }
