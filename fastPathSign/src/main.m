@@ -10,7 +10,7 @@
 #define LOG(...) //printf(__VA_ARGS__)
 
 int main(int argc, char *argv[]) {
-	if (argc < 2) {
+	if (argc != 2) {
         printf("Usage: %s <rootfs-based path to macho>\n", argv[0]);
         return 1;
     }
@@ -72,29 +72,46 @@ int main(int argc, char *argv[]) {
     {
         MachO *macho = fat->slices[i];
 
-        char *temp = strdup("/tmp/XXXXXX");
-        int fd = mkstemp(temp);
-        assert(fd >= 0);
-        close(fd);
+        char *temp = NULL;
+        MemoryStream *inStream = NULL;
 
-        LOG("Processing slice[%d] 0x%08X/0x%08X %s\n", i, macho->machHeader.cputype, macho->machHeader.cpusubtype, temp);
-
-        MemoryStream *machoStream = macho_get_stream(macho);
-        MemoryStream *tempFileStream = file_stream_init_from_path(temp, 0, 0, FILE_STREAM_FLAG_WRITABLE | FILE_STREAM_FLAG_AUTO_EXPAND);
-        memory_stream_copy_data(machoStream, 0, tempFileStream, 0, memory_stream_get_size(machoStream));
-        memory_stream_free(tempFileStream);
-
-        if(macho->machHeader.cputype == CPU_TYPE_ARM64)
+        if(macho && macho->machHeader.cputype==CPU_TYPE_ARM64)
         {
+            temp = strdup("/tmp/XXXXXX");
+            int fd = mkstemp(temp);
+            assert(fd >= 0);
+            close(fd);
+
+            LOG("Processing slice[%d] 0x%08X/0x%08X %s\n", i, macho->machHeader.cputype, macho->machHeader.cpusubtype, temp);
+
+            MemoryStream *machoStream = macho_get_stream(macho);
+            MemoryStream *tempFileStream = file_stream_init_from_path(temp, 0, 0, FILE_STREAM_FLAG_WRITABLE | FILE_STREAM_FLAG_AUTO_EXPAND);
+            memory_stream_copy_data(machoStream, 0, tempFileStream, 0, memory_stream_get_size(machoStream));
+            memory_stream_free(tempFileStream);
+
             LOG("Applying CoreTrust bypass to slice[%d] 0x%08X/0x%08X ...\n", i, macho->machHeader.cputype, macho->machHeader.cpusubtype);
             if (apply_coretrust_bypass(temp) != 0) {
                 printf("Failed applying CoreTrust bypass\n");
-                return 3;
+                abort();
             }
-        }
 
-        MemoryStream *inStream = file_stream_init_from_path(temp, 0, 0, FILE_STREAM_SIZE_AUTO);
-        assert(inStream);
+            inStream = file_stream_init_from_path(temp, 0, 0, FILE_STREAM_SIZE_AUTO);
+            assert(inStream != NULL);
+        }
+        else
+        {
+            int offset,size;
+            if(fatHeader.magic==FAT_MAGIC) {
+                offset = ((struct fat_arch*)archHeaderBuffer)[i].offset;
+                size = ((struct fat_arch*)archHeaderBuffer)[i].size;
+            }
+            else if(fatHeader.magic==FAT_MAGIC_64) {
+                offset = ((struct fat_arch_64*)archHeaderBuffer)[i].offset;
+                size = ((struct fat_arch_64*)archHeaderBuffer)[i].size;
+            }
+            inStream = file_stream_init_from_path(input, offset, size, 0);
+            assert(inStream != NULL);
+        }
 
         LOG("inStream size: 0x%zx, outStream size: 0x%zx\n", memory_stream_get_size(inStream), memory_stream_get_size(outStream));
 
@@ -127,8 +144,11 @@ int main(int argc, char *argv[]) {
 
         memory_stream_copy_data(inStream, 0, outStream, memory_stream_get_size(outStream), memory_stream_get_size(inStream));
         memory_stream_free(inStream);
-        assert(unlink(temp) == 0);
-        free(temp);
+        if(temp) {
+            assert(unlink(temp) == 0);
+            free(temp);
+            temp=NULL;
+        }
     }
 
     if (archHeaderBuffer)
