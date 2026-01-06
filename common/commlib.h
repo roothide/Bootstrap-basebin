@@ -17,6 +17,7 @@ extern int posix_spawnattr_set_persona_uid_np(const posix_spawnattr_t* __restric
 extern int posix_spawnattr_set_persona_gid_np(const posix_spawnattr_t* __restrict, uid_t);
 
 extern int posix_spawnattr_set_launch_type_np(const posix_spawnattr_t *attr, uint8_t launch_type);
+extern int posix_spawnattr_getmacpolicyinfo_np(const posix_spawnattr_t * __restrict attr, const char *policyname, void **datap, size_t *datalenp);
 
 int spawn(const char* path, char*const* argv, char*const* envp, void(^pid_out)(pid_t), void(^std_out)(char*,int), void(^err_out)(char*,int));
 
@@ -40,6 +41,12 @@ char* proc_get_identifier(pid_t pid, char buffer[255]);
 
 bool is_app_coalition(); // (inherit)
 
+void unsandbox(const char* sbtoken);
+
+const char* generate_sandbox_extensions(bool ext);
+
+const char* roothide_get_sandbox_profile(pid_t pid, char buffer[255]);
+
 void killAllForBundle(const char* bundlePath);
 void killAllForExecutable(const char* path);
 
@@ -62,10 +69,6 @@ bool is_sensitive_app_identifier(const char* identifier);
 bool is_apple_internal_identifier(const char* identifier);
 
 bool machoGetInfo(const char* path, bool* isMachO, bool* isLibrary);
-
-#define APP_PATH_PREFIX "/private/var/containers/Bundle/Application/"
-
-bool isDefaultInstallationPath(const char* path);
 
 #define APPLE_INTERNAL_IDENTIFIERS @[\
     @"com.apple.atrun",\

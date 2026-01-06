@@ -4,6 +4,11 @@
 <dict>
 	<key>Label</key>
 	<string>com.roothide.bootstrap.bootstrapd</string>
+	<key>MachServices</key>
+	<dict>
+		<key>com.roothide.bootstrapd-@JBRAND@</key>
+		<true/>
+	</dict>
 	<key>ProgramArguments</key>
 	<array>
 		<string>@JBROOT@/basebin/bootstrapd</string>

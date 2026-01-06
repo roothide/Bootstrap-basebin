@@ -56,7 +56,7 @@ void sign_apps() {
 	SYSLOG("app sign %s", gUpdatedAppBundles.description.UTF8String);
 	for(NSString* appbundle in gUpdatedAppBundles)
 	{
-		char* args[] = {"/basebin/uicache", "-p", (char*)jbroot(appbundle.fileSystemRepresentation), "--patchonly", NULL};
+		char* args[] = {"/basebin/appatch", (char*)jbroot(appbundle.fileSystemRepresentation), NULL};
 		int status = execBinary(jbroot(args[0]), args);
 		if(status != 0) {
 			fprintf(stderr, "signapp %s failed: %d\n", appbundle.fileSystemRepresentation, status);

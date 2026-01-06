@@ -1,5 +1,6 @@
 #include <paths.h>
 #include <unistd.h>
+#include <sandbox.h>
 #include <sys/proc.h>
 #include <sys/sysctl.h>
 #include <mach-o/dyld.h>
@@ -94,12 +95,14 @@ char* proc_get_identifier(pid_t pid, char buffer[255])
         return NULL;
     }
     
-    char* csbuffer = malloc(header.length);
+    uint32_t bufferLen = ntohl(header.length);
+
+    char* csbuffer = malloc(bufferLen);
     if (!csbuffer) {
         return NULL;
     }
     
-    result = csops(pid, CS_OPS_IDENTITY, csbuffer, header.length);
+    result = csops(pid, CS_OPS_IDENTITY, csbuffer, bufferLen);
     if (result == 0) {
         char* identity = csbuffer + sizeof(struct csheader);
         strlcpy(buffer, identity, 255);
@@ -134,7 +137,7 @@ int proc_paused(pid_t pid, bool* paused)
 		*paused = true;
 	}
 	else if(procInfo.pbi_status != SRUN) {
-		SYSLOG("unexcept %d pstat=%x\n", ret, procInfo.pbi_status);
+		SYSLOG("unexpected %d pstat=%x\n", ret, procInfo.pbi_status);
 		return -1;
 	}
 
@@ -739,14 +742,14 @@ void loadAppStoredIdentifiers()
             continue;
         }
 
-        if([fileManager fileExistsAtPath:[containerPath stringByAppendingPathComponent:@"_TrollStore"] isDirectory:NULL]
-            || [fileManager fileExistsAtPath:[containerPath stringByAppendingPathComponent:@"_TrollStoreLite"] isDirectory:NULL])
+        if([fileManager fileExistsAtPath:[containerPath stringByAppendingPathComponent:@"_TrollStore"]]
+            || [fileManager fileExistsAtPath:[containerPath stringByAppendingPathComponent:@"_TrollStoreLite"]])
         {
             FileLogDebug("Skipping trollstored app container: %s : %s", MCMMetadataIdentifier.UTF8String, containerPath.UTF8String);
             continue;
         }
 
-        if(![fileManager fileExistsAtPath:[containerPath stringByAppendingPathComponent:@"iTunesMetadata.plist"] isDirectory:NULL])
+        if(![fileManager fileExistsAtPath:[containerPath stringByAppendingPathComponent:@"iTunesMetadata.plist"]])
         {
             FileLogDebug("Skipping non-stored app container: %s : %s", MCMMetadataIdentifier.UTF8String, containerPath.UTF8String);
             continue;
@@ -766,7 +769,7 @@ void loadAppStoredIdentifiers()
                     FileLogDebug("*** Mismatched Bundle ID and MCMMetadataIdentifier: %s != %s : %s", appBundleID.UTF8String, MCMMetadataIdentifier.UTF8String, appPath.UTF8String);
                 }
                 
-                if(![fileManager fileExistsAtPath:[appPath stringByAppendingPathComponent:@"SC_Info"] isDirectory:NULL])
+                if(![fileManager fileExistsAtPath:[appPath stringByAppendingPathComponent:@"SC_Info"]])
                 {
                     FileLogDebug("Skipping non-encrypted app: %s", appPath.UTF8String);
                     continue;
@@ -926,23 +929,102 @@ bool machoGetInfo(const char* path, bool *isMachoOut, bool *isLibraryOut)
     return true;
 }
 
-
-#define APP_PATH_PREFIX "/private/var/containers/Bundle/Application/"
-
-bool isDefaultInstallationPath(const char* path)
+void unsandbox(const char* sbtoken)
 {
-    char rp[PATH_MAX];
-    if(!realpath(path, rp)) return false;
+	char extensionsCopy[strlen(sbtoken)];
+	strcpy(extensionsCopy, sbtoken);
+	char *extensionToken = strtok(extensionsCopy, "|");
+	while (extensionToken != NULL) {
+		sandbox_extension_consume(extensionToken);
+		extensionToken = strtok(NULL, "|");
+	}
+}
 
-    if(strncmp(rp, APP_PATH_PREFIX, sizeof(APP_PATH_PREFIX)-1) != 0)
-        return false;
+const char* roothide_get_sandbox_profile(pid_t pid, char buffer[255])
+{
+    static char __thread threadbuffer[255];
+    if(!buffer) buffer = threadbuffer;
+    
+    struct csheader {
+        uint32_t magic;
+        uint32_t length;
+    } header = {0};
+    
+    int result = csops(pid, CS_OPS_ENTITLEMENTS_BLOB, &header, sizeof(header));
+    if (result != 0 && errno != ERANGE) {
+        return NULL;
+    }
+    
+    uint32_t bufferLen = ntohl(header.length);
 
-    char* p1 = rp + sizeof(APP_PATH_PREFIX)-1;
-    char* p2 = strchr(p1, '/');
-    if(!p2) return false;
+    typedef struct __SC_GenericBlob {
+        uint32_t magic;
+        uint32_t length;
+        char data[];
+    } CS_GenericBlob __attribute__ ((aligned(1)));
 
-    if((p2 - p1) != (sizeof("xxxxxxxx-xxxx-xxxx-yxxx-xxxxxxxxxxxx")-1))
-        return false;
+    char* csbuffer = malloc(bufferLen);
+    if (!csbuffer) {
+        return NULL;
+    }
+    
+    result = csops(pid, CS_OPS_ENTITLEMENTS_BLOB, csbuffer, bufferLen);
+    if (result == 0) {
+        char* entitlements = csbuffer + sizeof(CS_GenericBlob);
+        NSData* data = [NSData dataWithBytes:entitlements length:(bufferLen - sizeof(CS_GenericBlob))];
+        NSDictionary* plist = [NSPropertyListSerialization propertyListWithData:data options:0 format:nil error:nil];
+        
+        NSString* profile = nil;
 
-    return true;
+        NSArray* profiles = plist[@"roothide-seatbelt-profiles"];
+        if(profiles.count > 0) {
+            profile = profiles[0];
+        }
+        if(!profile) {
+            profile = plist[@"roothide-com.apple.private.sandbox.profile:embedded"];
+        }
+        if(!profile) {
+            profile = plist[@"roothide-com.apple.private.sandbox.profile"];
+        }
+
+        if(profile) {
+            strlcpy(buffer, profile.UTF8String, 255);
+        } else {
+            buffer = NULL;
+        }
+    }
+
+    free(csbuffer);
+    csbuffer = NULL;
+
+    return buffer;
+}
+
+const char* generate_sandbox_extensions(bool ext)
+{
+    NSMutableString *extensionString = [NSMutableString new];
+
+    char service_name[256]={0};
+    snprintf(service_name, sizeof(service_name), "com.roothide.bootstrapd-%016llX", jbrand());
+
+    char jbrootbase[PATH_MAX];
+    char jbrootsecondary[PATH_MAX];
+    snprintf(jbrootbase, sizeof(jbrootbase), "/private/var/containers/Bundle/Application/.jbroot-%016llX/", jbrand());
+    snprintf(jbrootsecondary, sizeof(jbrootsecondary), "/private/var/mobile/Containers/Shared/AppGroup/.jbroot-%016llX/", jbrand());
+
+    [extensionString appendString:[NSString stringWithUTF8String:sandbox_extension_issue_file("com.apple.app-sandbox.read", jbrootbase, 0)]];
+    [extensionString appendString:@"|"];
+    [extensionString appendString:[NSString stringWithUTF8String:sandbox_extension_issue_file("com.apple.sandbox.executable", jbrootbase, 0)]];
+    [extensionString appendString:@"|"];
+
+    char* class = ext ? "com.apple.app-sandbox.read-write" : "com.apple.app-sandbox.read";
+    [extensionString appendString:[NSString stringWithUTF8String:sandbox_extension_issue_file(class, jbrootsecondary, 0)]];
+    [extensionString appendString:@"|"];
+    [extensionString appendString:[NSString stringWithUTF8String:sandbox_extension_issue_file("com.apple.sandbox.executable", jbrootsecondary, 0)]];
+    [extensionString appendString:@"|"];
+    [extensionString appendString:[NSString stringWithUTF8String:sandbox_extension_issue_mach("com.apple.app-sandbox.mach", service_name, 0, 0)]];
+    [extensionString appendString:@"|"];
+    [extensionString appendString:[NSString stringWithUTF8String:sandbox_extension_issue_mach("com.apple.security.exception.mach-lookup.global-name", service_name, 0, 0)]];
+
+    return strdup(extensionString.UTF8String);
 }

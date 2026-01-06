@@ -11,6 +11,7 @@
 #include <sys/stat.h>
 #import <mach/mach.h>
 
+#include <bootstrap.h>
 #include <roothide.h>
 #include "common.h"
 #include "ipc.h"
@@ -60,7 +61,7 @@ int recvbuf(int sd, void* buffer, int bufsize)
     
     printf("recvbuf %p %d/%d, %s", buffer, bufsize, rlen, rlen>=0?"":strerror(errno));
     
-    //rlen=0 if client close unexcept, ASSERT(rlen > 0);
+    //rlen=0 if client close unexpected, ASSERT(rlen > 0);
 
     return rlen;
 }
@@ -89,7 +90,7 @@ int sendbuf(int sd, void* buffer, int bufsize)
     while((slen=sendmsg(sd, &msg, 0))<0 && errno==EINTR){}; //may be interrupted by signal
     if(slen != bufsize) perror("sendmsg");
     
-    //slen=0 if server close unexcept //ASSERT(slen == bufsize);
+    //slen=0 if server close unexpected //ASSERT(slen == bufsize);
 
     return slen;
 }
@@ -131,7 +132,7 @@ NSDictionary* reponse(int socket)
     if(size > 0) {
         NSData* data = [NSData dataWithBytesNoCopy:buffer length:size];
         repMsg = [NSPropertyListSerialization propertyListWithData:data options:0 format:nil error:nil];
-
+        printf("reponse %s", repMsg.debugDescription.UTF8String);
         //dataWithBytesNoCopy autorelease //free(buffer)
     }
     else
@@ -144,6 +145,8 @@ NSDictionary* reponse(int socket)
 
 int request(int socket, int reqId, NSDictionary* msg)
 {
+    printf("request %d %s", reqId, msg.debugDescription.UTF8String);
+
     NSDictionary* reqMsg = @{
         @(BSD_REQ_ID_KEY) : @(reqId),
         @(BSD_REQ_PID_KEY) : @(getpid()),
@@ -153,8 +156,10 @@ int request(int socket, int reqId, NSDictionary* msg)
 
     NSError* err=nil;
     NSData *data = [NSPropertyListSerialization dataWithPropertyList:reqMsg format:NSPropertyListBinaryFormat_v1_0 options:0 error:&err];
-    //printf("err=%s", err.debugDescription.UTF8String);
-    ASSERT(data != nil);
+    if(!data) {
+        printf("serialization err=%s", err.debugDescription.UTF8String);
+        abort();
+    }
     
     if(sendbuf(socket, (void*)data.bytes, data.length) != data.length)
     {
@@ -169,6 +174,39 @@ int set_stop_server()
     if(server_stop_flag) return -1;
     server_stop_flag = true;
     return 0;
+}
+
+void start_mach_server()
+{
+    char service_name[256]={0};
+    snprintf(service_name, sizeof(service_name), "com.roothide.bootstrapd-%016llX", jbrand());
+
+    mach_port_t port = MACH_PORT_NULL;
+    kern_return_t kr = bootstrap_check_in(bootstrap_port, service_name, &port);
+    ASSERT(kr==KERN_SUCCESS && MACH_PORT_VALID(port));
+
+    static dispatch_source_t source; //retain the dispatch source
+     source = dispatch_source_create(DISPATCH_SOURCE_TYPE_MACH_RECV, (uintptr_t)port, 0, dispatch_get_global_queue(0,0));
+    dispatch_source_set_event_handler(source, ^{
+        mach_port_t port = (mach_port_t)dispatch_source_get_handle(source);
+
+        xpc_object_t message = nil;
+        int err = xpc_pipe_receive(port, &message);
+        if (err != 0) {
+            printf("xpc_pipe_receive error %d", err);
+            abort();
+        }
+
+        xpc_object_t reply = xpc_dictionary_create_reply(message);
+        xpc_dictionary_set_uint64(reply, "ack", 1);
+        err = xpc_pipe_routine_reply(reply);
+        if (err != 0) {
+            printf("Error %d sending response", err);
+            abort();
+        }
+    });
+
+    dispatch_resume(source);
 }
 
 int run_ipc_server(int (*callback)(int socket, pid_t pid, int reqId, NSDictionary* msg))
@@ -236,6 +274,14 @@ int run_ipc_server(int (*callback)(int socket, pid_t pid, int reqId, NSDictionar
         perror("listen");
         close(sd);
         return 1;
+    }
+
+    if(__builtin_available(iOS 16.0, *))
+    {
+        if(get_real_ppid() == 1)
+        {
+            start_mach_server();
+        }
     }
 
     int bufsize = 4096;

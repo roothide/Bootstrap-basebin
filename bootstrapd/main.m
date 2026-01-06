@@ -1,37 +1,13 @@
 
 #include <Foundation/Foundation.h>
 #include <roothide.h>
-#include <sandbox.h>
 #include <spawn.h>
 #include "common.h"
 #include "libbsd.h"
 #include "ipc.h"
 
-NSString* gSandboxExtensions = nil;
-NSString* gSandboxExtensionsExt = nil;
-
-NSString *generateSandboxExtensions(BOOL ext)
-{
-	NSMutableString *extensionString = [NSMutableString new];
-
-	char jbrootbase[PATH_MAX];
-	char jbrootsecondary[PATH_MAX];
-	snprintf(jbrootbase, sizeof(jbrootbase), "/private/var/containers/Bundle/Application/.jbroot-%016llX/", jbrand());
-	snprintf(jbrootsecondary, sizeof(jbrootsecondary), "/private/var/mobile/Containers/Shared/AppGroup/.jbroot-%016llX/", jbrand());
-
-	[extensionString appendString:[NSString stringWithUTF8String:sandbox_extension_issue_file("com.apple.app-sandbox.read", jbrootbase, 0)]];
-	[extensionString appendString:@"|"];
-	[extensionString appendString:[NSString stringWithUTF8String:sandbox_extension_issue_file("com.apple.sandbox.executable", jbrootbase, 0)]];
-	[extensionString appendString:@"|"];
-
-	char* class = ext ? "com.apple.app-sandbox.read-write" : "com.apple.app-sandbox.read";
-	[extensionString appendString:[NSString stringWithUTF8String:sandbox_extension_issue_file(class, jbrootsecondary, 0)]];
-	[extensionString appendString:@"|"];
-	[extensionString appendString:[NSString stringWithUTF8String:sandbox_extension_issue_file("com.apple.sandbox.executable", jbrootsecondary, 0)]];
-	//[extensionString appendString:@"|"];
-
-	return extensionString;
-}
+const char* g_sandbox_extensions = NULL;
+const char* g_sandbox_extensions_ext = NULL;
 
 int handleRequest(int conn, pid_t pid, int reqId, NSDictionary* msg)
 {
@@ -69,7 +45,7 @@ int handleRequest(int conn, pid_t pid, int reqId, NSDictionary* msg)
 
 		case BSD_REQ_GET_SBTOKEN:
 		{
-			reply(conn, @{@"result": @(0), @"sbtoken":gSandboxExtensions});
+			reply(conn, @{@"result": @(0), @"sbtoken":@(g_sandbox_extensions)});
 		} break;
 
 		case BSD_REQ_CHECK_SERVER:
@@ -189,8 +165,8 @@ int start_run_server()
 		ASSERT(_daemon(0,0)==0);
 	}
 
-	gSandboxExtensions = generateSandboxExtensions(NO);
-	gSandboxExtensionsExt = generateSandboxExtensions(YES);
+	g_sandbox_extensions = generate_sandbox_extensions(false);
+	g_sandbox_extensions_ext = generate_sandbox_extensions(true);
 
 	int ret = run_ipc_server(handleRequest);
 	SYSLOG("server return");
@@ -288,7 +264,7 @@ int main(int argc, char *argv[], char *envp[]) {
 			}
 		}
 
-		printf("xpcproxy cannot be run directly.\n");
+		printf("bootstrapd cannot be run directly.\n");
 		return -1;
 	}
 }

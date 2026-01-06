@@ -270,7 +270,7 @@ int signApp(NSString* appPath)
 
 		baseEntitlements = [NSDictionary dictionaryWithContentsOfFile:jbroot(@"/basebin/entitlements/bootstrap.entitlements")];
 
-	} else if(isDefaultInstallationPath(appPath.fileSystemRepresentation)) {
+	} else if(isRemovableBundlePath(appPath.fileSystemRepresentation)) {
 
 		 if(hasTrollstoreMarker(appPath.fileSystemRepresentation))
 		 {

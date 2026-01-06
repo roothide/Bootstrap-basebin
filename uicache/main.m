@@ -441,7 +441,7 @@ int spawner(NSString* executablePath)
 	const char* args[] = {executablePath.fileSystemRepresentation, executablePath.fileSystemRepresentation,NULL};
 	int ret = posix_spawn(&pid, args[0], NULL, &attr, (char*const*)args, NULL);
 	if(ret != 0) {
-		NSLog(@"Error: %d %s", ret, strerror(ret));
+		fprintf(stderr, "spawn error: %d %s\n", ret, strerror(ret));
 		return -1;
 	}
 	if(pid) kill(pid, SIGKILL);
@@ -453,39 +453,33 @@ void activator(NSString* bundlePath)
 {
 	NSFileManager* fm = NSFileManager.defaultManager;
 
-	NSDirectoryEnumerator* enumerator = [fm enumeratorAtURL:[NSURL fileURLWithPath:bundlePath] includingPropertiesForKeys:nil options:0 errorHandler:nil];
-	for(NSURL*fileURL in enumerator)
+	NSString* appInfoPath = [bundlePath stringByAppendingPathComponent:@"Info.plist"];
+	NSMutableDictionary* appInfoDict = [NSMutableDictionary dictionaryWithContentsOfFile:appInfoPath];
+
+	NSString* appExecutablePath = [bundlePath stringByAppendingPathComponent:appInfoDict[@"CFBundleExecutable"]];
+	spawner(appExecutablePath);
+
+	NSString *pluginsPath = [bundlePath stringByAppendingPathComponent:@"PlugIns"];
+	NSArray *plugins = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:pluginsPath error:nil];
+
+	for (NSString *pluginName in plugins)
 	{
-		NSString *filePath = fileURL.path;
-		if ([filePath.lastPathComponent isEqualToString:@"Info.plist"]) 
-        {
-			NSString* dirPath = filePath.stringByDeletingLastPathComponent;
-            if(![fm fileExistsAtPath:[dirPath stringByAppendingPathComponent:@"SC_Info"]])
-                continue;
+		NSString *pluginPath = [pluginsPath stringByAppendingPathComponent:pluginName];
 
-			NSDictionary *infoDict = [NSDictionary dictionaryWithContentsOfFile:filePath];
-			if (!infoDict) continue;
+		NSDictionary *pluginInfoDict = [NSDictionary dictionaryWithContentsOfFile:[pluginPath stringByAppendingPathComponent:@"Info.plist"]];
 
-			NSString *bundleId = infoDict[@"CFBundleIdentifier"];
-			NSString *bundleExecutable = infoDict[@"CFBundleExecutable"];
-			if (!bundleId || !bundleExecutable || !bundleExecutable.length) continue;
+		NSString *bundleId = pluginInfoDict[@"CFBundleIdentifier"];
+		NSString *bundleExecutable = pluginInfoDict[@"CFBundleExecutable"];
+		if (!bundleId || !bundleExecutable || !bundleExecutable.length) continue;
+		if ([pluginInfoDict[@"CFBundlePackageType"] isEqualToString:@"FMWK"]) continue;
 
-			if ([infoDict[@"CFBundlePackageType"] isEqualToString:@"FMWK"]) continue;
-
-			NSString *bundleExecutablePath = [dirPath stringByAppendingPathComponent:bundleExecutable];
-			if (![fm fileExistsAtPath:bundleExecutablePath]) continue;
-
-
-			// if ([infoDict[@"NSExtension"][@"NSExtensionPointIdentifier"] isEqualToString:@"com.apple.widget-extension"]) continue;
-            
-			// NSLog(@"active bundle=%@, package type=%@, extension type=%@", bundleId, infoDict[@"CFBundlePackageType"], infoDict[@"NSExtension"][@"NSExtensionPointIdentifier"]);
-
-			spawner(bundleExecutablePath);
-        }
-    }
+		NSString* pluginExecutablePath = [pluginPath stringByAppendingPathComponent:bundleExecutable];
+		if([fm fileExistsAtPath:pluginExecutablePath])
+			spawner(pluginExecutablePath);
+	}
 }
 
-void freeplay(NSString* mainBundleId, NSString* bundlePath)
+void freeplay(NSString* bundlePath)
 {
     NSFileManager* fm = NSFileManager.defaultManager;
 
@@ -506,14 +500,14 @@ void freeplay(NSString* mainBundleId, NSString* bundlePath)
 	activator(bundlePath);
 }
 
-int patchonly=0;
-
 void registerPath(NSString *path, BOOL forceSystem)
 {
 	const char* __sbtoken = bsd_getsbtoken();
 	assert(__sbtoken != NULL);
 	NSString* sbtoken = @(__sbtoken);
 	free((void*)__sbtoken);
+
+	BOOL noregister = NO;
 
 	LSApplicationWorkspace *workspace = [LSApplicationWorkspace defaultWorkspace];
 
@@ -530,33 +524,40 @@ void registerPath(NSString *path, BOOL forceSystem)
 		return;
 	}
 
-	NSString *appExecutablePath = [path stringByAppendingPathComponent:appInfoPlist[@"CFBundleExecutable"]];
+	NSString* executableName = appInfoPlist[@"CFBundleExecutable"];
+	NSString *appExecutablePath = [path stringByAppendingPathComponent:executableName];
 	NSString* appTeamID = getTeamIDFromBinaryAtPath(appExecutablePath);
+
+	BOOL encryptedApp = [NSFileManager.defaultManager fileExistsAtPath:[path stringByAppendingPathComponent:@"SC_Info"]];
+	NSString* backupVersion = [NSString stringWithContentsOfFile:[path.stringByDeletingLastPathComponent stringByAppendingPathComponent:@".appbackup"] encoding:NSASCIIStringEncoding error:nil];
+
+	if(@available(iOS 16.0, *))
+	{
+		if(encryptedApp && backupVersion.intValue>=1)
+		{
+			noregister = YES;
+		}
+	}
 
 	BOOL allowURLSchemes = [NSFileManager.defaultManager fileExistsAtPath:jbroot(@"/var/mobile/.allow_url_schemes")];
 
-	if(!allowURLSchemes)
-	{
-		//NSLog(@"Info=%@", appInfoPlist);
-		NSMutableArray* urltypes = [appInfoPlist[@"CFBundleURLTypes"] mutableCopy];
-		for(int i=0; i<urltypes.count; i++) {
-		//NSLog(@"schemes=%@", urltypes[i][@"CFBundleURLSchemes"]);
-			
-			NSMutableArray* schemes = [urltypes[i][@"CFBundleURLSchemes"] mutableCopy];
-			[schemes removeObjectsInArray:blockedURLSchemes];
-			//NSLog(@"new schemes=%@", schemes);
+	//NSLog(@"Info=%@", appInfoPlist);
+	NSMutableArray* urltypes = [appInfoPlist[@"CFBundleURLTypes"] mutableCopy];
+	for(int i=0; i<urltypes.count; i++) {
+	//NSLog(@"schemes=%@", urltypes[i][@"CFBundleURLSchemes"]);
+		
+		NSMutableArray* schemes = [urltypes[i][@"CFBundleURLSchemes"] mutableCopy];
+		if(!allowURLSchemes) [schemes removeObjectsInArray:blockedURLSchemes];
+		//NSLog(@"new schemes=%@", schemes);
 
-			if(![appBundleID isEqualToString:@"com.apple.Preferences"] && [schemes containsObject:@"prefs"])
-				[schemes removeObject:@"prefs"];
+		if(![appBundleID isEqualToString:@"com.apple.Preferences"] && [schemes containsObject:@"prefs"])
+			[schemes removeObject:@"prefs"];
 
-			urltypes[i][@"CFBundleURLSchemes"] = schemes.copy;
-		}
-		appInfoPlist[@"CFBundleURLTypes"] = urltypes.copy;
+		urltypes[i][@"CFBundleURLSchemes"] = schemes.copy;
 	}
+	appInfoPlist[@"CFBundleURLTypes"] = urltypes.copy;
 
     BOOL isAppleBundle = [appBundleID hasPrefix:@"com.apple."] && !is_apple_internal_identifier(appBundleID.UTF8String);
-
-	NSString* executableName = appInfoPlist[@"CFBundleExecutable"];
 
 	NSString* jbrootpath = [path stringByAppendingPathComponent:@".jbroot"];
 	BOOL jbrootexists = [NSFileManager.defaultManager fileExistsAtPath:jbrootpath];
@@ -570,13 +571,20 @@ void registerPath(NSString *path, BOOL forceSystem)
 	{
 		if(!isAppleBundle && !hasTrollstoreMarker(path.fileSystemRepresentation))
 		{
-			freeplay(appBundleID, path);
+			freeplay(path);
 		}
 
 		NSMutableDictionary* rebuildStatus = [NSMutableDictionary dictionaryWithContentsOfFile:rebuildFilePath];
 
 		struct stat st={0}; //st_dev may change after reboot
 		assert(stat(appExecutablePath.fileSystemRepresentation, &st) == 0);
+
+		NSString* appExecutableTweakedPath = [path stringByAppendingPathComponent:@".tweaked"];
+		NSString* appExecutableOriginalPath = [path stringByAppendingPathComponent:@".original"];
+			
+		if([NSFileManager.defaultManager fileExistsAtPath:appExecutableTweakedPath]) {
+			assert(stat(appExecutableTweakedPath.fileSystemRepresentation, &st) == 0);
+		}
 
 		if(!rebuildStatus
 			|| [rebuildStatus[@"st_ino"] unsignedLongLongValue] != st.st_ino
@@ -591,13 +599,32 @@ void registerPath(NSString *path, BOOL forceSystem)
 
 			printf("resign app: %s\n", path.fileSystemRepresentation);
 
-			int patch_app_exe(const char* file);
-			assert(patch_app_exe(appExecutablePath.fileSystemRepresentation)==0);
+			if(!noregister) {
+				int patch_app_exe(const char* file);
+				assert(patch_app_exe(appExecutablePath.fileSystemRepresentation)==0);
+			}
 
 			const char* argv[] = {"/basebin/appatch", path.fileSystemRepresentation, NULL};
 			assert(execBinary(jbroot(argv[0]), argv) == 0);
 			
 			assert(stat(appExecutablePath.fileSystemRepresentation, &st) == 0); //update
+
+			if(noregister)
+			{
+				if([NSFileManager.defaultManager fileExistsAtPath:appExecutableTweakedPath]) {
+					assert([NSFileManager.defaultManager removeItemAtPath:appExecutableTweakedPath error:nil]);
+				}
+				if([NSFileManager.defaultManager fileExistsAtPath:appExecutableOriginalPath]) {
+					assert([NSFileManager.defaultManager removeItemAtPath:appExecutableOriginalPath error:nil]);
+				}
+
+				assert([NSFileManager.defaultManager moveItemAtPath:appExecutablePath toPath:appExecutableTweakedPath error:nil]);
+
+				NSString* appbackup = [path stringByAppendingPathExtension:@"appbackup"];
+				NSString* appExecutableBackup = [appbackup stringByAppendingPathComponent:executableName];
+				assert(link(appExecutableBackup.fileSystemRepresentation, appExecutablePath.fileSystemRepresentation) == 0);
+				assert(link(appExecutableBackup.fileSystemRepresentation, appExecutableOriginalPath.fileSystemRepresentation) == 0);
+			}
 		}
 
 		if(!rebuildStatus
@@ -649,12 +676,17 @@ void registerPath(NSString *path, BOOL forceSystem)
 		unlink([path stringByAppendingPathComponent:@".preload"].fileSystemRepresentation);
 	}
 
+	if(noregister) {
+		printf("skip registering for %s\n", path.fileSystemRepresentation);
+		return;
+	}
+
     if(!isAppleBundle) {
         [appInfoPlist writeToFile:appInfoPath atomically:YES];
     }
 
 	BOOL isRemovableSystemApp = [[NSFileManager defaultManager] fileExistsAtPath:[@"/System/Library/AppSignatures" stringByAppendingPathComponent:appBundleID]];
-	BOOL registerAsUser = isDefaultInstallationPath(path.fileSystemRepresentation) && !isRemovableSystemApp && !forceSystem;
+	BOOL registerAsUser = isRemovableBundlePath(path.fileSystemRepresentation) && !isRemovableSystemApp && !forceSystem;
 
 	NSMutableDictionary *dictToRegister = [NSMutableDictionary dictionary];
 
@@ -686,7 +718,7 @@ void registerPath(NSString *path, BOOL forceSystem)
 		dictToRegister[@"EnvironmentVariables"] = constructEnvironmentVariablesForContainerPath(appBundleID, path, nil, NO);
 	}
 
-	dictToRegister[@"IsDeletable"] = @(registerAsUser || isRemovableSystemApp || isDefaultInstallationPath(path.fileSystemRepresentation));
+	dictToRegister[@"IsDeletable"] = @(registerAsUser || isRemovableSystemApp || isRemovableBundlePath(path.fileSystemRepresentation));
 	dictToRegister[@"Path"] = path;
 	
 	dictToRegister[@"SignerOrganization"] = @"Apple Inc.";
@@ -874,7 +906,6 @@ void registerPath(NSString *path, BOOL forceSystem)
 		printf("Registering dictionary: %s\n", dictToRegister.description.UTF8String);
 	}
 
-if(!patchonly) {
 	if ([workspace registerApplicationDictionary:dictToRegister])
 	{
 		networkFix(appBundleID);
@@ -888,7 +919,6 @@ if(!patchonly) {
 	{
 		fprintf(stderr, _("Error: Unable to register %s\n"), path.fileSystemRepresentation);
 	}
-}
 
     if(!isAppleBundle) {
         [appInfoData writeToFile:appInfoPath atomically:YES];
@@ -1008,7 +1038,7 @@ void registerAll(void) {
 		//ios app default storage directory, others are jailbroken apps
 		if ( ![appPath hasPrefix:@"/Applications/"]
 			&& ![appPath hasPrefix:@"/Developer/Applications/"]
-			&& !isDefaultInstallationPath(appPath.fileSystemRepresentation)
+			&& !isRemovableBundlePath(appPath.fileSystemRepresentation)
 			) {
 			registeredApps[app.bundleIdentifier] = app.bundleURL;
 		}
@@ -1080,18 +1110,12 @@ int main(int argc, char *argv[]) {
 			{"help", no_argument, 0, 'h'},
 			{"verbose", no_argument, 0, 'v'},	// verbose was added to maintain compatibility with old uikittools
 			{"force", no_argument, 0, 'f'},
-			{"patchonly", no_argument, 0, 0},
 			{NULL, 0, NULL, 0}};
 
 		int index = 0, code = 0;
 
 		while ((code = getopt_long(argc, argv, "ap:u:rl::si:hfvn", longOptions, &index)) != -1) {
 			switch (code) {
-				case 0:
-					if (strcmp(longOptions[index].name, "patchonly") == 0) {
-						patchonly = 1;
-					}
-					break;
 				case 'a':
 					all = YES;
 					break;

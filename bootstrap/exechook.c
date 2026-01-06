@@ -25,27 +25,45 @@ int posix_spawn_hook(pid_t *restrict pid, const char *restrict path, const posix
 
 	bool should_inject = true;
 
-	char executablePath[PATH_MAX]={0};
-	uint32_t bufsize=sizeof(executablePath);
-	ASSERT(_NSGetExecutablePath(executablePath, &bufsize) == 0);
+	if(string_has_suffix(g_executable_path, "/usr/libexec/xpcproxy"))
+	{
+		// short flags=-1;
+		// void* amfi=NULL;
+		// void* sandbox=NULL;
+		// if(attrp) posix_spawnattr_getflags(attrp, &flags);
+		// if(attrp) posix_spawnattr_getmacpolicyinfo_np(attrp, "AMFI", &amfi, NULL);
+		// if(attrp) posix_spawnattr_getmacpolicyinfo_np(attrp, "Sandbox", &sandbox, NULL);
+		// if(amfi || sandbox) {
+		// 	FileLogDebug("xpcproxy spawn path=%s flags=%x Sandbox=%p AMFI=%p", path, flags, sandbox, amfi);
+		// 	if (argv) for (int i = 0; argv[i]; i++) FileLogDebug("\targs[%d] = %s", i, argv[i]);
+		// 	if (envp) for (int i = 0; envp[i]; i++) FileLogDebug("\tenvp[%d] = %s", i, envp[i]);
+		// }
+
+		char* temp=NULL;
+		asprintf(&temp, "/.sysroot%s", path);
+		const char* resigned_path = jbroot(temp);
+		free(temp);
+
+		if(isSubPathOf(resigned_path, jbroot("/.sysroot/")))
+		{
+			path = resigned_path;
+		}
+	}
 
 	if(isSubPathOf(path, jbroot("/")))
 	{
-		if(string_has_suffix(executablePath, "/usr/libexec/xpcproxy"))
-		{
-			if(__builtin_available(iOS 16.0, *)) {
-				if(attrp) {
-					posix_spawnattr_set_launch_type_np(attrp, 0);
-				}
+		if(__builtin_available(iOS 16.0, *)) {
+			if(attrp) {
+				posix_spawnattr_set_launch_type_np(attrp, 0);
 			}
 		}
 
-		if(string_has_prefix(rootfs(path), "/basebin/")) {
+		if(isSubPathOf(path, jbroot("/basebin/"))) {
 			should_inject = false;
+		} else {
+			should_inject = true;
 		}
-	}
-	else
-	{
+	} else {
 		should_inject = false;
 	}
 
@@ -65,6 +83,9 @@ int posix_spawn_hook(pid_t *restrict pid, const char *restrict path, const posix
 			} else {
 				envbuf_setenv(&envc, "DYLD_INSERT_LIBRARIES", bootstrapath, 1);
 			}
+		}
+		if(g_sandbox_extensions) {
+			envbuf_setenv(&envc, "__SANDBOX_EXTENSIONS", g_sandbox_extensions, 1);
 		}
 	}
 	else

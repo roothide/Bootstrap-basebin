@@ -24,6 +24,43 @@
 
 #include <CoreFoundation/CoreFoundation.h>
 
+char* g_executable_path = NULL;
+char* g_sandbox_extensions = NULL;
+
+
+int sandbox_init_hook(const char *profile, uint64_t flags, char **errorbuf)
+{
+	int retval = sandbox_init(profile, flags, errorbuf);
+	if (retval == 0) {
+		if(g_sandbox_extensions) {
+			unsandbox(g_sandbox_extensions);
+		}
+	}
+	return retval;
+}
+
+int sandbox_init_with_parameters_hook(const char *profile, uint64_t flags, const char *const parameters[], char **errorbuf)
+{
+	int retval = sandbox_init_with_parameters(profile, flags, parameters, errorbuf);
+	if (retval == 0) {
+		if(g_sandbox_extensions) {
+			unsandbox(g_sandbox_extensions);
+		}
+	}
+	return retval;
+}
+
+int sandbox_init_with_extensions_hook(const char *profile, uint64_t flags, const char *const extensions[], char **errorbuf)
+{
+	int retval = sandbox_init_with_extensions(profile, flags, extensions, errorbuf);
+	if (retval == 0) {
+		if(g_sandbox_extensions) {
+			unsandbox(g_sandbox_extensions);
+		}
+	}
+	return retval;
+}
+
 pid_t fork_hook()
 {
     pid_t _fork();
@@ -362,6 +399,8 @@ static void __attribute__((__constructor__)) bootstrap()
     uint32_t bufsize=sizeof(executablePath);
     ASSERT(_NSGetExecutablePath(executablePath, &bufsize) == 0);
 
+	g_executable_path = strdup(executablePath);
+
 	//do nothing extra inside xpcproxy (do not enable syslog in xpcproxy)
 	if(string_has_suffix(executablePath, "/usr/libexec/xpcproxy")) {
 		return;
@@ -372,6 +411,18 @@ static void __attribute__((__constructor__)) bootstrap()
 	bootstrapLogFunction = bootstrapLog;
 	SYSLOG("Bootstrap loaded...");
 #endif
+
+	const char* sbtoken = getenv("__SANDBOX_EXTENSIONS");
+	if(sbtoken)
+	{
+		unsandbox(sbtoken);
+
+		g_sandbox_extensions = strdup(sbtoken);
+
+		if(__builtin_available(iOS 16.0, *)) {
+			ASSERT(bsd_tick_mach_service());
+		}
+	}
 
 	const char* exepath = rootfs(executablePath);
 
@@ -392,6 +443,15 @@ static void __attribute__((__constructor__)) bootstrap()
 		if(cfBundleIdentifier)
 			bundleIdentifier = CFStringGetCStringPtr(cfBundleIdentifier, kCFStringEncodingASCII);
 	}
+
+	if(!bundleIdentifier) {
+		const char* identifier = proc_get_identifier(getpid(), NULL);
+		if(identifier) {
+			bundleIdentifier = strdup(identifier);
+		}
+	}
+
+	SYSLOG("bundleIdentifier = %s", bundleIdentifier ? bundleIdentifier : "null");
 
 	bool appFromTrollStore = hasTrollstoreMarker(executablePath);
 
@@ -513,8 +573,24 @@ static void __attribute__((__constructor__)) bootstrap()
 		}
 	}
 
+	// const char* profile = roothide_get_sandbox_profile(getpid(), NULL);
+	// if(profile)
+	// {
+	// 	char* errormsg = NULL;
+	// 	if(sandbox_init(profile, SANDBOX_NAMED, &errormsg) == 0) {
+	// 		SYSLOG("sandbox_init succeeded: %s\n", profile);
+	// 		unsandbox(sbtoken);
+	// 	} else {
+	// 		SYSLOG("sandbox_init failed: %s, err=%s\n", profile, errormsg);
+	// 		free(errormsg);
+	// 	}
+	// }
+
 	if(preload && strstr(preload,"/basebin/bootstrap.dylib") && !strstr(preload,":")) {
 		unsetenv("DYLD_INSERT_LIBRARIES");
+	}
+	if(sbtoken) {
+		unsetenv("__SANDBOX_EXTENSIONS");
 	}
 }
 
@@ -532,6 +608,9 @@ DYLD_INTERPOSE(execv_hook, execv)
 DYLD_INTERPOSE(execl_hook, execl)
 DYLD_INTERPOSE(execvp_hook, execvp)
 DYLD_INTERPOSE(execvP_hook, execvP)
+DYLD_INTERPOSE(sandbox_init_hook, sandbox_init)
+DYLD_INTERPOSE(sandbox_init_with_parameters_hook, sandbox_init_with_parameters)
+DYLD_INTERPOSE(sandbox_init_with_extensions_hook, sandbox_init_with_extensions)
 #ifdef __arm64e__
 DYLD_INTERPOSE(fork_hook, fork)
 DYLD_INTERPOSE(vfork_hook, vfork)

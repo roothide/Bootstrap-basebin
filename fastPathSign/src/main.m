@@ -18,10 +18,13 @@ int main(int argc, char *argv[]) {
     char *input = argv[argc-1];
 
     struct stat st;
-    assert(stat(input, &st) == 0);
+    if(stat(input, &st) != 0) {
+        perror("stat");
+        return 2;
+    }
 
     FAT *fat = fat_init_from_path(input);
-    if (!fat) return 2;
+    if (!fat) return 3;
 
     char *tempOut = strdup("/tmp/XXXXXX");
     int fdOut = mkstemp(tempOut);
@@ -91,8 +94,8 @@ int main(int argc, char *argv[]) {
 
             LOG("Applying CoreTrust bypass to slice[%d] 0x%08X/0x%08X ...\n", i, macho->machHeader.cputype, macho->machHeader.cpusubtype);
             if (apply_coretrust_bypass(temp) != 0) {
-                printf("Failed applying CoreTrust bypass\n");
-                abort();
+                fprintf(stderr, "Failed applying CoreTrust bypass on slice[%d] 0x%08X/0x%08X\n", i, macho->machHeader.cputype, macho->machHeader.cpusubtype);
+                return 5;
             }
 
             inStream = file_stream_init_from_path(temp, 0, 0, FILE_STREAM_SIZE_AUTO);

@@ -9,6 +9,9 @@
 extern char** NXArgv; // __NSGetArgv() not working on ctor
 extern int    NXArgc;
 
+extern char* g_executable_path;
+extern char* g_sandbox_extensions;
+
 #define EXPORT __attribute__ ((visibility ("default")))
 
 #ifdef DEBUG

@@ -3651,7 +3651,8 @@ int main(int argc, char *argv[]) {
                 ldid::Unsign(input.data(), input.size(), output, dummy_);
             else {
                 std::string identifier(flag_I ?: split.base.c_str());
-                /*always keep identifier */ //if (flag_s) 
+                /*always keep identifier if not specified */ //if (flag_s) 
+                if(!flag_I)
                 {
                     FatHeader fat_header(input.data(), input.size());
                     _foreach (mach_header, fat_header.GetMachHeaders()) {
@@ -3669,6 +3670,14 @@ int main(int argc, char *argv[]) {
 
                         for (size_t index(0); index != Swap(super->count); ++index)
                             if (Swap(super->index[index].type) == CSSLOT_CODEDIRECTORY) {
+                                uint32_t begin = Swap(super->index[index].offset);
+                                struct CodeDirectory *directory = reinterpret_cast<struct CodeDirectory *>(blob + begin + sizeof(Blob));
+                                identifier = (const char *)(blob + begin + Swap(directory->identOffset));
+                            }
+                        
+                        //prefer alternate code directory if present
+                        for (size_t index(0); index != Swap(super->count); ++index)
+                            if (Swap(super->index[index].type) == CSSLOT_ALTERNATE) {
                                 uint32_t begin = Swap(super->index[index].offset);
                                 struct CodeDirectory *directory = reinterpret_cast<struct CodeDirectory *>(blob + begin + sizeof(Blob));
                                 identifier = (const char *)(blob + begin + Swap(directory->identOffset));
@@ -3821,6 +3830,9 @@ int main(int argc, char *argv[]) {
                 _assert(!candidates.empty());
                 auto best(candidates.end());
                 --best;
+//print all directories
+int i=0; for(auto& item : candidates)
+{ auto best=&item; if(i==0)printf("\n"); printf("CodeDirectory[%d] HashType=%x\n", i++, best->first);
 
                 const auto directory(best->second.directory_);
                 const auto flags(Swap(directory->flags));
@@ -3852,6 +3864,13 @@ int main(int argc, char *argv[]) {
                 printf("CodeDirectory v=%x size=%zd flags=0x%x(%s) hashes=%d+%d location=embedded\n",
                     Swap(directory->version), best->second.size_, flags, names.empty() ? "none" : names.c_str() + 1, Swap(directory->nCodeSlots), Swap(directory->nSpecialSlots));
                 printf("Hash type=%s size=%d\n", best->second.algorithm_.name(), directory->hashSize);
+                
+                if (Swap(directory->version) >= 0x20200 && Swap(directory->teamIDOffset) > 0)
+                    printf("TeamIdentifier=%s\n", blob + best->second.offset + Swap(directory->teamIDOffset));
+                else
+                    printf("TeamIdentifier=not set\n");
+printf("\n");
+}
 
                 std::string choices;
                 for (const auto &candidate : candidates) {
@@ -3911,10 +3930,12 @@ int main(int argc, char *argv[]) {
                     PKCS7_free(p7);
                 }
 
+/*
                 if (Swap(directory->version) >= 0x20200 && Swap(directory->teamIDOffset) > 0)
                     printf("TeamIdentifier=%s\n", blob + best->second.offset + Swap(directory->teamIDOffset));
                 else
                     printf("TeamIdentifier=not set\n");
+*/
             }
         }
 

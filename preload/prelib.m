@@ -8,16 +8,6 @@
 #include <sandbox.h>
 #include "commlib.h"
 
-void unsandbox(const char* sbtoken) {
-	char extensionsCopy[strlen(sbtoken)];
-	strcpy(extensionsCopy, sbtoken);
-	char *extensionToken = strtok(extensionsCopy, "|");
-	while (extensionToken != NULL) {
-		sandbox_extension_consume(extensionToken);
-		extensionToken = strtok(NULL, "|");
-	}
-}
-
 extern struct mach_header_64* _dyld_get_prog_image_header();
 
 bool check_executable_encrypted()
@@ -51,8 +41,16 @@ uint64_t jbrand()
 const char* jbroot(const char* path)
 {
 	NSString* jbrootPath = g_rebuildStatus[@"jbroot"];
-	NSString* newPath = [jbrootPath stringByAppendingPathComponent:@(path)];
-	return strdup(newPath.fileSystemRepresentation);
+	NSString* newpath = [jbrootPath stringByAppendingPathComponent:@(path)];
+    @synchronized(@"jbroot_cache_lock")
+    {
+        static NSMutableSet* cache = nil;
+        if(!cache) cache = [NSMutableSet new];
+        
+        [cache addObject:newpath];
+        newpath = [cache member:newpath];
+    }
+    return newpath.fileSystemRepresentation;
 }
 
 NSString* __attribute__((overloadable)) jbroot(NSString* path)
@@ -66,9 +64,11 @@ static void __attribute__((__constructor__)) preload()
 {
 	// debugserver spawn reparent
 	// if(getppid() != 1) return;
+	if(get_real_ppid() != 1) return;
 
     NSString* rebuildFile = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@".rebuild"];
 	NSDictionary* rebuildStatus = [NSDictionary dictionaryWithContentsOfFile:rebuildFile];
+	NSLog(@"rebuildStatus=%@", rebuildStatus);
 
 	g_rebuildStatus = rebuildStatus;
 
@@ -81,7 +81,7 @@ static void __attribute__((__constructor__)) preload()
 	int count=_dyld_image_count();
     for(int i=0; i<count; i++) {
 		const char* path = _dyld_get_image_name(i);
-		NSLog(@"dyldlib=%s", path);
+		// NSLog(@"dyldlib=%s", path);
 		if(strstr(path, "/basebin/bootstrap.dylib")) {
 			found = 1;
 			break;
@@ -99,6 +99,7 @@ static void __attribute__((__constructor__)) preload()
 		}
 		
 		if(!dlopen("@executable_path/.jbroot/basebin/bootstrap.dylib", RTLD_NOW)) {
+			NSLog(@"dlopen failed: %s", dlerror());
 			assert(checkpatchedexe());
 		}
 	}

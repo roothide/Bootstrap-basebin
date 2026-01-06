@@ -20,7 +20,7 @@
 #include <vector>
 #include <plist/plist.h>
 
-#define LOG(...)
+#define LOG(...) printf(__VA_ARGS__)
 
 enum SecCodeExecSegFlags {
     kSecCodeExecSegMainBinary = 0x001,
@@ -801,38 +801,56 @@ char *extract_preferred_slice(const char *fatPath)
 
 int realstore(const char* path, const char* extra_entitlements, const char* strip_entitlements, const char* teamID)
 {
-    // printf("extra_entitlements: %s\n", extra_entitlements);
-    char buf[PATH_MAX];
-    const char *input = path;
-
     struct stat st;
-    assert(stat(input, &st) == 0);
+    assert(stat(path, &st) == 0);
 
-	char *machoPath = extract_preferred_slice(input);
-    if(!machoPath) {
-        printf("extracted failed %s\n", input);
+    int fd = open(path, O_RDONLY);
+    if(fd < 0) {
+        perror("open");
         return -1;
     }
-	LOG("Extracted %s best slice to %s\n", basename_r(input, buf), machoPath);
 
-    LOG("Applying CoreTrust bypass...\n");
+    uint32_t magic = 0;
+    assert(read(fd, &magic, sizeof(magic)) == sizeof(magic));
 
-	if (apply_coretrust_bypass(machoPath, extra_entitlements, strip_entitlements, teamID) != 0) {
-		printf("Failed applying CoreTrust bypass\n");
-		return -1;
-	}
+    close(fd);
 
-   if (copyfile(machoPath, input, 0, COPYFILE_ALL | COPYFILE_MOVE | COPYFILE_UNLINK) == 0) {
-        chown(input, st.st_uid, st.st_gid);
-        chmod(input, st.st_mode);
-        LOG("Applied CoreTrust Bypass!\n");
+    if(magic == MH_MAGIC_64)
+    {
+        LOG("Applying CoreTrust bypass...\n");
+        if (apply_coretrust_bypass(path, extra_entitlements, strip_entitlements, teamID) != 0) {
+            fprintf(stderr, "Failed applying CoreTrust bypass\n");
+            return -1;
+        }
     }
-    else {
-        perror("copyfile");
-		return -1;
+    else
+    {
+        char *machoPath = extract_preferred_slice(path);
+        if(!machoPath) {
+            printf("extracted failed %s\n", path);
+            return -1;
+        }
+
+        LOG("Extracted %s best slice to %s\n", (path), machoPath);
+
+        LOG("Applying CoreTrust bypass...\n");
+
+        if (apply_coretrust_bypass(machoPath, extra_entitlements, strip_entitlements, teamID) != 0) {
+            fprintf(stderr, "Failed applying CoreTrust bypass\n");
+            return -1;
+        }
+
+        if (copyfile(machoPath, path, 0, COPYFILE_ALL | COPYFILE_MOVE | COPYFILE_UNLINK) != 0) {
+            perror("copyfile");
+            return -1;
+        }
+
+        free(machoPath);
     }
 
-	free(machoPath);
+    LOG("Applied CoreTrust Bypass!\n");
+    chown(path, st.st_uid, st.st_gid);
+    chmod(path, st.st_mode);
 	return 0;
 }
 

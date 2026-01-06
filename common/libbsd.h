@@ -17,6 +17,8 @@ enum bootstrapReq
 	BSD_REQ_MAX_REQ
 };
 
+bool bsd_tick_mach_service();
+
 int bsd_enableJIT();
 int bsd_enableJIT2(pid_t pid);
 

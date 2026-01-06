@@ -1,10 +1,58 @@
+#include <bootstrap.h>
+#include <xpc/xpc.h>
 
 #include "ipc.h"
 #include "libbsd.h"
 #include "common.h"
 
-#define printf(...) SYSLOG
-#define perror(x)   SYSLOG("%s : %s", x, strerror(errno));
+#undef	SYSLOG
+#define	SYSLOG(...)
+
+bool bsd_tick_mach_service()
+{
+	bool retval = true;
+	
+	char service_name[256]={0};
+	snprintf(service_name, sizeof(service_name), "com.roothide.bootstrapd-%016llX", jbrand());
+
+	mach_port_t port = MACH_PORT_NULL;
+	kern_return_t kr = bootstrap_look_up(bootstrap_port, service_name, &port);
+	if(kr != KERN_SUCCESS || !MACH_PORT_VALID(port)) {
+		SYSLOG("bootstrap_check_in port=%x kr=%x,%s", port, kr, bootstrap_strerror(kr));
+		return false;
+	}
+
+	xpc_object_t message = xpc_dictionary_create_empty();
+	xpc_dictionary_set_uint64(message, "id", 0);
+
+	xpc_object_t pipe = xpc_pipe_create_from_port(port, 0);
+	if(pipe)
+	{
+		xpc_object_t reply = NULL;
+		int err = xpc_pipe_routine(pipe, message, &reply);
+		if(err==0)
+		{
+			assert(reply != NULL);
+
+			uint64_t ack = xpc_dictionary_get_uint64(reply, "ack");
+
+			retval = (ack == 1);
+
+			// xpc_release(reply);
+		}
+	}
+	else
+	{
+		SYSLOG("xpc_pipe_create_from_port failed");
+		retval = false;
+	}
+
+	mach_port_deallocate(mach_task_self(), port);
+	// xpc_release(message);
+	// xpc_release(pipe);
+
+	return retval;
+}
 
 int bsd_enableJIT()
 {
