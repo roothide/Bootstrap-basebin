@@ -1,7 +1,7 @@
-#include <Foundation/Foundation.h>
+#include <private/bsm/audit.h>
+
 #include <sys/clonefile.h>
 #include <mach-o/dyld.h>
-#include <roothide.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
 #include <xpc/xpc.h>
@@ -9,19 +9,36 @@
 #include <libgen.h>
 #include <spawn.h>
 
+#include <roothide.h>
+#include <Foundation/Foundation.h>
+
 #include "crashreporter.h"
+#include "jailbreakd.h"
 #include "codesign.h"
-#include "commlib.h"
 #include "envbuf.h"
+#include "ptrace.h"
+#include "common.h"
+#include "dobby.h"
+
 
 const char* g_sandbox_extensions = NULL;
 const char* g_sandbox_extensions_ext = NULL;
+
+extern xpc_object_t (*orig_xpc_dictionary_create_reply)(xpc_object_t original);
+extern xpc_object_t new_xpc_dictionary_create_reply(xpc_object_t original);
+extern int (*orig_xpc_pipe_routine_reply)(xpc_object_t reply);
+extern int new_xpc_pipe_routine_reply(xpc_object_t reply);
 
 int (*orig_csops)(pid_t pid, unsigned int  ops, void * useraddr, size_t usersize) = csops;
 int new_csops(pid_t pid, unsigned int  ops, void * useraddr, size_t usersize)
 {
 	int ret = orig_csops(pid, ops, useraddr, usersize);
-	if(ret==0 && ops==CS_OPS_STATUS) {
+
+	if(isBlacklistedPid(pid)) {
+		return ret;
+	}
+
+	if(ret==0 && ops==CS_OPS_STATUS && useraddr) {
 		*(uint32_t*)useraddr |= CS_VALID;
 		*(uint32_t*)useraddr |= CS_PLATFORM_BINARY;
 		*(uint32_t*)useraddr &= ~CS_PLATFORM_PATH;
@@ -34,7 +51,12 @@ int (*orig_csops_audittoken)(pid_t pid, unsigned int  ops, void * useraddr, size
 int new_csops_audittoken(pid_t pid, unsigned int  ops, void * useraddr, size_t usersize, audit_token_t * token)
 {
     int ret = orig_csops_audittoken(pid, ops, useraddr, usersize, token);
-    if(ret==0 && ops==CS_OPS_STATUS) {
+
+	if(isBlacklistedToken(token)) {
+		return ret;
+	}
+
+    if(ret==0 && ops==CS_OPS_STATUS && useraddr) {
         *(uint32_t*)useraddr |= CS_VALID;
         *(uint32_t*)useraddr |= CS_PLATFORM_BINARY;
         *(uint32_t*)useraddr &= ~CS_PLATFORM_PATH;
@@ -61,10 +83,14 @@ int new_sandbox_check_by_audit_token(audit_token_t au, const char *operation, in
 	va_end(a);
 
 	if (name && operation) {
-		if (strcmp(operation, "mach-lookup") == 0) {
-			if (strncmp((char *)name, "cy:", 3) == 0 || strncmp((char *)name, "lh:", 3) == 0) {
-				/* always allow */
-				return 0;
+		if(isBlacklistedToken(&au)) {
+			FileLogDebug(strstr(operation, "mach-") ? "sandbox_check_by_audit_token operation=%s name=%s from %s" : "sandbox_check_by_audit_token operation=%s name=%p from %s", operation, name, proc_get_path(audit_token_to_pid(au),NULL));
+		} else {
+			if (strcmp(operation, "mach-lookup") == 0) {
+				if (strncmp((char *)name, "cy:", 3) == 0 || strncmp((char *)name, "lh:", 3) == 0) {
+					/* always allow */
+					return 0;
+				}
 			}
 		}
 	}
@@ -133,6 +159,22 @@ xpc_object_t new_xpc_dictionary_get_value(xpc_object_t xdict, const char *key)
 	return origXvalue;
 }
 
+
+int jbserver_received_xpc_message(xpc_object_t xmsg);
+int xpc_receive_mach_msg(void *msg, void *a2, void *a3, void *a4, xpc_object_t *xOut);
+int (*orig_xpc_receive_mach_msg)(void *msg, void *a2, void *a3, void *a4, xpc_object_t *xOut) = xpc_receive_mach_msg;
+int new_xpc_receive_mach_msg(void *msg, void *a2, void *a3, void *a4, xpc_object_t *xOut)
+{
+	int r = orig_xpc_receive_mach_msg(msg, a2, a3, a4, xOut);
+	if (r == 0 && xOut && *xOut) {
+		if (jbserver_received_xpc_message(*xOut) == 0) {
+			// xpc_release(*xOut);
+			return 22;
+		}
+	}
+	return r;
+}
+
 int (*orig_posix_spawn)(pid_t *restrict pidp, const char *restrict path, const posix_spawn_file_actions_t *restrict file_actions, posix_spawnattr_t *restrict attrp, char *const argv[restrict], char *const envp[restrict]) = posix_spawn;
 int orig_posix_spawn_wrapper(pid_t *restrict pidp, const char *restrict path, const posix_spawn_file_actions_t *restrict file_actions, posix_spawnattr_t *restrict attrp, char *const argv[restrict], char *const envp[restrict])
 {
@@ -169,6 +211,8 @@ int new_posix_spawn(pid_t *restrict pidp, const char *restrict path, const posix
 		short flags = -1;
 		if(attrp) posix_spawnattr_getflags(attrp, &flags);
 		FileLogDebug("********* launchd re-spawning: %s, flags=%x", path, flags);
+		 
+		signal(SIGTRAP, SIG_IGN);
 
 		posix_spawnattr_t attr;
 		posix_spawnattr_init(&attr);
@@ -199,12 +243,15 @@ int new_posix_spawn(pid_t *restrict pidp, const char *restrict path, const posix
 		}
 	}
 
-	bool is_stored_app = false;
+	bool is_app_path = false;
+	bool is_tweaked_app = false;
 	const char* newpath = NULL;
 	const char* insertlib = NULL;
 
 	if(isRemovableBundlePath(path))
 	{
+		is_app_path = true;
+
 		char dirnamebuf[PATH_MAX]={0};
 		dirname_r(path, dirnamebuf);
 
@@ -219,7 +266,7 @@ int new_posix_spawn(pid_t *restrict pidp, const char *restrict path, const posix
 			unlink(path);
 			clonefile(tweaked_path, path, 0);
 
-			is_stored_app = true;
+			is_tweaked_app = true;
 		}
 
 		free(tweaked_path);
@@ -227,7 +274,7 @@ int new_posix_spawn(pid_t *restrict pidp, const char *restrict path, const posix
 		free(original_path);
 		original_path=NULL;
 
-		if(is_stored_app)
+		if(is_tweaked_app)
 		{
 			newpath = strdup(path);
 
@@ -270,7 +317,29 @@ int new_posix_spawn(pid_t *restrict pidp, const char *restrict path, const posix
 		}
 	}
 
+	volatile pid_t* blacklistedPidp = NULL;
+	if(is_app_path && isBlacklistedPath(path))
+	{
+		FileLogDebug("blacklisted app %s", path);
+
+		blacklistedPidp = allocBlacklistProcessId();
+		pidp = blacklistedPidp;
+
+		//choicy may set these 
+		envbuf_unsetenv(&envc, "_SafeMode");
+		envbuf_unsetenv(&envc, "_MSSafeMode");
+	}
+
 	int ret = orig_posix_spawn_wrapper(pidp, newpath ?: path, file_actions, attrp, argv, envc);
+
+	if(blacklistedPidp)
+	{
+		pid_t pid = *blacklistedPidp;
+		if(pidp) *pidp = *blacklistedPidp;
+
+		commitBlacklistProcessId(blacklistedPidp); // will release blacklistedPidp
+		blacklistedPidp = NULL;
+	}
 
 	if(attr) posix_spawnattr_destroy(&attr);
 	if(insertlib) free((void*)insertlib);
@@ -278,7 +347,7 @@ int new_posix_spawn(pid_t *restrict pidp, const char *restrict path, const posix
 
 	envbuf_free(envc);
 
-	if(is_stored_app)
+	if(is_tweaked_app)
 	{
 		char dirnamebuf[PATH_MAX]={0};
 		dirname_r(path, dirnamebuf);
@@ -306,12 +375,50 @@ int new_posix_spawnp(pid_t *restrict pidp, const char *restrict path, const posi
 	});
 }
 
+
+struct _posix_spawn_args_desc {
+	size_t attr_size;
+	posix_spawnattr_t attrp;
+	//....
+};
+
+int __posix_spawn(pid_t *restrict pid, const char *restrict path, struct _posix_spawn_args_desc *desc, char *const argv[restrict], char *const envp[restrict]);
+int (*__posix_spawn_hook_orig)(pid_t *restrict pidp, const char *restrict path, struct _posix_spawn_args_desc *desc, char *const argv[restrict], char *const envp[restrict]);
+int __posix_spawn_hook(pid_t *restrict pidp, const char *restrict path, struct _posix_spawn_args_desc *desc, char *const argv[restrict], char *const envp[restrict])
+{
+	pid_t pid = 0;
+	int ret = __posix_spawn_hook_orig(&pid, path, desc, argv, envp);
+
+	if(ret==0 && pid>0 && desc) 
+	{
+		short flags = 0;
+		posix_spawnattr_t attrp = &desc->attrp;
+		posix_spawnattr_getflags(attrp, &flags);
+		if((flags & POSIX_SPAWN_START_SUSPENDED) != 0) {
+			jbdProcessEnableJIT(pid, false);
+		}
+	}
+
+	if(pidp) *pidp = pid;
+	return ret;
+}
+
 __attribute__((constructor)) static void initializer(void)
 {
-	CommLogFunction = FileLogDebugFunction;
 	FileLogDebug("launchdhook initializing");
 
+#ifdef ENABLE_LOGS
+	enableCommLog(FileLogDebugFunction, FileLogErrorFunction);
+#endif
+
+	ptrace(PT_TRACE_ME, 0, 0, 0);
+	ptrace(PT_SIGEXC, 0, 0, 0);
+
 	crashreporter_start();
+
+	if(proc_traced(getpid())) {
+		DobbyHook((void*)__posix_spawn, (void*)__posix_spawn_hook, (void**)&__posix_spawn_hook_orig);
+	}
 
 	if (access("/var/mobile/Library/Preferences/com.apple.NanoRegistry.NRRootCommander.volatile.plist", W_OK)==0) {
 		remove("/var/mobile/Library/Preferences/com.apple.NanoRegistry.NRRootCommander.volatile.plist");
@@ -324,6 +431,10 @@ __attribute__((constructor)) static void initializer(void)
 
 	g_sandbox_extensions = generate_sandbox_extensions(false);
 	g_sandbox_extensions_ext = generate_sandbox_extensions(true);
+
+	loadAppStoredIdentifiers();
+	
+	assert(initJailbreakd(jbserver_received_xpc_message) == 0);
 
 	FileLogDebug("launchdhook initialized");
 }
@@ -339,3 +450,6 @@ DYLD_INTERPOSE(new_posix_spawn, posix_spawn)
 DYLD_INTERPOSE(new_posix_spawnp, posix_spawnp)
 DYLD_INTERPOSE(new_xpc_dictionary_get_value, xpc_dictionary_get_value)
 DYLD_INTERPOSE(new_sandbox_check_by_audit_token, sandbox_check_by_audit_token)
+DYLD_INTERPOSE(new_xpc_receive_mach_msg, xpc_receive_mach_msg)
+DYLD_INTERPOSE(new_xpc_pipe_routine_reply, xpc_pipe_routine_reply)
+DYLD_INTERPOSE(new_xpc_dictionary_create_reply, xpc_dictionary_create_reply)

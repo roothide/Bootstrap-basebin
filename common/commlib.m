@@ -13,6 +13,12 @@
 #include "libproc.h"
 
 void (*CommLogFunction)(const char* format, ...) = NULL;
+void (*CommErrFunction)(const char* format, ...) = NULL;
+void enableCommLog(void* debugLog, void* errorLog)
+{
+    CommLogFunction = debugLog;
+    CommErrFunction = errorLog;
+}
 
 pid_t get_real_ppid()
 {
@@ -127,7 +133,7 @@ int proc_paused(pid_t pid, bool* paused)
 	struct proc_bsdinfo procInfo={0};
 	int ret = proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &procInfo, sizeof(procInfo));
 	if(ret != sizeof(procInfo)) {
-		SYSLOG("bsdinfo failed, %d,%s\n", errno, strerror(errno));
+		SYSERR("bsdinfo failed, %d,%s\n", errno, strerror(errno));
 		return -1;
 	}
 
@@ -137,11 +143,37 @@ int proc_paused(pid_t pid, bool* paused)
 		*paused = true;
 	}
 	else if(procInfo.pbi_status != SRUN) {
-		SYSLOG("unexpected %d pstat=%x\n", ret, procInfo.pbi_status);
+		SYSERR("unexpected %d pstat=%x\n", ret, procInfo.pbi_status);
 		return -1;
 	}
 
 	return 0;
+}
+
+bool proc_traced(pid_t pid)
+{
+	int32_t opt[4] = {
+		CTL_KERN,
+		KERN_PROC,
+		KERN_PROC_PID,
+		pid,
+	};
+	struct kinfo_proc info={0};
+	size_t len = sizeof(struct kinfo_proc);
+	if(sysctl(opt, 4, &info, &len, NULL, 0) == 0) {
+		if((info.kp_proc.p_flag & P_TRACED) != 0) {
+			return true;
+		}
+	}
+	
+	struct proc_bsdinfo procInfo={0};
+	if (proc_pidinfo(getpid(), PROC_PIDTBSDINFO, 0, &procInfo, sizeof(procInfo)) == sizeof(procInfo)) {
+		if((procInfo.pbi_flags & PROC_FLAG_TRACED) != 0) {
+			return true;
+		}
+	}
+
+	return false;
 }
 
 // (inherit)
@@ -328,7 +360,7 @@ int spawn(const char* path, char*const* argv, char*const* envp, void(^pid_out)(p
     
     if(spawnError != 0)
     {
-        SYSLOG("posix_spawn error %d:%s\n", spawnError, strerror(spawnError));
+        SYSERR("posix_spawn error %d:%s\n", spawnError, strerror(spawnError));
         dispatch_source_cancel(stdOutSource);
         dispatch_source_cancel(stdErrSource);
         return spawnError;
@@ -726,7 +758,7 @@ void loadAppStoredIdentifiers()
     NSError *error = nil;
     NSArray *appContainers = [fileManager contentsOfDirectoryAtPath:applicationsPath error:&error];
     if (error) {
-        FileLogError("Error reading Application directory: %s", error.description.UTF8String);
+        SYSERR("Error reading Application directory: %s", error.description.UTF8String);
         abort();
     }
     
@@ -738,20 +770,20 @@ void loadAppStoredIdentifiers()
         NSDictionary *metadataPlist = [NSDictionary dictionaryWithContentsOfFile:metadataPlistPath];
         NSString *MCMMetadataIdentifier = metadataPlist[@"MCMMetadataIdentifier"];
         if(!MCMMetadataIdentifier) {
-            FileLogDebug("Skipping container with no MCMMetadataIdentifier: %s", containerPath.UTF8String);
+            SYSLOG("Skipping container with no MCMMetadataIdentifier: %s", containerPath.UTF8String);
             continue;
         }
 
         if([fileManager fileExistsAtPath:[containerPath stringByAppendingPathComponent:@"_TrollStore"]]
             || [fileManager fileExistsAtPath:[containerPath stringByAppendingPathComponent:@"_TrollStoreLite"]])
         {
-            FileLogDebug("Skipping trollstored app container: %s : %s", MCMMetadataIdentifier.UTF8String, containerPath.UTF8String);
+            SYSLOG("Skipping trollstored app container: %s : %s", MCMMetadataIdentifier.UTF8String, containerPath.UTF8String);
             continue;
         }
 
         if(![fileManager fileExistsAtPath:[containerPath stringByAppendingPathComponent:@"iTunesMetadata.plist"]])
         {
-            FileLogDebug("Skipping non-stored app container: %s : %s", MCMMetadataIdentifier.UTF8String, containerPath.UTF8String);
+            SYSLOG("Skipping non-stored app container: %s : %s", MCMMetadataIdentifier.UTF8String, containerPath.UTF8String);
             continue;
         }
 
@@ -766,20 +798,20 @@ void loadAppStoredIdentifiers()
                 NSString *appBundleID = infoPlist[@"CFBundleIdentifier"];
 
                 if([appBundleID isEqualToString:MCMMetadataIdentifier]==NO) {
-                    FileLogDebug("*** Mismatched Bundle ID and MCMMetadataIdentifier: %s != %s : %s", appBundleID.UTF8String, MCMMetadataIdentifier.UTF8String, appPath.UTF8String);
+                    SYSLOG("*** Mismatched Bundle ID and MCMMetadataIdentifier: %s != %s : %s", appBundleID.UTF8String, MCMMetadataIdentifier.UTF8String, appPath.UTF8String);
                 }
                 
                 if(![fileManager fileExistsAtPath:[appPath stringByAppendingPathComponent:@"SC_Info"]])
                 {
-                    FileLogDebug("Skipping non-encrypted app: %s", appPath.UTF8String);
+                    SYSLOG("Skipping non-encrypted app: %s", appPath.UTF8String);
                     continue;
                 }
 
                 if (appBundleID) {
-                    FileLogDebug("App: %s -> %s", item.UTF8String, appBundleID.UTF8String);
+                    SYSLOG("App: %s -> %s", item.UTF8String, appBundleID.UTF8String);
                     [StoredAppIdentifiers addObject:appBundleID];
                 } else {
-                    FileLogDebug("*** No Bundle ID found: %s", appPath.UTF8String);
+                    SYSLOG("*** No Bundle ID found: %s", appPath.UTF8String);
                     continue;
                 }
                 
@@ -795,10 +827,10 @@ void loadAppStoredIdentifiers()
                         NSString *plugInBundleID = plugInInfo[@"CFBundleIdentifier"];
                         
                         if (plugInBundleID) {
-                            FileLogDebug("  PlugIn: %s -> %s", plugIn.UTF8String, plugInBundleID.UTF8String);
+                            SYSLOG("  PlugIn: %s -> %s", plugIn.UTF8String, plugInBundleID.UTF8String);
                             [StoredAppIdentifiers addObject:plugInBundleID];
                         } else {
-                            FileLogDebug("  *** No Bundle ID found: %s", plugInPath.UTF8String);
+                            SYSLOG("  *** No Bundle ID found: %s", plugInPath.UTF8String);
                         }
                     }
                 }

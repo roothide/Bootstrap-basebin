@@ -16,6 +16,7 @@
 #include <dispatch/dispatch.h>
 
 #include "crashreporter.h"
+#include "commlib.h"
 #include "filelog.h"
 
 #ifndef __MigPackStructs
@@ -300,16 +301,6 @@ void crashreporter_dump_image_list(FILE *f)
 
 void crashreporter_catch_mach(__Request__mach_exception_raise_t *request, __Reply__mach_exception_raise_t *reply)
 {
-	pid_t pid=0;
-	kern_return_t kr = pid_for_task(request->task.name, &pid);
-	if(kr != KERN_SUCCESS || pid <= 0) {
-		ABORT("pid_for_task failed: pid=%d, error=%x,%s", pid, kr, mach_error_string(kr));
-	}
-
-	if(pid != getpid()) {
-		ABORT("Mach Exception for another process: %d", pid);
-	}
-
 	pthread_t pthread = pthread_from_mach_thread_np(request->thread.name);
 
 	arm_thread_state64_t threadState = {0};
@@ -413,8 +404,36 @@ void *crashreporter_listen(void *arg)
             ABORT("recv mach msg failed: %x", ret);
         }
 
+		bool ignored = false;
 		__Reply__mach_exception_raise_t reply = {0};
-		crashreporter_catch_mach((__Request__mach_exception_raise_t *)msg, &reply);
+		__Request__mach_exception_raise_t* request = (__Request__mach_exception_raise_t *)msg;
+
+		pid_t pid=0;
+		kern_return_t kr = pid_for_task(request->task.name, &pid);
+		if(kr != KERN_SUCCESS || pid <= 0) {
+			ABORT("pid_for_task failed: pid=%d, error=%x,%s", pid, kr, mach_error_string(kr));
+		}
+
+		if(pid != getpid()) {
+			ABORT("Mach Exception for another process: %d", pid);
+		}
+
+		if(proc_traced(getpid()))
+		{
+			if(request->exception == EXC_SOFTWARE && request->codeCnt == 2 && request->code[0] == EXC_SOFT_SIGNAL) 
+			{
+				int signum = (int)request->code[1];
+				if(signum < SIGILL || signum > SIGSYS)
+				{
+					FileLogDebug("Ignoring EXC_SOFTWARE for signal %d", signum);
+					reply.RetCode = KERN_SUCCESS;
+					reply.NDR = request->NDR;
+					ignored = true;
+				}
+			}
+		}
+
+		if(!ignored) crashreporter_catch_mach(request, &reply);
 
 		reply.Head.msgh_bits = MACH_MSGH_BITS(MACH_MSGH_BITS_REMOTE(msg->msgh_bits), 0);
 		reply.Head.msgh_size = sizeof(__Reply__mach_exception_raise_t);
@@ -439,7 +458,7 @@ void crashreporter_pause(void)
 void crashreporter_resume(void)
 {
 	if (gCrashReporterState == kCrashReporterStatePaused) {
-		task_set_exception_ports(mach_task_self_, EXC_MASK_CRASH_RELATED, gExceptionPort, EXCEPTION_DEFAULT, ARM_THREAD_STATE64);
+		task_set_exception_ports(mach_task_self_, EXC_MASK_CRASH_RELATED, gExceptionPort, EXCEPTION_DEFAULT|MACH_EXCEPTION_CODES, ARM_THREAD_STATE64);
 		defaultNSExceptionHandler = NSGetUncaughtExceptionHandler();
 		NSSetUncaughtExceptionHandler(crashreporter_catch_objc);
 		gCrashReporterState = kCrashReporterStateActive;

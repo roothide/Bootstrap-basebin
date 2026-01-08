@@ -539,7 +539,7 @@ void registerPath(NSString *path, BOOL forceSystem)
 		}
 	}
 
-	BOOL allowURLSchemes = [NSFileManager.defaultManager fileExistsAtPath:jbroot(@"/var/mobile/.allow_url_schemes")];
+	BOOL allowURLSchemes = [NSFileManager.defaultManager fileExistsAtPath:jbroot(@"/var/mobile/.allow_url_schemes")] || [NSFileManager.defaultManager fileExistsAtPath:jbroot(@"/basebin/.launchctl_support")];
 
 	//NSLog(@"Info=%@", appInfoPlist);
 	NSMutableArray* urltypes = [appInfoPlist[@"CFBundleURLTypes"] mutableCopy];

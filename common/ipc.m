@@ -17,7 +17,8 @@
 #include "ipc.h"
 
 #define printf(...) do { if (ipc_log_enabled) { SYSLOG(__VA_ARGS__); } } while (0)
-#define perror(x)   do { if (ipc_log_enabled) { SYSLOG("%s : %s", x, strerror(errno)); } } while (0)
+#define errlog(...) do { if (ipc_log_enabled) { SYSERR(__VA_ARGS__); } } while (0)
+#define perror(x)   do { if (ipc_log_enabled) { SYSERR("%s : %s", x, strerror(errno)); } } while (0)
 
 #define BSD_PORT_PATH jbroot("/basebin/.bootstrapd.port")
 
@@ -157,7 +158,7 @@ int request(int socket, int reqId, NSDictionary* msg)
     NSError* err=nil;
     NSData *data = [NSPropertyListSerialization dataWithPropertyList:reqMsg format:NSPropertyListBinaryFormat_v1_0 options:0 error:&err];
     if(!data) {
-        printf("serialization err=%s", err.debugDescription.UTF8String);
+        errlog("serialization err=%s", err.debugDescription.UTF8String);
         abort();
     }
     
@@ -193,7 +194,7 @@ void start_mach_server()
         xpc_object_t message = nil;
         int err = xpc_pipe_receive(port, &message);
         if (err != 0) {
-            printf("xpc_pipe_receive error %d", err);
+            errlog("xpc_pipe_receive error %d", err);
             abort();
         }
 
@@ -201,7 +202,7 @@ void start_mach_server()
         xpc_dictionary_set_uint64(reply, "ack", 1);
         err = xpc_pipe_routine_reply(reply);
         if (err != 0) {
-            printf("Error %d sending response", err);
+            errlog("Error %d sending response", err);
             abort();
         }
     });

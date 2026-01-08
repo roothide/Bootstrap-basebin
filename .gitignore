@@ -4,3 +4,4 @@ installdeb2
 /.build
 common/lib/libcommon.a
 common/lib/prepare.a
+dyldhook/dyldhook

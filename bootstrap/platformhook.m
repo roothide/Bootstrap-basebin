@@ -17,11 +17,18 @@ int (*orig_csops)(pid_t pid, unsigned int  ops, void * useraddr, size_t usersize
 int new_csops(pid_t pid, unsigned int  ops, void * useraddr, size_t usersize)
 {
 	int ret = orig_csops(pid, ops, useraddr, usersize);
-	if(ret==-1) ret = orig_csops(getpid(), ops, useraddr, usersize);
-	if(ret==0 && ops==CS_OPS_STATUS) {
-		*(uint32_t*)useraddr |= CS_VALID;
-		*(uint32_t*)useraddr |= CS_PLATFORM_BINARY;
-		*(uint32_t*)useraddr &= ~CS_PLATFORM_PATH;
+
+    SYSLOG("csops(ops=%d) ret=(%d,err=%d) : pid=%d data=%08X size=%lx", ops, ret,errno, pid, useraddr ? *(uint32_t*)useraddr : 0, usersize);
+
+	if(ops==CS_OPS_STATUS && useraddr) 
+    {
+        if(ret == 0) {
+            *(uint32_t*)useraddr |= CS_VALID;
+            *(uint32_t*)useraddr |= CS_PLATFORM_BINARY;
+            *(uint32_t*)useraddr &= ~CS_PLATFORM_PATH;
+        } else {
+            *(uint32_t*)useraddr = CS_SIGNED|CS_PLATFORM_BINARY|CS_KILL|CS_ADHOC|CS_VALID;
+        }
 	}
 
 	return ret;
@@ -31,15 +38,19 @@ int (*orig_csops_audittoken)(pid_t pid, unsigned int  ops, void * useraddr, size
 int new_csops_audittoken(pid_t pid, unsigned int  ops, void * useraddr, size_t usersize, audit_token_t * token)
 {
     int ret = orig_csops_audittoken(pid, ops, useraddr, usersize, token);
-    if(ret==-1) ret = orig_csops(getpid(), ops, useraddr, usersize);
 
-    SYSLOG("csops_audittoken(%d): %d : %d %08X %lx %p", ops, ret, pid, useraddr ? *(uint32_t*)useraddr : 0, usersize, token);
+    SYSLOG("csops_audittoken(ops=%d) ret=(%d,err=%d) : pid=%d data=%08X size=%lx token=%p", ops, ret,errno, pid, useraddr ? *(uint32_t*)useraddr : 0, usersize, token);
 
-    if(ops==CS_OPS_STATUS) {
-        *(uint32_t*)useraddr |= CS_VALID;
-        *(uint32_t*)useraddr |= CS_PLATFORM_BINARY;
-        *(uint32_t*)useraddr &= ~CS_PLATFORM_PATH;
-    }
+	if(ops==CS_OPS_STATUS && useraddr) 
+    {
+        if(ret == 0) {
+            *(uint32_t*)useraddr |= CS_VALID;
+            *(uint32_t*)useraddr |= CS_PLATFORM_BINARY;
+            *(uint32_t*)useraddr &= ~CS_PLATFORM_PATH;
+        } else {
+            *(uint32_t*)useraddr = CS_SIGNED|CS_PLATFORM_BINARY|CS_KILL|CS_ADHOC|CS_VALID;
+        }
+	}
 
     return ret;
 }

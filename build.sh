@@ -23,6 +23,11 @@ make clean && make
 cp ./fastPathSign ../.build/
 cd -
 
+cd dyldhook
+make clean && make
+cp ./dyldhook ../.build/
+cd -
+
 cd common
 make clean all
 cd -
@@ -60,6 +65,10 @@ make clean all
 cd -
 
 cd launchdhook
+make clean all
+cd -
+
+cd jailbreakd
 make clean all
 cd -
 

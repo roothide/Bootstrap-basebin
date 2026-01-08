@@ -16,6 +16,9 @@ bootstrap_INSTALL_PATH = /basebin
 
 include $(THEOS_MAKE_PATH)/library.mk
 
+after-package::
+	find $(THEOS_LIBRARY_PATH) -name "$(LIBRARY_NAME).*" -delete
+
 after-all::
 ifneq ($(DEBUG), 1)
 	strip -N $(THEOS_OBJ_DIR)/bootstrap.dylib

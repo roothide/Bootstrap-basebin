@@ -14,7 +14,7 @@
 #include "common.h"
 #include "codesign.h"
 
-xpc_object_t (*orig_xpc_dictionary_create_reply)(xpc_object_t original);
+xpc_object_t (*orig_xpc_dictionary_create_reply)(xpc_object_t original) = xpc_dictionary_create_reply;
 xpc_object_t new_xpc_dictionary_create_reply(xpc_object_t original)
 {
 	xpc_object_t reply = orig_xpc_dictionary_create_reply(original);
@@ -36,7 +36,7 @@ xpc_object_t new_xpc_dictionary_create_reply(xpc_object_t original)
 	return reply;
 }
 
-int (*orig_xpc_pipe_routine_reply)(xpc_object_t reply);
+int (*orig_xpc_pipe_routine_reply)(xpc_object_t reply) = xpc_pipe_routine_reply;
 int new_xpc_pipe_routine_reply(xpc_object_t reply)
 {
 	if (xpc_get_type(reply) == XPC_TYPE_DICTIONARY)
@@ -184,24 +184,12 @@ void check_usreboot_msg(xpc_object_t xmsg)
 	}
 }
 
-void roothide_handle_xpc_msg(xpc_object_t xmsg)
+int roothide_handle_launchd_xpc_msg(xpc_object_t xmsg)
 {
 	check_usreboot_msg(xmsg);
 
 	audit_token_t clientToken = {0};
 	xpc_dictionary_get_audit_token(xmsg, &clientToken);
-
-#ifdef ENABLE_LOGS
-	if (xpc_dictionary_get_value(xmsg, "jb-domain") && xpc_dictionary_get_value(xmsg, "action"))
-	{
-		const char *desc = NULL;
-		FileLogDebug("jbserver received xpc message from (%d) %s :\n%s",
-				   audit_token_to_pid(clientToken),
-				   proc_get_path(audit_token_to_pid(clientToken), NULL),
-				   (desc = xpc_copy_description(xmsg)));
-		if (desc) free((void *)desc);
-	}
-#endif
 
 	if (isBlacklistedToken(&clientToken))
 	{
@@ -271,5 +259,9 @@ void roothide_handle_xpc_msg(xpc_object_t xmsg)
 				xpc_dictionary_set_int64(xmsg, "pid", INT_MAX);
 			}
 		}
+
+		return -1;
 	}
+
+	return 0;
 }

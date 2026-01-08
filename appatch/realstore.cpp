@@ -20,7 +20,7 @@
 #include <vector>
 #include <plist/plist.h>
 
-#define LOG(...) printf(__VA_ARGS__)
+#define LOG(...) //printf(__VA_ARGS__)
 
 enum SecCodeExecSegFlags {
     kSecCodeExecSegMainBinary = 0x001,

@@ -40,7 +40,7 @@ typedef struct nlist nlist_t;
 #include <dlfcn.h>
 #include <assert.h>
 
-#define SYSLOG(...) //printf(__VA_ARGS__)
+#include "common.h"
 
 struct _dyld_interpose {
     void* hook;
@@ -103,7 +103,7 @@ static void perform_rebinding_with_section(section_t *section, intptr_t slide)
 #endif
             SYSLOG("rebind %p -> %p\n", orig, hook);
           } else {
-            SYSLOG("vm_protect failed: %s\n", mach_error_string(err));
+            SYSERR("vm_protect failed: %s\n", mach_error_string(err));
           }
 
         }

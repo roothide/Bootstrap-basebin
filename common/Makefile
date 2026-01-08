@@ -10,6 +10,8 @@ THEOS_PACKAGE_SCHEME = roothide
 include $(THEOS)/makefiles/common.mk
 
 LIBRARY_NAME = libcommon
+$(LIBRARY_NAME)_INSTALL=0 # do not copy to theos/lib
+
 libcommon_FILES = $(wildcard *.c *.m *.mm *.cpp)
 libcommon_CFLAGS = -I. -DFISHHOOK_EXPORT -fobjc-arc -Wno-unused-variable -Wno-unused-but-set-variable
 libcommon_LFGLAGS = -L.

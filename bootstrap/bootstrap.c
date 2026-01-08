@@ -400,6 +400,11 @@ static void __attribute__((__constructor__)) bootstrap()
     ASSERT(_NSGetExecutablePath(executablePath, &bufsize) == 0);
 
 	g_executable_path = strdup(executablePath);
+	
+	const char* sbtoken = getenv("__SANDBOX_EXTENSIONS");
+	if(sbtoken) {
+		g_sandbox_extensions = strdup(sbtoken);
+	}
 
 	//do nothing extra inside xpcproxy (do not enable syslog in xpcproxy)
 	if(string_has_suffix(executablePath, "/usr/libexec/xpcproxy")) {
@@ -407,17 +412,14 @@ static void __attribute__((__constructor__)) bootstrap()
 	}
 
 #if DEBUG
-	CommLogFunction = bootstrapLog;
+	enableCommLog(bootstrapLog, bootstrapLog);
 	bootstrapLogFunction = bootstrapLog;
 	SYSLOG("Bootstrap loaded...");
 #endif
 
-	const char* sbtoken = getenv("__SANDBOX_EXTENSIONS");
 	if(sbtoken)
 	{
 		unsandbox(sbtoken);
-
-		g_sandbox_extensions = strdup(sbtoken);
 
 		if(__builtin_available(iOS 16.0, *)) {
 			ASSERT(bsd_tick_mach_service());
@@ -528,7 +530,7 @@ static void __attribute__((__constructor__)) bootstrap()
 	{
 		if(bundleIdentifier)
 		{
-			if(string_has_prefix(bundleIdentifier, "com.apple.") && !blockTweaks)
+			if(string_has_prefix(bundleIdentifier, "com.apple.") && !is_apple_internal_identifier(bundleIdentifier))
 			{
 				void init_platformHook();
 				init_platformHook(); //try
@@ -559,7 +561,7 @@ static void __attribute__((__constructor__)) bootstrap()
 	}
 
 	//fix frida: always enable JIT before checking tweakloader
-	if(requireJIT()==0 && !blockTweaks && get_real_ppid()==1 && is_app_coalition()) {
+	if(requireJIT()==0 && !blockTweaks && get_real_ppid()==1 && (is_app_coalition() || string_has_prefix(exepath, "/.sysroot/"))) {
 
 		void init_prefs_inlinehook();
 		init_prefs_inlinehook();

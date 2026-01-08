@@ -18,7 +18,7 @@ bool bsd_tick_mach_service()
 	mach_port_t port = MACH_PORT_NULL;
 	kern_return_t kr = bootstrap_look_up(bootstrap_port, service_name, &port);
 	if(kr != KERN_SUCCESS || !MACH_PORT_VALID(port)) {
-		SYSLOG("bootstrap_check_in port=%x kr=%x,%s", port, kr, bootstrap_strerror(kr));
+		SYSERR("bootstrap_check_in port=%x kr=%x,%s", port, kr, bootstrap_strerror(kr));
 		return false;
 	}
 
@@ -43,7 +43,7 @@ bool bsd_tick_mach_service()
 	}
 	else
 	{
-		SYSLOG("xpc_pipe_create_from_port failed");
+		SYSERR("xpc_pipe_create_from_port failed");
 		retval = false;
 	}
 

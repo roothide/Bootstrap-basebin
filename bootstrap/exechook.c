@@ -9,21 +9,30 @@
 #include <sys/syslimits.h>
 #include <spawn.h>
 #include <paths.h>
+#include <signal.h>
 
 #include <roothide.h>
 
 #include "common.h"
 #include "envbuf.h"
+#include "jailbreakd.h"
 
-int posix_spawn_hook(pid_t *restrict pid, const char *restrict path, const posix_spawn_file_actions_t *restrict file_actions, const posix_spawnattr_t *restrict attrp, char *const argv[restrict], char *const envp[restrict])
+int posix_spawn_hook(pid_t *restrict pidp, const char *restrict path, const posix_spawn_file_actions_t *restrict file_actions, posix_spawnattr_t *restrict attrp, char *const argv[restrict], char *const envp[restrict])
 {
 	SYSLOG("posix_spawn_hook: %s\n", path);
 
 	if(!path) {
-		return posix_spawn(pid, path, file_actions, attrp, argv, envp);
+		return posix_spawn(pidp, path, file_actions, attrp, argv, envp);
 	}
 
+	bool should_patch = false;
 	bool should_inject = true;
+
+	posix_spawnattr_t attr=NULL;
+	if(!attrp) {
+		attrp = &attr;
+		posix_spawnattr_init(&attr);
+	}
 
 	if(string_has_suffix(g_executable_path, "/usr/libexec/xpcproxy"))
 	{
@@ -46,6 +55,7 @@ int posix_spawn_hook(pid_t *restrict pid, const char *restrict path, const posix
 
 		if(isSubPathOf(resigned_path, jbroot("/.sysroot/")))
 		{
+			should_patch = true;
 			path = resigned_path;
 		}
 	}
@@ -116,8 +126,58 @@ int posix_spawn_hook(pid_t *restrict pid, const char *restrict path, const posix
 			}
 		}
 	}
+
+	short flags = 0;
+	posix_spawnattr_getflags(attrp, &flags);
+
+	int proctype = 0;
+	posix_spawnattr_getprocesstype_np(attrp, &proctype);
+
+	bool should_suspend = (proctype != POSIX_SPAWN_PROC_TYPE_DRIVER);
+	bool should_resume = should_suspend && (flags & POSIX_SPAWN_START_SUSPENDED)==0;
+	bool patch_exec = should_suspend && (flags & POSIX_SPAWN_SETEXEC) != 0;
+
+	if(should_patch)
+	{
+		if (should_suspend) {
+			posix_spawnattr_setflags(attrp, flags | POSIX_SPAWN_START_SUSPENDED);
+		}
+
+		if (patch_exec) {
+			if (jbdSpawnExecStart(path, should_resume) != 0) { // jdb fault?
+				//restore flags
+				posix_spawnattr_setflags(attrp, flags);
+				return 201;
+			}
+		}
+	}
 	
-    int retval = posix_spawn(pid, path, file_actions, attrp, argv, envc);
+	pid_t pid=0;
+    int retval = posix_spawn(&pid, path, file_actions, attrp, argv, envc);
+	if (pidp) *pidp = pid;
+
     envbuf_free(envc);
+
+	// maybe caller will use it again? restore flags
+	posix_spawnattr_setflags(attrp, flags);
+
+	if(attr) posix_spawnattr_destroy(&attr);
+
+	if(should_patch)
+	{
+		if (patch_exec) { //exec failed?
+			jbdSpawnExecCancel(path);
+		} else if (retval == 0 && pid > 0) {
+			if (should_suspend) {
+				if(jbdSpawnPatchChild(pid, should_resume) != 0) { // jdb fault? kill
+					//just kill it instead of letting it hang forever, and the requester decides what to do later
+					kill(pid, SIGQUIT); //core dump
+					kill(pid, SIGKILL);
+					return 202;
+				}
+			}
+		}
+	}
+
     return retval;
 }

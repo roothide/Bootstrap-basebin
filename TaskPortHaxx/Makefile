@@ -24,6 +24,8 @@ TaskPortHaxx_INSTALL_PATH = /basebin
 include $(THEOS_MAKE_PATH)/tool.mk
 
 LIBRARY_NAME = prepare
+$(LIBRARY_NAME)_INSTALL=0 # do not copy to theos/lib
+
 prepare_FILES = \
 	TaskPortHaxxApp/launch.m \
 	TaskPortHaxxApp/unarchive.m \

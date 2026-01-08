@@ -47,16 +47,28 @@
 #define CS_ENTITLEMENT_FLAGS        (CS_GET_TASK_ALLOW | CS_INSTALLER | CS_DATAVAULT_CONTROLLER | CS_NVRAM_UNRESTRICTED)
 
 /* csops  operations */
-#define	CS_OPS_STATUS		0	/* return status */
-#define	CS_OPS_MARKINVALID	1	/* invalidate process */
-#define	CS_OPS_MARKHARD		2	/* set HARD flag */
-#define	CS_OPS_MARKKILL		3	/* set KILL flag (sticky) */
-#define	CS_OPS_PIDPATH		4	/* get executable's pathname */
-#define	CS_OPS_CDHASH		5	/* get code directory hash */
-#define CS_OPS_PIDOFFSET	6	/* get offset of active Mach-o slice */
-#define CS_OPS_ENTITLEMENTS_BLOB 7	/* get entitlements blob */
-#define CS_OPS_MARKRESTRICT	8	/* set RESTRICT flag (sticky) */
-#define CS_OPS_IDENTITY     11  /* get codesign identity */
+#define CS_OPS_STATUS           0       /* return status */
+#define CS_OPS_MARKINVALID      1       /* invalidate process */
+#define CS_OPS_MARKHARD         2       /* set HARD flag */
+#define CS_OPS_MARKKILL         3       /* set KILL flag (sticky) */
+#ifdef KERNEL_PRIVATE
+/* CS_OPS_PIDPATH		4	*/
+#endif
+#define CS_OPS_CDHASH           5       /* get code directory hash */
+#define CS_OPS_PIDOFFSET        6       /* get offset of active Mach-o slice */
+#define CS_OPS_ENTITLEMENTS_BLOB 7      /* get entitlements blob */
+#define CS_OPS_MARKRESTRICT     8       /* set RESTRICT flag (sticky) */
+#define CS_OPS_SET_STATUS       9       /* set codesign flags */
+#define CS_OPS_BLOB             10      /* get codesign blob */
+#define CS_OPS_IDENTITY         11      /* get codesign identity */
+#define CS_OPS_CLEARINSTALLER   12      /* clear INSTALLER flag */
+#define CS_OPS_CLEARPLATFORM 13 /* clear platform binary status (DEVELOPMENT-only) */
+#define CS_OPS_TEAMID       14  /* get team id */
+#define CS_OPS_CLEAR_LV     15  /* clear the library validation flag */
+#define CS_OPS_DER_ENTITLEMENTS_BLOB 16  /* get der entitlements blob */
+#define CS_OPS_VALIDATION_CATEGORY 17   /* get process validation category */
+
+#define CS_MAX_TEAMID_LEN       64
 
 int csops(pid_t pid, unsigned int  ops, void * useraddr, size_t usersize);
 int csops_audittoken(pid_t pid, unsigned int ops, void * useraddr, size_t usersize, audit_token_t * token);

@@ -19,8 +19,7 @@ int handleRequest(int conn, pid_t pid, int reqId, NSDictionary* msg)
 		{
 			int result = 0;
 			if(pid > 0) {
-				int enableJIT(pid_t);
-				result = enableJIT(pid);
+				result = proc_enable_jit(pid, true);
 			} else {
 				result = -1;
 			}
@@ -34,8 +33,7 @@ int handleRequest(int conn, pid_t pid, int reqId, NSDictionary* msg)
 			pid_t _pid = [msg[@"pid"] intValue];
 			SYSLOG("BSD_REQ_ENABLE_JIT2 %d -> %d", pid, _pid);
 			if(_pid > 0) {
-				int enableJIT(pid_t);
-				result = enableJIT(_pid);
+				result = proc_enable_jit(_pid, true);
 			} else {
 				result = -1;
 			}
@@ -214,7 +212,7 @@ void CommLog(const char* format, ...)
 
 int main(int argc, char *argv[], char *envp[]) {
 
-	CommLogFunction = CommLog;
+	enableCommLog(CommLog, CommLog);
 
 	@autoreleasepool {
 		SYSLOG("Hello bootstrapd! pid=%d, uid=%d\n", getpid(), getuid());
