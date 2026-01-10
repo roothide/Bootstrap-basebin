@@ -415,7 +415,7 @@ void *crashreporter_listen(void *arg)
 		}
 
 		if(pid != getpid()) {
-			ABORT("Mach Exception for another process: %d", pid);
+			ABORT("Mach Exception(%d,%llx,%llx) from another process: %d", request->exception, request->code[0], request->code[1], pid);
 		}
 
 		if(proc_traced(getpid()))
@@ -445,23 +445,41 @@ void *crashreporter_listen(void *arg)
 	}
 }
 
-void crashreporter_pause(void)
+int gCrashReporterStateKey = 0;
+int crashreporter_pause(void)
 {
-	if (gCrashReporterState == kCrashReporterStateActive) {
-		task_set_exception_ports(mach_task_self_, EXC_MASK_CRASH_RELATED, MACH_PORT_NULL, 0, 0);
-		NSSetUncaughtExceptionHandler(defaultNSExceptionHandler);
-		defaultNSExceptionHandler = nil;
-		gCrashReporterState = kCrashReporterStatePaused;
+	int key = 0;
+	@synchronized(@"CrashReporterStateKey")
+	{
+		if (gCrashReporterState == kCrashReporterStateActive) {
+			task_set_exception_ports(mach_task_self_, EXC_MASK_CRASH_RELATED, MACH_PORT_NULL, 0, 0);
+			NSSetUncaughtExceptionHandler(defaultNSExceptionHandler);
+			defaultNSExceptionHandler = nil;
+			gCrashReporterState = kCrashReporterStatePaused;
+		}
+		//only allow the last pause to be resumed
+		key = ++gCrashReporterStateKey;
 	}
+	return key;
 }
 
-void crashreporter_resume(void)
+void crashreporter_resume(int key)
 {
-	if (gCrashReporterState == kCrashReporterStatePaused) {
-		task_set_exception_ports(mach_task_self_, EXC_MASK_CRASH_RELATED, gExceptionPort, EXCEPTION_DEFAULT|MACH_EXCEPTION_CODES, ARM_THREAD_STATE64);
-		defaultNSExceptionHandler = NSGetUncaughtExceptionHandler();
-		NSSetUncaughtExceptionHandler(crashreporter_catch_objc);
-		gCrashReporterState = kCrashReporterStateActive;
+	@synchronized(@"CrashReporterStateKey")
+	{
+		if(key == gCrashReporterStateKey)
+		{
+			if (gCrashReporterState == kCrashReporterStatePaused) {
+				task_set_exception_ports(mach_task_self_, EXC_MASK_CRASH_RELATED, gExceptionPort, EXCEPTION_DEFAULT|MACH_EXCEPTION_CODES, ARM_THREAD_STATE64);
+				defaultNSExceptionHandler = NSGetUncaughtExceptionHandler();
+				NSSetUncaughtExceptionHandler(crashreporter_catch_objc);
+				gCrashReporterState = kCrashReporterStateActive;
+			}
+		}
+		else
+		{
+			FileLogError("crashreporter_resume called with mismatched key: %d (current key: %d)", key, gCrashReporterStateKey);
+		}
 	}
 }
 
@@ -579,7 +597,7 @@ void crashreporter_start()
 		mach_port_insert_right(mach_task_self_, gExceptionPort, gExceptionPort, MACH_MSG_TYPE_MAKE_SEND);
 		pthread_create(&gExceptionThread, NULL, crashreporter_listen, "crashreporter");
 		gCrashReporterState = kCrashReporterStatePaused;
-		crashreporter_resume();
+		crashreporter_resume(0);
 	}
 }
 

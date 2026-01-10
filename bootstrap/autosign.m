@@ -154,8 +154,9 @@ int autosign(char* path)
                 char sent[PATH_MAX];
                 snprintf(sent,sizeof(sent),"-S%s", jbroot("/basebin/entitlements/bootstrap.entitlements"));
 
-                char* args[] = {"ldid", "-M", sent, path, NULL};
-				int status = execBinary(jbroot("/basebin/ldid"), args);
+				//note: only basebin/ldid -M supports deep merge
+                char* args[] = {"/basebin/ldid", "-M", sent, path, NULL};
+				int status = execBinary(jbroot(args[0]), args);
 				if(status != 0) {
 					fprintf(stderr, "ldid %s failed: %d\n", jbpath, status);
 					g_sign_failed = true;
@@ -164,8 +165,8 @@ int autosign(char* path)
 			else
 			{
 				//since RootHidePatcher always re-sign with entitlements for all mach-o files....
-                char* args[] = {"ldid", "-S", path, NULL};
-				int status = execBinary(jbroot("/basebin/ldid"), args);
+                char* args[] = {"/basebin/ldid", "-S", path, NULL};
+				int status = execBinary(jbroot(args[0]), args);
 				if(status != 0) {
 					fprintf(stderr, "ldid %s failed: %d\n", jbpath, status);
 					g_sign_failed = true;

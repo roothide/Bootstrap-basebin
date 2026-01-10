@@ -269,7 +269,7 @@ struct DYLDINFO* loadDyldInfo(const char* path)
                 struct section_64* sec = (struct section_64*)((uint64_t)seg+sizeof(*seg));
                 for(int j=0; j<seg->nsects; j++)
                 {
-                    FileLogError("section[%d] = %.*s/%.*s vm=%llx offset=%x:%llx", j, 
+                    FileLogDebug("section[%d] = %.*s/%.*s vm=%llx offset=%x:%llx", j, 
                         sizeof(sec[j].segname),sec[j].segname, 
                         sizeof(sec[j].sectname),sec[j].sectname,
                         sec[j].addr, sec[j].offset, sec[j].size);

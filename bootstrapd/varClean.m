@@ -18,7 +18,7 @@ char* varCleanPatterns[][4] = {
 dispatch_queue_t varCleanQueue = nil;
 NSMutableDictionary* varCleanDict = nil;
 
-void doVarClean(const char* bundleIdentifier, bool all)
+static void doVarClean(const char* bundleIdentifier, bool all)
 {
 	//if the user has enabled URLSchemes, this means the user does not need to hide the "jailbreak"
 	if(access(jbroot("/var/mobile/.allow_url_schemes"), F_OK)==0) {
@@ -41,7 +41,7 @@ void doVarClean(const char* bundleIdentifier, bool all)
 	}
 }
 
-void varCleanInit()
+static void varCleanInit()
 {
 	for(int i=0; i<sizeof(varCleanPatterns)/sizeof(varCleanPatterns[0]); i++) {
 		char** pattern = varCleanPatterns[i];
@@ -86,6 +86,10 @@ void varCleanInit()
 
 int varClean(NSString* bundleIdentifier)
 {
+	if(launchctl_support()) {
+		return 0;
+	}
+
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
 		varCleanQueue = dispatch_queue_create("varClean", DISPATCH_QUEUE_SERIAL);
@@ -103,7 +107,7 @@ int varClean(NSString* bundleIdentifier)
 
 #define SPLASHBOARD_SNAPSHOTS_DIR "/var/mobile/Library/SplashBoard/Snapshots"
 
-void cleanSplashBoardSnapshots()
+static void cleanSplashBoardSnapshots()
 {
 	for(NSString* item in [NSFileManager.defaultManager directoryContentsAtPath:@(SPLASHBOARD_SNAPSHOTS_DIR)])
     {
@@ -116,7 +120,7 @@ void cleanSplashBoardSnapshots()
 	}
 }
 
-void varCleanAutoClean()
+static void varCleanAutoClean()
 {
 	//if the user has enabled URLSchemes, this means the user does not need to hide the "jailbreak"
 	if(access(jbroot("/var/mobile/.allow_url_schemes"), F_OK)==0) {
@@ -159,7 +163,9 @@ void varCleanAutoClean()
 	dispatch_resume(source);
 }
 
-static void __attribute__((__constructor__)) varclean_initializer(void)
+void varclean_init(void)
 {
-	varCleanAutoClean();
+	if(!launchctl_support()) {
+		varCleanAutoClean();
+	}
 }

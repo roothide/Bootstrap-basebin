@@ -21,6 +21,7 @@
 #include "sandbox.h"
 #include "libproc.h"
 #include "libbsd.h"
+#include "jbclient.h"
 
 #include <CoreFoundation/CoreFoundation.h>
 
@@ -269,6 +270,18 @@ bool _CFCanChangeEUIDs(void) {
     return canChangeEUIDs;
 }
 
+void loadPathHook()
+{
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+		void* roothidehooks = dlopen(jbroot("/basebin/roothidehooks.dylib"), RTLD_NOW);
+		ASSERT(roothidehooks != NULL);
+		void (*pathhook)() = dlsym(roothidehooks, "pathhook");
+		ASSERT(pathhook != NULL);
+		pathhook();
+	});
+}
+
 #include <pwd.h>
 #include <libgen.h>
 #include <stdio.h>
@@ -417,18 +430,18 @@ static void __attribute__((__constructor__)) bootstrap()
 	SYSLOG("Bootstrap loaded...");
 #endif
 
+	const char* exepath = rootfs(executablePath);
+
+	ASSERT(!string_has_prefix(exepath, "/basebin/"));
+
 	if(sbtoken)
 	{
 		unsandbox(sbtoken);
 
-		if(__builtin_available(iOS 16.0, *)) {
+		if(!string_has_prefix(exepath, "/.sysroot/")) {
 			ASSERT(bsd_tick_mach_service());
 		}
 	}
-
-	const char* exepath = rootfs(executablePath);
-
-	assert(!string_has_prefix(exepath, "/basebin/"));
 
     // SYSLOG("bootstrap....%s\n", exepath);
 	// SYSLOG("HOME=%s\n%s\n%s", getenv("HOME"), getenv("CFFIXED_USER_HOME"), getenv("TMPDIR"));
@@ -480,7 +493,7 @@ static void __attribute__((__constructor__)) bootstrap()
 
     if(strcmp(exepath, "/usr/bin/launchctl")==0)
     {
-		if(access(jbroot("/basebin/.launchctl_support"), F_OK) != 0) 
+		if(!launchctl_support()) 
 		{
 			if(NXArgc >= 3 && strcmp(NXArgv[1],"reboot")==0 && strcmp(NXArgv[2],"userspace")==0) 
 			{
@@ -494,7 +507,7 @@ static void __attribute__((__constructor__)) bootstrap()
     }
     else if(strcmp(exepath, "/usr/bin/ldrestart")==0)
     {
-		if(access(jbroot("/basebin/.launchctl_support"), F_OK) != 0) 
+		if(!launchctl_support()) 
 		{
 			char* args[] = {"/usr/bin/killall", "-9", "backboardd", NULL};
 			runAsRoot(jbroot(args[0]), args);
@@ -512,17 +525,13 @@ static void __attribute__((__constructor__)) bootstrap()
     {
 		runAsRoot(jbroot("/basebin/uicache"), NXArgv);
     }
-
-	void init_prefs_objchook();
-	init_prefs_objchook();
-
-	bool blockTweaks = false;
-	for(int i=0; i<sizeof(tweakDisabledProcesses)/sizeof(tweakDisabledProcesses[0]); i++)
+	else if(strcmp(exepath, "/usr/sbin/shshd")==0)
 	{
-		if(strcmp(exepath, tweakDisabledProcesses[i])==0) {
-			blockTweaks=true;
-			break;
-		}
+		fprintf(stderr, "shshd is not supported on current device.\n");
+		exit(0);
+	}
+	else if(string_has_suffix(exepath, "/usr/libexec/watchdogd")) {
+		//init watchdogd hook
 	}
 
 	//checkServer before loading roothidepatch
@@ -534,6 +543,9 @@ static void __attribute__((__constructor__)) bootstrap()
 			{
 				void init_platformHook();
 				init_platformHook(); //try
+				
+				void init_process_path_hook();
+				init_process_path_hook();
 			} 
 			else if(string_has_prefix(exepath, "/Applications/"))
 			{
@@ -555,16 +567,77 @@ static void __attribute__((__constructor__)) bootstrap()
 
 	dlopen(jbroot("/usr/lib/roothideinit.dylib"), RTLD_NOW);
 
+	if (string_has_suffix(exepath, "/System/Library/CoreServices/SpringBoard.app/SpringBoard")
+		|| string_has_suffix(exepath, "/usr/sbin/cfprefsd")
+		|| string_has_suffix(exepath, "/usr/libexec/lsd"))
+	{
+		ASSERT(requireJIT()==0);
+		dlopen(jbroot("/basebin/roothidehooks.dylib"), RTLD_NOW);
+	}
+
 	//load first
 	if(!dlopen(jbroot("/usr/lib/roothidepatch.dylib"), RTLD_NOW)) { // require jit
 		ASSERT(checkpatchedexe());
 	}
+	
+	if(!string_has_suffix(executablePath, "/usr/sbin/cfprefsd")) {
+		void init_prefs_objchook();
+		init_prefs_objchook();
+	}
 
-	//fix frida: always enable JIT before checking tweakloader
-	if(requireJIT()==0 && !blockTweaks && get_real_ppid()==1 && (is_app_coalition() || string_has_prefix(exepath, "/.sysroot/"))) {
+	do {
+		//fix frida: always enable JIT first
+		if(requireJIT() != 0) {
+			SYSLOG("Failed to enable JIT");
+			break;
+		}
 
-		void init_prefs_inlinehook();
-		init_prefs_inlinehook();
+		char *tweaksDisabledEnv = getenv("DISABLE_TWEAKS");
+		if (tweaksDisabledEnv) {
+			if (!strcmp(tweaksDisabledEnv, "1")) {
+				break;
+			}
+		}
+		const char *safeModeValue = getenv("_SafeMode");
+		if (safeModeValue) {
+			if (!strcmp(safeModeValue, "1")) {
+				break;
+			}
+		}
+		const char *msSafeModeValue = getenv("_MSSafeMode");
+		if (msSafeModeValue) {
+			if (!strcmp(msSafeModeValue, "1")) {
+				break;
+			}
+		}
+
+		if(get_real_ppid() != 1) {
+			SYSLOG("Not loading tweaks for non launched job process: pid=%d ppid=%d", getpid(), get_real_ppid());
+			break;
+		}
+
+		if(!is_app_coalition() && !string_has_prefix(exepath, "/.sysroot/")) {
+			SYSLOG("Not loading tweaks for process from deb packages");
+			break;
+		}
+
+		bool blockTweaks = false;
+		for(int i=0; i<sizeof(tweakDisabledProcesses)/sizeof(tweakDisabledProcesses[0]); i++)
+		{
+			if(strcmp(exepath, tweakDisabledProcesses[i])==0) {
+				SYSLOG("Tweaks disabled for %s", exepath);
+				blockTweaks=true;
+				break;
+			}
+		}
+		if(blockTweaks) {
+			break;
+		}
+
+		if(!string_has_suffix(executablePath, "/usr/sbin/cfprefsd")) {
+			void init_prefs_inlinehook();
+			init_prefs_inlinehook();
+		}
 	
 		if(access(jbroot("/var/mobile/.tweakenabled"), F_OK)==0)
 		{
@@ -573,7 +646,8 @@ static void __attribute__((__constructor__)) bootstrap()
 				dlopen(tweakloader, RTLD_NOW);
 			}
 		}
-	}
+
+	} while(0);
 
 	// const char* profile = roothide_get_sandbox_profile(getpid(), NULL);
 	// if(profile)

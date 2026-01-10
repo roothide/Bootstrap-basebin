@@ -3,6 +3,7 @@
 #include <roothide.h>
 #include "commlib.h"
 #include "libbsd.h"
+#include "resign.h"
 
 int jitest(int count, int time)
 {
@@ -21,13 +22,13 @@ int jitest(int count, int time)
 int main(int argc, char *argv[], char *envp[])
 {
 #ifdef ENABLE_LOGS
-	FileLogDebug("bsctl started args:\n");
-	for (int i = 0; i < argc; i++) {
-		FileLogDebug("%s\n", argv[i]);
-	}
 	FileLogDebug("bsctl started with environment variables:\n");
 	for (char*const* env = environ; *env != 0; env++) {
 		FileLogDebug("%s\n", *env);
+	}
+	FileLogDebug("bsctl started args:\n");
+	for (int i = 0; i < argc; i++) {
+		FileLogDebug("%s\n", argv[i]);
 	}
 #endif
 
@@ -35,8 +36,8 @@ int main(int argc, char *argv[], char *envp[])
 	{
 		if(strcmp(argv[1], "startup")==0)
 		{
-			int ret1 = spawnBootstrap((char*const[]){"/usr/bin/launchctl", "bootstrap", "system", "/Library/LaunchDaemons", NULL}, NULL, NULL);
-			int ret2 = spawnBootstrap((char*const[]){"/usr/bin/uicache", "-a", NULL}, NULL, NULL);
+			int ret1 = spawn_bootstrap_binary((char*const[]){"/usr/bin/launchctl", "bootstrap", "system", "/Library/LaunchDaemons", NULL}, NULL, NULL);
+			int ret2 = spawn_bootstrap_binary((char*const[]){"/usr/bin/uicache", "-a", NULL}, NULL, NULL);
 			return (ret1==0 && ret2==0) ? 0 : -1;
 		}
 		else if(strcmp(argv[1], "check") == 0)
@@ -92,6 +93,10 @@ int main(int argc, char *argv[], char *envp[])
 			printf("sbtoken=%s\n", sbtoken);
 			if(sbtoken) free((void*)sbtoken);
 			return sbtoken==NULL?-1:0;
+		}
+		else if(strcmp(argv[1], "resign") == 0)
+		{
+			return ResignSystemExecutables();
 		}
 	}
 

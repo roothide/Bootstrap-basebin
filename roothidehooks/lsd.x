@@ -3,8 +3,6 @@
 #include <roothide.h>
 #include "common.h"
 
-extern char **environ;
-
 #pragma GCC diagnostic ignored "-Wobjc-method-access"
 #pragma GCC diagnostic ignored "-Wunused-variable"
 

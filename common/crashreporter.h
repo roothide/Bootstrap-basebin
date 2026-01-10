@@ -8,8 +8,8 @@ typedef enum {
 } crash_reporter_state;
 
 void crashreporter_start();
-void crashreporter_pause(void);
-void crashreporter_resume(void);
+int crashreporter_pause(void);
+void crashreporter_resume(int key);
 
 FILE *crashreporter_open_outfile(const char *source, char **nameOut);
 void crashreporter_save_outfile(FILE *f);

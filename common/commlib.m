@@ -11,6 +11,7 @@
 #include "envbuf.h"
 #include "codesign.h"
 #include "libproc.h"
+#include "jailbreakd.h"
 
 void (*CommLogFunction)(const char* format, ...) = NULL;
 void (*CommErrFunction)(const char* format, ...) = NULL;
@@ -81,6 +82,7 @@ int proc_get_pidversion(pid_t pid)
 	struct proc_uniqidentifierinfo uniqidinfo = {0};
 	int ret = proc_pidinfo(pid, PROC_PIDUNIQIDENTIFIERINFO, 0, &uniqidinfo, sizeof(uniqidinfo));
 	if (ret <= 0) {
+        SYSERR("proc_get_pidversion(%d) failed %d,%s", pid, errno, strerror(errno));
         return 0;
 	}
 	return uniqidinfo.p_idversion;
@@ -139,7 +141,7 @@ int proc_paused(pid_t pid, bool* paused)
 
 	if(procInfo.pbi_status == SSTOP)
 	{
-		SYSLOG("%d pstat=%x flag=%x xstat=%x\n", ret, procInfo.pbi_status, procInfo.pbi_flags, procInfo.pbi_xstatus);
+		SYSLOG("proc_paused: pid=%d flag=%x pstat=%d xstat=%d\n", pid, procInfo.pbi_flags, procInfo.pbi_status, procInfo.pbi_xstatus);
 		*paused = true;
 	}
 	else if(procInfo.pbi_status != SRUN) {
@@ -148,6 +150,16 @@ int proc_paused(pid_t pid, bool* paused)
 	}
 
 	return 0;
+}
+
+bool proc_debugged(pid_t pid)
+{
+    uint32_t csflags=0;
+    if(csops(getpid(), CS_OPS_STATUS, &csflags, sizeof(csflags)) != 0) {
+        SYSERR("proc_debugged: csops failed %d,%s", errno, strerror(errno));
+        return false;
+    }
+    return (csflags & CS_DEBUGGED) != 0;
 }
 
 bool proc_traced(pid_t pid)
@@ -237,7 +249,7 @@ void killAllForBundle(const char* bundlePath)
 
 void killAllForExecutable(const char* path)
 {
-    SYSLOG("killallForExecutable %s, %d", path);
+    SYSLOG("killAllForExecutable %s", path);
     
     struct stat st;
     if(stat(path, &st) < 0) return;
@@ -268,7 +280,7 @@ void killAllForExecutable(const char* path)
             if(stat(procpath, &st2) == 0) {
                 if(st.st_ino==st2.st_ino && st.st_dev==st2.st_dev) {
                     int ret = kill(pid, SIGKILL);
-                    //SYSLOG("killAllForExecutable(%d) %s -> %d", signal, path, ret);
+                    //SYSLOG("killAllForExecutable(%d) %s -> %d", sig, path, ret);
                 }
             }
         }
@@ -386,11 +398,11 @@ int spawn(const char* path, char*const* argv, char*const* envp, void(^pid_out)(p
     return -1;
 }
 
-int spawnBootstrap(char*const* argv, __strong NSString** stdOut, __strong NSString** stdErr)
+int spawn_bootstrap_binary(char*const* argv, __strong NSString** stdOut, __strong NSString** stdErr)
 {
     NSMutableArray* argArr = [[NSMutableArray alloc] init];
     for(int i=1; argv[i]; i++) [argArr addObject:[NSString stringWithUTF8String:argv[i]]];
-    SYSLOG("spawnBootstrap %s with %s", argv[0], argArr.debugDescription.UTF8String);
+    SYSLOG("spawn_bootstrap_binary %s with %s", argv[0], argArr.debugDescription.UTF8String);
     
     char **envc = envbuf_mutcopy(environ);
     
@@ -420,9 +432,9 @@ int spawnBootstrap(char*const* argv, __strong NSString** stdOut, __strong NSStri
     return retval;
 }
 
-int spawnRoot(NSString* path, NSArray* args, __strong NSString** stdOut, __strong NSString** stdErr)
+int spawn_root(NSString* path, NSArray* args, __strong NSString** stdOut, __strong NSString** stdErr)
 {
-    SYSLOG("spawnRoot %s with %s", path.fileSystemRepresentation, args.debugDescription.UTF8String);
+    SYSLOG("spawn_root %s with %s", path.fileSystemRepresentation, args.debugDescription.UTF8String);
     
     NSMutableArray* argsM = args.mutableCopy ?: [NSMutableArray new];
     [argsM insertObject:path atIndex:0];
@@ -477,38 +489,31 @@ bool checkpatchedexe()
 	return true;
 }
 
-/* pbi_flags values */
-#define PROC_FLAG_TRACED        2       /* process currently being traced, possibly by gdb */
+bool launchctl_support()
+{
+    static bool result = false;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        result = (access(jbroot("/basebin/.launchctl_support"), F_OK) == 0);
+    });
+    return result;
+}
+
 int requireJIT()
 {
 	static int result = -1;
 	
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-		int32_t opt[4] = {
-			CTL_KERN,
-			KERN_PROC,
-			KERN_PROC_PID,
-			getpid(),
-		};
-		struct kinfo_proc info={0};
-		size_t len = sizeof(struct kinfo_proc);
-		if(sysctl(opt, 4, &info, &len, NULL, 0) == 0) {
-			if((info.kp_proc.p_flag & P_TRACED) != 0) {
-				result = 0;
-				return;
-			}
+		if(proc_traced(getpid())) {
+		    result = 0;
+		    return;
 		}
-		
-		struct proc_bsdinfo procInfo={0};
-		if (proc_pidinfo(getpid(), PROC_PIDTBSDINFO, 0, &procInfo, sizeof(procInfo)) == sizeof(procInfo)) {
-			if((procInfo.pbi_flags & PROC_FLAG_TRACED) != 0) {
-				result = 0;
-				return;
-			}
-		}
-		
-		result = bsd_enableJIT();
+        if(launchctl_support()) {
+            result = jbdProcessEnableJIT(getpid(), false);
+        } else {
+		    result = bsd_enableJIT();
+        }
 	});
 	return result;
 }
@@ -967,7 +972,8 @@ void unsandbox(const char* sbtoken)
 	strcpy(extensionsCopy, sbtoken);
 	char *extensionToken = strtok(extensionsCopy, "|");
 	while (extensionToken != NULL) {
-		sandbox_extension_consume(extensionToken);
+		int ret = sandbox_extension_consume(extensionToken);
+        // SYSLOG("unsandbox: consume %s -> %d", extensionToken, ret);
 		extensionToken = strtok(NULL, "|");
 	}
 }
@@ -1059,4 +1065,27 @@ const char* generate_sandbox_extensions(bool ext)
     [extensionString appendString:[NSString stringWithUTF8String:sandbox_extension_issue_mach("com.apple.security.exception.mach-lookup.global-name", service_name, 0, 0)]];
 
     return strdup(extensionString.UTF8String);
+}
+
+int roothide_config_set_blacklist_enable(bool enabled)
+{
+    NSString* roothideDir = jbroot(@"/var/mobile/Library/RootHide");
+    if(![NSFileManager.defaultManager fileExistsAtPath:roothideDir]) {
+        NSDictionary* attr = @{NSFilePosixPermissions:@(0755), NSFileOwnerAccountID:@(501), NSFileGroupOwnerAccountID:@(501)};
+        if(![NSFileManager.defaultManager createDirectoryAtPath:roothideDir withIntermediateDirectories:YES attributes:attr error:nil])
+        {
+            SYSERR("Failed to create directory: %s", roothideDir.fileSystemRepresentation);
+            return -1;
+        }
+    }
+
+    NSString *configFilePath = jbroot(@"/var/mobile/Library/RootHide/RootHideConfig.plist");
+    NSMutableDictionary* defaults = [NSMutableDictionary dictionaryWithContentsOfFile:configFilePath];
+    if(!defaults) defaults = [[NSMutableDictionary alloc] init];
+    [defaults setValue:@(!enabled) forKey:@"blacklistDisabled"];
+    if(![defaults writeToFile:configFilePath atomically:YES]) {
+        SYSERR("Failed to write config file: %s", configFilePath.fileSystemRepresentation);
+        return -1;
+    }
+    return 0;
 }

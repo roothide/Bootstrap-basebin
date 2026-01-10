@@ -5,3 +5,7 @@ installdeb2
 common/lib/libcommon.a
 common/lib/prepare.a
 dyldhook/dyldhook
+/roothidehooks/packages
+entitlements/executables/debugserver.extra
+entitlements/executables/debugserver.strip
+entitlements/executables/lockdownd.extra

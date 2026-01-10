@@ -31,6 +31,8 @@ static void finish_process_trace(trace_data_t* trace_data, bool success)
 
     if(!success) {
         //we hosted the exec*ed process so we have to deal with it if patching failed
+        /* note: SIGSTOP on PT_DETACH doesn't work on processes
+         that was not really paused (PT_ATTACHEXC without exception port set). */
         ptrace(PT_DETACH, pid, NULL, SIGSTOP);
         kill(pid, SIGQUIT); //core dump
         kill(pid, SIGKILL);
@@ -80,7 +82,7 @@ static void* exception_server(void* arg)
             continue;
         }
 
-        arm_thread_state64_t threadState;
+        arm_thread_state64_t threadState={0};
         mach_msg_type_number_t threadStateCount = ARM_THREAD_STATE64_COUNT;
         thread_get_state(request->thread.name, ARM_THREAD_STATE64, (thread_state_t)&threadState, &threadStateCount);
 

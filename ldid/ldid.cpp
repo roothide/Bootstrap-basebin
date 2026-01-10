@@ -20,6 +20,8 @@
 **/
 /* }}} */
 
+const char* __strip_file = nullptr;
+
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
@@ -2270,6 +2272,70 @@ static void req(std::streambuf &buffer, uint8_t (&&data)[Size_]) {
     put(buffer, zeros, 3 - (Size_ + 3) % 4);
 }
 
+int _merger(plist_t target, plist_t source)
+{
+    if (!target || !source) {
+        return -1;
+    }
+    
+    plist_type target_type = plist_get_node_type(target);
+    plist_type source_type = plist_get_node_type(source);
+    
+    if (target_type != source_type) {
+        return -1;
+    }
+    
+    if (target_type == PLIST_DICT)
+    {
+        plist_dict_iter iter = NULL;
+        plist_dict_new_iter(source, &iter);
+        if (!iter) {
+            return -1;
+        }
+        
+        char *key = NULL;
+        plist_t src_val = NULL;
+        
+        while (1) {
+            plist_dict_next_item(source, iter, &key, &src_val);
+            if (!src_val) {
+                break;
+            }
+            
+            plist_t target_val = plist_dict_get_item(target, key);
+            plist_type src_val_type = plist_get_node_type(src_val);
+            
+            if (target_val) {
+                plist_type target_val_type = plist_get_node_type(target_val);
+                
+                if ((src_val_type == PLIST_DICT && target_val_type == PLIST_DICT) ||
+                    (src_val_type == PLIST_ARRAY && target_val_type == PLIST_ARRAY)) {
+                    assert(_merger(target_val, src_val) == 0);
+                } else {
+                    plist_dict_set_item(target, key, plist_copy(src_val));
+                }
+            } else {
+                plist_dict_set_item(target, key, plist_copy(src_val));
+            }
+            
+            free(key);
+            key = NULL;
+        }
+        
+        free(iter);
+        
+    } else if (target_type == PLIST_ARRAY) 
+    {
+        uint32_t source_size = plist_array_get_size(source);
+        for (uint32_t i = 0; i < source_size; i++) {
+            plist_t src_item = plist_array_get_item(source, i);
+            plist_array_append_item(target, plist_copy(src_item));
+        }
+    }
+    
+    return 0;
+}
+
 Hash Sign(const void *idata, size_t isize, std::streambuf &output, const std::string &identifier, const std::string &entitlements, bool merge, const std::string &requirements, const std::string &key, const Slots &slots, uint32_t flags, uint8_t platform, const Progress &progress) {
     Hash hash;
 
@@ -2361,6 +2427,7 @@ Hash Sign(const void *idata, size_t isize, std::streambuf &output, const std::st
                 exit(1);
             };
 
+/*
             plist_dict_iter iterator(NULL);
             plist_dict_new_iter(merging, &iterator);
             _scope({ free(iterator); });
@@ -2374,11 +2441,24 @@ Hash Sign(const void *idata, size_t isize, std::streambuf &output, const std::st
                 _scope({ free(key); });
                 plist_dict_set_item(combined, key, plist_copy(value));
             }
-
+            */
+           assert(_merger(combined, merging) == 0);
 
             plist_dict_remove_item(combined, "com.apple.private.skip-library-validation");
             plist_dict_remove_item(combined, "com.apple.private.cs.debugger");
             plist_dict_remove_item(combined, "dynamic-codesigning");
+
+            if(__strip_file != NULL)
+            {
+                Map strip;
+                strip.open(__strip_file, O_RDONLY, PROT_READ, MAP_PRIVATE);
+                auto strping(plist(strip));
+                for(int i=0; i<plist_array_get_size(strping); i++) {
+                    char *key(NULL);
+                    plist_get_string_val(plist_array_get_item(strping, i), &key);
+                    plist_dict_remove_item(combined, key);
+                }
+            }
 
 
             baton.derformat_ = der(combined);
@@ -3404,6 +3484,9 @@ int main(int argc, char *argv[]) {
     for (int argi(1); argi != argc; ++argi)
         if (argv[argi][0] != '-')
             files.push_back(argv[argi]);
+        else if (strncmp(argv[argi], "--strip=", 8) == 0) {
+            __strip_file = argv[argi] + 8;
+        }
         else if (strcmp(argv[argi], "-arch") == 0) {
             bool foundarch = false;
             flag_A = true;

@@ -22,5 +22,11 @@ after-all::
 	cp $(THEOS_OBJ_DIR)/bsctl ../.build/
 	cp -a ./layout/basebin/LaunchDaemons ../.build/
 
+before-package::
+	cp -a ../entitlements $(THEOS_STAGING_DIR)/basebin/bsctl.entitlements
+
+after-install::
+	install.exec "rm -rf /basebin/entitlements && mv /basebin/bsctl.entitlements /basebin/entitlements"
+	
 clean::
 	rm -rf ./packages/*

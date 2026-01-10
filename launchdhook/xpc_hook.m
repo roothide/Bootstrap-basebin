@@ -144,7 +144,7 @@ void check_usreboot_msg(xpc_object_t xmsg)
 
 	if (getpid() != 1)
 	{
-		FileLogError("usereboot message not from launchd?");
+		FileLogError("usreboot message not from launchd?");
 		return;
 	}
 
@@ -154,9 +154,9 @@ void check_usreboot_msg(xpc_object_t xmsg)
 	uint32_t csflags = 0;
 	csops(audit_token_to_pid(clientToken), CS_OPS_STATUS, &csflags, sizeof(csflags));
 
-	if ((csflags & CS_PLATFORM_BINARY) == 0)
+	if ((csflags & CS_PLATFORM_BINARY)==0 && audit_token_to_euid(clientToken) != 0)
 	{
-		FileLogError("usereboot message not from platform process?");
+		FileLogError("usreboot message not from root/platform process? %d,%s", audit_token_to_pid(clientToken), proc_get_path(audit_token_to_pid(clientToken), NULL));
 		return;
 	}
 

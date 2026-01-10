@@ -11,7 +11,7 @@ LIBRARY_NAME = bootstrap
 
 bootstrap_FILES = $(wildcard *.c *.x *.m *.S)
 bootstrap_CFLAGS = -I../common -fobjc-arc -Wno-deprecated-declarations -Wno-unused-variable -Wno-unused-but-set-variable -Wno-unused-value -Wno-format-invalid-specifier
-bootstrap_LDFLAGS = -L../common/lib -lcommon -ldobby -lc++
+bootstrap_LDFLAGS = -L../common/lib -lcommon -ldobby -lc++ -lbsm
 bootstrap_INSTALL_PATH = /basebin
 
 include $(THEOS_MAKE_PATH)/library.mk

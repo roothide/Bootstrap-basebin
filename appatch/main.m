@@ -368,7 +368,7 @@ int signApp(NSString* appPath)
 			if (containerRequiredObj && [containerRequiredObj isKindOfClass:[NSNumber class]]) {
 				containerRequired = [(NSNumber *)containerRequiredObj boolValue];
 				if(containerRequired) {
-					NSLog(@"container %@ for %@", bundleId, filePath);
+					NSLog(@"force container %@ for %@", bundleId, bundleMainExecutablePath);
 					extraEntitlements[@"com.apple.private.security.container-required"] = bundleId;
 				}
 			}
@@ -388,7 +388,7 @@ int signApp(NSString* appPath)
 				}
 
 				if(!noContainer && !noSandbox) {
-					// NSLog(@"container %@ for %@", bundleId, filePath);
+					NSLog(@"force container %@ for %@", bundleId, bundleMainExecutablePath);
 					extraEntitlements[@"com.apple.private.security.container-required"] = bundleId;
 				}
 			}
@@ -397,16 +397,15 @@ int signApp(NSString* appPath)
 			if([NSFileManager.defaultManager fileExistsAtPath:specialEntitlementsPath])
 				extraEntitlements = [NSMutableDictionary dictionaryWithContentsOfFile:specialEntitlementsPath];
 
-			NSData *entitlementsXML = [NSPropertyListSerialization dataWithPropertyList:extraEntitlements format:NSPropertyListXMLFormat_v1_0 options:0 error:nil];
-			NSString* entitlementsString = [[NSString alloc] initWithData:entitlementsXML encoding:NSUTF8StringEncoding];
-
+			NSData* extraEntitlementsXML = [NSPropertyListSerialization dataWithPropertyList:extraEntitlements format:NSPropertyListXMLFormat_v1_0 options:0 error:nil];
+			NSString* extraEntitlementsString = [[NSString alloc] initWithData:extraEntitlementsXML encoding:NSUTF8StringEncoding];
 
 			NSString* stripEntitlements = nil;
 			NSString* stripEntitlementsPath = jbroot([NSString stringWithFormat:@"/basebin/entitlements/bundles/%@.strip", bundleId]);
 			if([NSFileManager.defaultManager fileExistsAtPath:stripEntitlementsPath])
 				stripEntitlements = [NSString stringWithContentsOfFile:stripEntitlementsPath encoding:NSUTF8StringEncoding error:nil];
 
-			assert(realstore(bundleMainExecutablePath.UTF8String, entitlementsString.UTF8String, stripEntitlements.UTF8String, appTeamID.UTF8String) == 0);
+			assert(realstore(bundleMainExecutablePath.UTF8String, extraEntitlementsString.UTF8String, stripEntitlements.UTF8String, appTeamID.UTF8String) == 0);
 			[signedMainExecutables addObject:bundleMainExecutablePath];
 		}
 	}

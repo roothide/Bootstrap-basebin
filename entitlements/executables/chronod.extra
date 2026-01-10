@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>get-task-allow</key>
+	<true/>
+	<key>platform-application</key>
+	<true/>
+	<key>com.apple.private.security.no-sandbox</key>
+	<true/>
+	<key>com.apple.private.security.storage.AppBundles</key>
+	<true/>
+	<key>com.apple.private.security.storage.AppDataContainers</key>
+	<true/>
+	<key>com.apple.security.exception.files.absolute-path.read-write</key>
+	<array>
+		<string>/private/var/mobile/Containers/</string>
+	</array>
+	<key>com.apple.security.exception.mach-lookup.global-name</key>
+	<array>
+		<string>com.apple.datamigrator</string>
+		<string>com.apple.Honeybee.event-notify</string>
+		<string>com.apple.mobile.usermanagerd.xpc</string>
+		<string>com.apple.SharedWebCredentials</string>
+		<string>com.apple.osanalytics.osanalyticshelper</string>
+	</array>
+	<key>com.apple.security.exception.sysctl.read-only</key>
+	<array>
+		<string>kern.bootargs</string>
+	</array>
+	<key>com.apple.security.ts.xpc-service-name</key>
+	<array>
+		<string>com.apple.intents.intents</string>
+	</array>
+	<key>com.apple.springboard.CFUserNotification</key>
+	<true/>
+	<key>com.apple.security.iokit-user-client-class</key>
+	<array>
+		<string>IOSurfaceRootUserClient</string>
+		<string>AGXDeviceUserClient</string>
+		<string>AGXSharedUserClient</string>
+		<string>AGXCommandQueue</string>
+		<string>AGXDevice</string>
+	</array>
+</dict>
+</plist>

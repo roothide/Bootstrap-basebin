@@ -533,7 +533,7 @@ void registerPath(NSString *path, BOOL forceSystem)
 
 	if(@available(iOS 16.0, *))
 	{
-		if(encryptedApp && backupVersion.intValue>=1)
+		if((encryptedApp || hasTrollstoreMarker(path.fileSystemRepresentation)) && backupVersion.intValue>=1)
 		{
 			noregister = YES;
 		}

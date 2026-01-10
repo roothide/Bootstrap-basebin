@@ -175,6 +175,8 @@ int new_xpc_receive_mach_msg(void *msg, void *a2, void *a3, void *a4, xpc_object
 	return r;
 }
 
+#define ROOTHIDE_START_SUSPENDED	0x2000 // _POSIX_SPAWN_ALLOW_DATA_EXEC(0x2000) only used in DEBUG/DEVELOPMENT kernel
+
 int (*orig_posix_spawn)(pid_t *restrict pidp, const char *restrict path, const posix_spawn_file_actions_t *restrict file_actions, posix_spawnattr_t *restrict attrp, char *const argv[restrict], char *const envp[restrict]) = posix_spawn;
 int orig_posix_spawn_wrapper(pid_t *restrict pidp, const char *restrict path, const posix_spawn_file_actions_t *restrict file_actions, posix_spawnattr_t *restrict attrp, char *const argv[restrict], char *const envp[restrict])
 {
@@ -190,11 +192,20 @@ int orig_posix_spawn_wrapper(pid_t *restrict pidp, const char *restrict path, co
 
 	pid_t pid = 0;
 
-	crashreporter_pause();
+	posix_spawnattr_t attr=NULL;
+	if(!attrp) {
+		posix_spawnattr_init(&attr);
+		attrp = &attr;
+	}
+	
+	posix_spawnattr_setexceptionports_np(attrp, EXC_MASK_ALL, MACH_PORT_NULL, 0, 0);
+	// int key = crashreporter_pause();
 	int ret = orig_posix_spawn(&pid, path, file_actions, attrp, argv, envp);
-	crashreporter_resume();
+	// crashreporter_resume(key);
 
 	FileLogDebug("posix_spawn(%s) ret=%d pid=%d", path, ret, pid);
+
+	if(attr) posix_spawnattr_destroy(&attr);
 
 	if(pidp) *pidp = pid;
 	return ret;
@@ -243,10 +254,23 @@ int new_posix_spawn(pid_t *restrict pidp, const char *restrict path, const posix
 		}
 	}
 
+	bool should_patch = false;
 	bool is_app_path = false;
 	bool is_tweaked_app = false;
 	const char* newpath = NULL;
 	const char* insertlib = NULL;
+
+	// if(strcmp(path, "/usr/libexec/debugserver") == 0)
+	// {
+	// 	const char* mypath = jbroot("/usr/bin/xcodeanydebug/debugserver");
+	// 	if(access(mypath, F_OK)==0) {
+	// 		newpath = strdup(mypath);
+
+	// 		if (__builtin_available(iOS 16.0, *)) {
+	// 			posix_spawnattr_set_launch_type_np(attrp, 0);
+	// 		}
+	// 	}
+	// }
 
 	if(isRemovableBundlePath(path))
 	{
@@ -293,6 +317,10 @@ int new_posix_spawn(pid_t *restrict pidp, const char *restrict path, const posix
 
 		if(isSubPathOf(resigned_path, jbroot("/.sysroot/")))
 		{
+			if(strcmp(path, "/usr/libexec/xpcproxy") != 0) {
+				should_patch = true;
+			}
+
 			newpath = strdup(resigned_path);
 
 			insertlib = strdup(jbroot("/basebin/bootstrap.dylib"));
@@ -317,6 +345,10 @@ int new_posix_spawn(pid_t *restrict pidp, const char *restrict path, const posix
 		}
 	}
 
+	pid_t pid = 0;
+	if(!pidp) pidp = &pid;
+
+	volatile pid_t* old_pidp = pidp;
 	volatile pid_t* blacklistedPidp = NULL;
 	if(is_app_path && isBlacklistedPath(path))
 	{
@@ -330,11 +362,31 @@ int new_posix_spawn(pid_t *restrict pidp, const char *restrict path, const posix
 		envbuf_unsetenv(&envc, "_MSSafeMode");
 	}
 
+	short flags = 0;
+	posix_spawnattr_getflags(attrp, &flags);
+
+	int proctype = 0;
+	posix_spawnattr_getprocesstype_np(attrp, &proctype);
+
+	bool should_suspend = (proctype != POSIX_SPAWN_PROC_TYPE_DRIVER);
+	bool should_resume = should_suspend && (flags & POSIX_SPAWN_START_SUSPENDED)==0;
+
+	if(should_patch)
+	{
+		if (should_suspend) {
+			short newflags = flags | POSIX_SPAWN_START_SUSPENDED;
+			if(proc_debugged(getpid())) {
+				newflags |= ROOTHIDE_START_SUSPENDED;
+			}
+			posix_spawnattr_setflags(attrp, newflags);
+		}
+	}
+
 	int ret = orig_posix_spawn_wrapper(pidp, newpath ?: path, file_actions, attrp, argv, envc);
 
 	if(blacklistedPidp)
 	{
-		pid_t pid = *blacklistedPidp;
+		pidp = old_pidp;
 		if(pidp) *pidp = *blacklistedPidp;
 
 		commitBlacklistProcessId(blacklistedPidp); // will release blacklistedPidp
@@ -362,6 +414,21 @@ int new_posix_spawn(pid_t *restrict pidp, const char *restrict path, const posix
 		}
 
 		free(original_path);
+	}
+
+	if(should_patch)
+	{
+		pid_t pid = *pidp;
+		if(ret == 0 && pid > 0) {
+			if (should_suspend) {
+				if(jbdSpawnPatchChild(pid, should_resume) != 0) { // jdb fault? kill
+					//just kill it instead of letting it hang forever, and the requester decides what to do later
+					kill(pid, SIGQUIT); //core dump
+					kill(pid, SIGKILL);
+					return 202;
+				}
+			}
+		}
 	}
 
 	return ret;
@@ -394,8 +461,17 @@ int __posix_spawn_hook(pid_t *restrict pidp, const char *restrict path, struct _
 		short flags = 0;
 		posix_spawnattr_t attrp = &desc->attrp;
 		posix_spawnattr_getflags(attrp, &flags);
-		if((flags & POSIX_SPAWN_START_SUSPENDED) != 0) {
-			jbdProcessEnableJIT(pid, false);
+
+		if((flags&ROOTHIDE_START_SUSPENDED) != 0)
+			posix_spawnattr_setflags(&(desc->attrp), flags & ~ROOTHIDE_START_SUSPENDED);
+
+		if((flags & POSIX_SPAWN_START_SUSPENDED) != 0 && (flags & ROOTHIDE_START_SUSPENDED) == 0) {
+			uint32_t csflags = 0;
+			int csret=csops(pid, CS_OPS_STATUS, &csflags, sizeof(csflags));
+			//launchd may spawn non-daemon processes with POSIX_SPAWN_START_SUSPENDED at early boot
+			if(csret==0 && (csflags & CS_PLATFORM_BINARY)==0) {
+				jbdProcessEnableJIT(pid, true);
+			}
 		}
 	}
 
@@ -411,12 +487,17 @@ __attribute__((constructor)) static void initializer(void)
 	enableCommLog(FileLogDebugFunction, FileLogErrorFunction);
 #endif
 
-	ptrace(PT_TRACE_ME, 0, 0, 0);
-	ptrace(PT_SIGEXC, 0, 0, 0);
+	FileLogDebug("launchdhook debugged=%d traced=%d", proc_debugged(getpid()), proc_traced(getpid()));
+	if(access(jbroot("/usr/sbin/frida-server"), F_OK)==0)
+	{
+		ptrace(PT_TRACE_ME, 0, 0, 0);
+		ptrace(PT_SIGEXC, 0, 0, 0);
+		FileLogDebug("launchdhook debugged=%d traced=%d", proc_debugged(getpid()), proc_traced(getpid()));
+	}
 
 	crashreporter_start();
 
-	if(proc_traced(getpid())) {
+	if(proc_debugged(getpid())) {
 		DobbyHook((void*)__posix_spawn, (void*)__posix_spawn_hook, (void**)&__posix_spawn_hook_orig);
 	}
 
@@ -427,14 +508,16 @@ __attribute__((constructor)) static void initializer(void)
 		remove("/var/mobile/Library/Preferences/com.apple.NanoRegistry.NRLaunchNotificationController.volatile.plist");
 	}
 
-    ASSERT([[NSString new] writeToFile:jbroot(@"/basebin/.launchctl_support") atomically:YES encoding:NSUTF8StringEncoding error:nil]);
+	loadAppStoredIdentifiers();
 
 	g_sandbox_extensions = generate_sandbox_extensions(false);
 	g_sandbox_extensions_ext = generate_sandbox_extensions(true);
 
-	loadAppStoredIdentifiers();
+	ASSERT(roothide_config_set_blacklist_enable(true) == 0);
 	
-	assert(initJailbreakd(jbserver_received_xpc_message) == 0);
+	ASSERT(initJailbreakd(jbserver_received_xpc_message) == 0);
+
+    ASSERT([[NSString new] writeToFile:jbroot(@"/basebin/.launchctl_support") atomically:YES encoding:NSUTF8StringEncoding error:nil]);
 
 	FileLogDebug("launchdhook initialized");
 }

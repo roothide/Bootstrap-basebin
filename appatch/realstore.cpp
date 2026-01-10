@@ -289,8 +289,119 @@ static plist_t plist(const std::string &data) {
     return plist;
 }
 
+int _merger(plist_t target, plist_t source)
+{
+    if (!target || !source) {
+        return -1;
+    }
+    
+    plist_type target_type = plist_get_node_type(target);
+    plist_type source_type = plist_get_node_type(source);
+    
+    if (target_type != source_type) {
+        return -1;
+    }
+    
+    if (target_type == PLIST_DICT)
+    {
+        plist_dict_iter iter = NULL;
+        plist_dict_new_iter(source, &iter);
+        if (!iter) {
+            return -1;
+        }
+        
+        char *key = NULL;
+        plist_t src_val = NULL;
+        
+        while (1) {
+            plist_dict_next_item(source, iter, &key, &src_val);
+            if (!src_val) {
+                break;
+            }
+            
+            plist_t target_val = plist_dict_get_item(target, key);
+            plist_type src_val_type = plist_get_node_type(src_val);
+            
+            if (target_val) {
+                plist_type target_val_type = plist_get_node_type(target_val);
+                
+                if ((src_val_type == PLIST_DICT && target_val_type == PLIST_DICT) ||
+                    (src_val_type == PLIST_ARRAY && target_val_type == PLIST_ARRAY)) {
+                    assert(_merger(target_val, src_val) == 0);
+                } else {
+                    plist_dict_set_item(target, key, plist_copy(src_val));
+                }
+            } else {
+                plist_dict_set_item(target, key, plist_copy(src_val));
+            }
+            
+            free(key);
+            key = NULL;
+        }
+        
+        free(iter);
+        
+    } else if (target_type == PLIST_ARRAY) 
+    {
+        uint32_t source_size = plist_array_get_size(source);
+        for (uint32_t i = 0; i < source_size; i++) {
+            plist_t src_item = plist_array_get_item(source, i);
+            plist_array_append_item(target, plist_copy(src_item));
+        }
+    }
+    
+    return 0;
+}
 
+struct Baton {
+    std::string entitlements_;
+    std::string derformat_;
+};
 
+Baton merge_entitlements(std::string entitlements, const char* extra, const char* strip)
+{
+    auto combined = plist(entitlements);
+
+    _scope({ plist_free(combined); });
+    if (plist_get_node_type(combined) != PLIST_DICT) {
+        fprintf(stderr, "ldid: Existing entitlements are in wrong format\n");
+        exit(1);
+    };
+
+    auto merging(plist(extra));
+
+    _scope({ plist_free(merging); });
+    if (plist_get_node_type(merging) != PLIST_DICT) {
+        fprintf(stderr, "ldid: Entitlements need a root key of dict\n");
+        exit(1);
+    };
+
+    assert(_merger(combined, merging) == 0);
+
+    if(strip) {
+        auto strping(plist(strip));
+        for(int i=0; i<plist_array_get_size(strping); i++) {
+            char *key(NULL);
+            plist_get_string_val(plist_array_get_item(strping, i), &key);
+            plist_dict_remove_item(combined, key);
+        }
+    }
+
+    plist_dict_remove_item(combined, "com.apple.private.skip-library-validation");
+    plist_dict_remove_item(combined, "com.apple.private.cs.debugger");
+    plist_dict_remove_item(combined, "dynamic-codesigning");
+
+    uint32_t size;
+    char *xml(NULL);
+    plist_to_xml(combined, &xml, &size);
+    _scope({ free(xml); });
+
+    Baton baton;
+    baton.derformat_ = der(combined);
+    baton.entitlements_.assign(xml, size);
+
+    return baton;
+}
 
 
 extern "C" {
@@ -514,7 +625,7 @@ int reset_blob(CS_DecodedSuperBlob *decodedSuperblob, CS_DecodedBlob *realCodeDi
     return 0;
 }
 
-int apply_coretrust_bypass(const char *machoPath, const char* extraEntitlements, const char* strip_entitlements, const char* teamID)
+int apply_coretrust_bypass(const char *machoPath, const char* extra_entitlements, const char* strip_entitlements, const char* teamID)
 {
     MachO *macho = macho_init_for_writing(machoPath);
     if (!macho) return -1;
@@ -614,7 +725,7 @@ int apply_coretrust_bypass(const char *machoPath, const char* extraEntitlements,
     // Set flags to 0 to remove any problematic flags (such as the 'adhoc' flag in bit 2)
     csd_code_directory_set_flags(realCodeDirBlob, 0);
 
-    if(extraEntitlements)
+    if(extra_entitlements)
     {
         CS_DecodedBlob *entBlob = csd_superblob_find_blob(decodedSuperblob, CSSLOT_ENTITLEMENTS, NULL);
         CS_DecodedBlob *derBlob = csd_superblob_find_blob(decodedSuperblob, CSSLOT_DER_ENTITLEMENTS, NULL);
@@ -650,12 +761,7 @@ int apply_coretrust_bypass(const char *machoPath, const char* extraEntitlements,
         
         if(macho->machHeader.filetype == MH_EXECUTE) 
         {
-            struct Baton {
-                std::string entitlements_;
-                std::string derformat_;
-            } baton;
-
-            std::string entitlements_;
+            std::string entitlements;
 
             if(entBlob) {
 
@@ -664,66 +770,12 @@ int apply_coretrust_bypass(const char *machoPath, const char* extraEntitlements,
                 memset(blob, 0, blobsize);
                 memory_stream_read(entBlob->stream, 0, blobsize, blob);
 
-                entitlements_.assign(blob->data, blobsize-sizeof(CS_GenericBlob));
+                entitlements.assign(blob->data, blobsize-sizeof(CS_GenericBlob));
 
                 free(blob);
             }
 
-            auto combined = plist(entitlements_);
-
-            _scope({ plist_free(combined); });
-            if (plist_get_node_type(combined) != PLIST_DICT) {
-                fprintf(stderr, "ldid: Existing entitlements are in wrong format\n");
-                exit(1);
-            };
-
-            auto merging(plist(extraEntitlements));
-
-            _scope({ plist_free(merging); });
-            if (plist_get_node_type(merging) != PLIST_DICT) {
-                fprintf(stderr, "ldid: Entitlements need a root key of dict\n");
-                exit(1);
-            };
-
-            plist_dict_iter iterator(NULL);
-            plist_dict_new_iter(merging, &iterator);
-            _scope({ free(iterator); });
-
-            for (;;) {
-                char *key(NULL);
-                plist_t value(NULL);
-                plist_dict_next_item(merging, iterator, &key, &value);
-                if (key == NULL)
-                    break;
-                _scope({ free(key); });
-                plist_dict_set_item(combined, key, plist_copy(value));
-            }
-
-
-            if(strip_entitlements) {
-                auto strping(plist(strip_entitlements));
-                for(int i=0; i<plist_array_get_size(strping); i++) {
-                    char *key(NULL);
-                    plist_get_string_val(plist_array_get_item(strping, i), &key);
-                    plist_dict_remove_item(combined, key);
-                }
-            }
-
-
-            plist_dict_remove_item(combined, "com.apple.private.skip-library-validation");
-            plist_dict_remove_item(combined, "com.apple.private.cs.debugger");
-            plist_dict_remove_item(combined, "dynamic-codesigning");
-
-
-            baton.derformat_ = der(combined);
-
-            char *xml(NULL);
-            uint32_t size;
-            plist_to_xml(combined, &xml, &size);
-            _scope({ free(xml); });
-
-            baton.entitlements_.assign(xml, size);
-
+            Baton baton = merge_entitlements(entitlements, extra_entitlements, strip_entitlements);
 
             reset_blob(decodedSuperblob, realCodeDirBlob, CSSLOT_ENTITLEMENTS, (void*)baton.entitlements_.data(), baton.entitlements_.size());
             //have to update CodeDir...

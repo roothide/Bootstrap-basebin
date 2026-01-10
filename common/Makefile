@@ -14,6 +14,7 @@ $(LIBRARY_NAME)_INSTALL=0 # do not copy to theos/lib
 
 libcommon_FILES = $(wildcard *.c *.m *.mm *.cpp)
 libcommon_CFLAGS = -I. -DFISHHOOK_EXPORT -fobjc-arc -Wno-unused-variable -Wno-unused-but-set-variable
+libcommon_CCFLAGS = -std=c++11
 libcommon_LFGLAGS = -L.
 libcommon_LINKAGE_TYPE = static
 libcommon_INSTALL_PATH = /basebin

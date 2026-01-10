@@ -29,7 +29,8 @@ void fixsuid();
 
 extern struct mach_header_64* _dyld_get_prog_image_header();
 extern intptr_t _dyld_get_image_slide(struct mach_header_64* mh);
-
+extern const char* dyld_image_path_containing_address(const void* addr);
+extern const struct mach_header* dyld_image_header_containing_address(const void* addr);
 
 extern int posix_spawn_hook(pid_t *restrict pid, const char *restrict file,
 					   const posix_spawn_file_actions_t *restrict file_actions,

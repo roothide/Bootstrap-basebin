@@ -92,7 +92,7 @@ static void __attribute__((__constructor__)) preload()
 	{
 		if(check_executable_encrypted())
 		{
-			assert(requireJIT()==0);
+			ASSERT(requireJIT()==0);
 
 			void init_bypassDyldLibValidation();
 			init_bypassDyldLibValidation();
@@ -100,7 +100,7 @@ static void __attribute__((__constructor__)) preload()
 		
 		if(!dlopen("@executable_path/.jbroot/basebin/bootstrap.dylib", RTLD_NOW)) {
 			NSLog(@"dlopen failed: %s", dlerror());
-			assert(checkpatchedexe());
+			ASSERT(checkpatchedexe());
 		}
 	}
 

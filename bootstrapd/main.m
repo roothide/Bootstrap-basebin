@@ -19,7 +19,7 @@ int handleRequest(int conn, pid_t pid, int reqId, NSDictionary* msg)
 		{
 			int result = 0;
 			if(pid > 0) {
-				result = proc_enable_jit(pid, true);
+				result = proc_enable_jit(pid, false);
 			} else {
 				result = -1;
 			}
@@ -33,7 +33,7 @@ int handleRequest(int conn, pid_t pid, int reqId, NSDictionary* msg)
 			pid_t _pid = [msg[@"pid"] intValue];
 			SYSLOG("BSD_REQ_ENABLE_JIT2 %d -> %d", pid, _pid);
 			if(_pid > 0) {
-				result = proc_enable_jit(_pid, true);
+				result = proc_enable_jit(_pid, false);
 			} else {
 				result = -1;
 			}
@@ -162,6 +162,9 @@ int start_run_server()
 	} else {
 		ASSERT(_daemon(0,0)==0);
 	}
+
+	void varclean_init(void);
+	 varclean_init();
 
 	g_sandbox_extensions = generate_sandbox_extensions(false);
 	g_sandbox_extensions_ext = generate_sandbox_extensions(true);

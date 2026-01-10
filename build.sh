@@ -72,13 +72,14 @@ cd jailbreakd
 make clean all
 cd -
 
-# cd roothidehooks
-# make clean all
-# cd -
+cd roothidehooks
+make clean all
+cd -
 
 cp ./test.sh .build/
 cp ./rebuildApps.sh .build/
 cp -a ./entitlements .build/
+cp -a ./fallback .build/
 
 echo "**** basebin build successful ****"
 

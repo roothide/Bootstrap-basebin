@@ -23,8 +23,8 @@ clean::
 	rm -rf ./packages/*
 	
 before-package::
-	cp -a ../entitlements $(THEOS_STAGING_DIR)/basebin/
+	cp -a ../entitlements $(THEOS_STAGING_DIR)/basebin/appatch.entitlements
 	cp -a ../rebuildApps.sh $(THEOS_STAGING_DIR)/DEBIAN/postinst
 	
-# after-install::
-# 	install.exec '$(THEOS_PACKAGE_INSTALL_PREFIX)/basebin/$(TOOL_NAME)' /Applications/MobileSafari.app
+after-install::
+	install.exec "rm -rf /basebin/entitlements; mv /basebin/appatch.entitlements /basebin/entitlements"

@@ -26,17 +26,20 @@ extern int posix_spawnattr_setexceptionports_np(posix_spawnattr_t *__restrict, e
 int spawn(const char* path, char*const* argv, char*const* envp, void(^pid_out)(pid_t), void(^std_out)(char*,int), void(^err_out)(char*,int));
 
 #ifdef __OBJC__
-int spawnBootstrap(char*const* argv, __strong NSString** stdOut, __strong NSString** stdErr);
-int spawnRoot(NSString* path, NSArray* args, __strong NSString** stdOut, __strong NSString** stdErr);
+int spawn_root(NSString* path, NSArray* args, __strong NSString** stdOut, __strong NSString** stdErr);
+int spawn_bootstrap_binary(char*const* argv, __strong NSString** stdOut, __strong NSString** stdErr);
 #endif
 
 pid_t get_real_ppid();
 
 bool checkpatchedexe();
 
+bool launchctl_support();
+
 int requireJIT();
 
 bool proc_traced(pid_t pid);
+bool proc_debugged(pid_t pid);
 int proc_get_status(int pid);
 pid_t proc_get_ppid(pid_t pid);
 int proc_get_pidversion(pid_t pid);
@@ -45,7 +48,7 @@ char* proc_get_path(pid_t pid, char buffer[PATH_MAX]);
 char* proc_get_identifier(pid_t pid, char buffer[255]);
 
 int proc_hook_dyld(pid_t pid);
-int proc_enable_jit(pid_t pid, bool resume);
+int proc_enable_jit(pid_t pid, bool suspended);
 
 bool is_app_coalition(); // (inherit)
 
@@ -70,6 +73,15 @@ int resolvePath(const char *file, const char *searchPath, int (^attemptHandler)(
 bool hasTrollstoreMarker(const char* path);
 bool hasTrollstoreLiteMarker(const char* path);
 
+bool isBlacklistedApp(const char* identifier);
+bool isBlacklistedPath(const char* path);
+
+bool isBlacklistedToken(audit_token_t* token);
+bool isBlacklistedPid(pid_t pid);
+
+pid_t* allocBlacklistProcessId();
+void commitBlacklistProcessId(pid_t* pidp);
+
 void loadAppStoredIdentifiers();
 
 bool is_safe_bundle_identifier(const char* identifier);
@@ -77,6 +89,8 @@ bool is_sensitive_app_identifier(const char* identifier);
 bool is_apple_internal_identifier(const char* identifier);
 
 bool machoGetInfo(const char* path, bool* isMachO, bool* isLibrary);
+
+int roothide_config_set_blacklist_enable(bool enabled);
 
 #define APPLE_INTERNAL_IDENTIFIERS @[\
     @"com.apple.atrun",\

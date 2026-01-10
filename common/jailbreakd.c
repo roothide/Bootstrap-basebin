@@ -412,12 +412,12 @@ int jbdExecTraceCancel(const char* execfile)
 	return result;
 }
 
-int jbdProcessEnableJIT(int pid, bool resume)
+int jbdProcessEnableJIT(int pid, bool suspended)
 {
 	xpc_object_t message = xpc_dictionary_create_empty();
 	xpc_dictionary_set_uint64(message, "id", JBD_MSG_PROCESS_ENABLE_JIT);
 	xpc_dictionary_set_int64(message, "pid", pid);
-	xpc_dictionary_set_bool(message, "resume", resume);
+	xpc_dictionary_set_bool(message, "suspended", suspended);
 	xpc_object_t reply = jailbreakdXpcRequest(message);
 	xpc_release(message);
 	int64_t result = -1;

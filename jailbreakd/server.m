@@ -47,11 +47,11 @@ void jailbreakd_received_message(mach_port_t port)
 				case JBD_MSG_PROCESS_ENABLE_JIT: {
 					int64_t result = -1;
 					pid_t pid = xpc_dictionary_get_int64(message, "pid");
-					bool resume = xpc_dictionary_get_bool(message, "resume");
+					bool suspended = xpc_dictionary_get_bool(message, "suspended");
 					pid_t ppid = proc_get_ppid(pid);
-					FileLogDebug("process enable JIT: client pid=%d, target pid=%d, target's parent pid=%d, target proc=%s", clientPid, pid, ppid, proc_get_path(pid,NULL));
+					FileLogDebug("process enable JIT(suspended=%d): client pid=%d, target pid=%d, target's parent pid=%d, target proc=%s", suspended, clientPid, pid, ppid, proc_get_path(pid,NULL));
 					if(pid==clientPid || ppid==clientPid) {
-						result = proc_enable_jit(pid, resume);
+						result = proc_enable_jit(pid, suspended);
 						if(result != 0) {
 							FileLogError("enable JIT failed: %d", pid);
 						}

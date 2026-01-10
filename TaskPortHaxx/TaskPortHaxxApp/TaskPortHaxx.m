@@ -300,7 +300,7 @@ if(IS_ARM64E_DEVICE()) {
     ret = (int)RemoteArbCall(self.ubProc, ptrace, PT_ATTACHEXC, self.dtProc.pid, 0, 0);
     printf("ptrace(PT_ATTACHEXC) returned %d\n", ret);
     assert(ret == 0);
-    //PT_ATTACHEXC will make TaskPortHaxx proxy to continue running as its exception port is not set
+    //PT_ATTACHEXC on a suspended process will resume it if its exception port is not set.
     // kr = (int)RemoteArbCall(self.ubProc, ptrace, PT_CONTINUE, self.dtProc.pid, 1, 0);
     // printf("ptrace(PT_CONTINUE) returned %d\n", ret);
     // assert(ret == 0);
