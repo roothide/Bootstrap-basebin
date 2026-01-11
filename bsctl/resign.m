@@ -9,6 +9,12 @@
 int ResignSystemExecutables()
 {
     NSFileManager* fm = NSFileManager.defaultManager;
+
+    NSArray* ResignList = [NSArray arrayWithContentsOfFile:jbroot(@"/basebin/resignList.plist")];
+    if(!ResignList) {
+        LOG("Unable to load resign list\n");
+        return -1;
+    }
     
     if([fm fileExistsAtPath:RESIGNED_SYSROOT_PATH]) {
         ASSERT([fm removeItemAtPath:RESIGNED_SYSROOT_PATH error:nil]);
@@ -17,7 +23,7 @@ int ResignSystemExecutables()
     for(NSString* sourcePath in ResignList)
     {
         if(![fm fileExistsAtPath:sourcePath]) {
-            LOG("Skip resign %s\n", sourcePath.fileSystemRepresentation);
+            LOG("%s Not Found, Skip...\n", sourcePath.fileSystemRepresentation);
             continue;
         }
         

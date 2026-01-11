@@ -78,6 +78,7 @@ cd -
 
 cp ./test.sh .build/
 cp ./rebuildApps.sh .build/
+cp ./resignList.plist .build/
 cp -a ./entitlements .build/
 cp -a ./fallback .build/
 

@@ -1,4 +1,5 @@
 #!/bin/sh
 
+plutil -xml /basebin/resignList.plist
 plutil -xml /basebin/LaunchDaemons/com.roothide.bootstrap.startup.plist
 sed -i "s|@JBROOT@|$(jbroot)|g" /basebin/LaunchDaemons/com.roothide.bootstrap.startup.plist

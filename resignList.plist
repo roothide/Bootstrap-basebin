@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<array>
+    <!-- roothide required -->
+    <string>/sbin/launchd</string>
+    <string>/usr/libexec/xpcproxy</string>
+    <string>/System/Library/CoreServices/SpringBoard.app/SpringBoard</string>
+    <string>/usr/bin/powerlogHelperd</string>
+    <string>/usr/sbin/spindump</string>
+    <string>/usr/sbin/cfprefsd</string>
+    <string>/usr/libexec/lsd</string>
+    <string>/usr/libexec/transitd</string>
+    <!-- more daemons -->
+    <string>/usr/libexec/nfcd</string>
+    <string>/usr/libexec/replayd</string>
+    <string>/usr/libexec/audiomxd</string> <!-- ios17+only -->
+    <string>/usr/sbin/mediaserverd</string>
+    <string>/usr/libexec/backboardd</string>
+    <string>/usr/libexec/runningboardd</string>
+    <string>/usr/libexec/thermalmonitord</string>
+    <string>/Applications/MediaRemoteUI.app/MediaRemoteUI</string>
+    <string>/System/Library/PrivateFrameworks/Pasteboard.framework/Support/pasted</string>
+    <string>/System/Library/PrivateFrameworks/ChronoCore.framework/Support/chronod</string>
+    <string>/System/Library/PrivateFrameworks/TelephonyUtilities.framework/callservicesd</string>
+</array>
+</plist>

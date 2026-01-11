@@ -28,8 +28,9 @@
 #define RB_PANIC	0x800
 int reboot_np(int howto, const char *message); //only works in launchd
 
+#undef ABORT
 #define ABORT(...) do { \
-		char *message; \
+		char *message=NULL; \
 		asprintf(&message, __VA_ARGS__); \
 		reboot_np(RB_PANIC|RB_QUICK, message); \
 		free(message); \

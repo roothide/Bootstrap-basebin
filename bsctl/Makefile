@@ -24,6 +24,7 @@ after-all::
 
 before-package::
 	cp -a ../entitlements $(THEOS_STAGING_DIR)/basebin/bsctl.entitlements
+	cp -a ../resignList.plist $(THEOS_STAGING_DIR)/basebin/resignList.plist
 
 after-install::
 	install.exec "rm -rf /basebin/entitlements && mv /basebin/bsctl.entitlements /basebin/entitlements"
