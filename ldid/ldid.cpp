@@ -3486,6 +3486,7 @@ int main(int argc, char *argv[]) {
             files.push_back(argv[argi]);
         else if (strncmp(argv[argi], "--strip=", 8) == 0) {
             __strip_file = argv[argi] + 8;
+            assert(__strip_file[0] != '\0');
         }
         else if (strcmp(argv[argi], "-arch") == 0) {
             bool foundarch = false;
@@ -3745,6 +3746,7 @@ int main(int argc, char *argv[]) {
                             if (mach_header.Swap(load_command->cmd) == LC_CODE_SIGNATURE)
                                 signature = reinterpret_cast<struct linkedit_data_command *>(load_command);
 
+                        if(!signature) continue; //fix for unsiged binaries
                         uint32_t data = mach_header.Swap(signature->dataoff);
 
                         uint8_t *top = reinterpret_cast<uint8_t *>(mach_header.GetBase());

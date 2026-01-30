@@ -8,6 +8,7 @@
 #include "dobby.h"
 
 NSArray* stockPrefsIdentifiers = @[
+    @"Apple Global Domain", //kCFPreferencesAnyApplication
     @".GlobalPreferences", //kCFPreferencesAnyApplication
     @".GlobalPreferences_m",
     @"bluetoothaudiod",
@@ -32,14 +33,34 @@ NSArray* stockPrefsIdentifiers = @[
     @"com.google.gmp.measurement",
 ];
 
-
 BOOL prefsRedirection(NSString** pidentifier, NSString** pcontainer)
 {
-    SYSLOG("prefsRedirection:%@ container=%@ bundleIdentifier=%@ homedir=%@", *pidentifier, *pcontainer, NSBundle.mainBundle.bundleIdentifier, NSHomeDirectory());
+    SYSLOG("prefsRedirection:%@ container=%@ bundleIdentifier=%@ homedir=%@ sandboxed=%d/containerized=%d", *pidentifier, *pcontainer, NSBundle.mainBundle.bundleIdentifier, NSHomeDirectory(), proc_is_sandboxed(), proc_is_containerized());
+    
+    uint64_t sandbox_preference_check_flags = SANDBOX_CHECK_NO_REPORT|SANDBOX_CHECK_ALLOW_APPROVAL|SANDBOX_FILTER_GLOBAL_NAME|SANDBOX_FILTER_APPLEEVENT_DESTINATION;
+
+    SYSLOG("user-preference sandbox pre check %@ read=%d write=%d", *pidentifier,
+        sandbox_check(getpid(), "user-preference-read", sandbox_preference_check_flags, (*pidentifier).UTF8String) == 0,
+        sandbox_check(getpid(), "user-preference-write", sandbox_preference_check_flags, (*pidentifier).UTF8String) == 0
+    );
+
+    //_CFPrefsGetCacheStringForBundleID
+    NSString* bundleIdentifier = NSBundle.mainBundle.bundleIdentifier;
+    if(!bundleIdentifier) {
+        bundleIdentifier = [@(g_executable_path) lastPathComponent];
+    }
+    if([bundleIdentifier hasSuffix:@".plist"]) {
+        bundleIdentifier = bundleIdentifier.stringByDeletingPathExtension;
+    }
 
     NSString* container = *pcontainer;
     NSString* identifier = *pidentifier;
 
+    if(!identifier) {
+        identifier = bundleIdentifier;
+    }
+
+    //Using kCFPreferencesAnyUser with a container is only allowed for System Containers
     if([identifier isEqualToString:(__bridge NSString*)kCFPreferencesAnyApplication]) {
         return NO;
     }
@@ -48,23 +69,11 @@ BOOL prefsRedirection(NSString** pidentifier, NSString** pcontainer)
         container = nil;
     }
 
-    NSString* bundleIdentifier = NSBundle.mainBundle.bundleIdentifier;
-    if(!bundleIdentifier) {
-        char executablePath[PATH_MAX]={0};
-        uint32_t bufsize=sizeof(executablePath);
-        ASSERT(_NSGetExecutablePath(executablePath, &bufsize) == 0);
-        
-        bundleIdentifier = [@(executablePath) lastPathComponent];
-    }
-    if([bundleIdentifier hasSuffix:@".plist"]) {
-        bundleIdentifier = bundleIdentifier.stringByDeletingPathExtension;
-    }
-
     NSFileManager* fm = NSFileManager.defaultManager;
 
     //check if is a absolute path first
-    if([identifier hasPrefix:@"/"]) {
-        
+    if([identifier hasPrefix:@"/"])
+    {    
         NSString *pattern = @"^((?:/private)?/var/\\w+)/Library/Preferences/(.+)";
         NSRegularExpression* regex = [NSRegularExpression regularExpressionWithPattern:pattern options:0 error:nil];
         NSTextCheckingResult* match = [regex firstMatchInString:identifier options:0 range:NSMakeRange(0, identifier.length)];
@@ -95,7 +104,8 @@ BOOL prefsRedirection(NSString** pidentifier, NSString** pcontainer)
         identifier = __identifier;
         container = jbroot(__container);
     }
-    else if(container) {
+    else if(container)
+    {
         NSString *pattern = @"^(?:/private)?/var/\\w+(?:/)?$";
         NSRegularExpression* regex = [NSRegularExpression regularExpressionWithPattern:pattern options:0 error:nil];
         NSTextCheckingResult* match = [regex firstMatchInString:container options:0 range:NSMakeRange(0, container.length)];
@@ -123,8 +133,8 @@ BOOL prefsRedirection(NSString** pidentifier, NSString** pcontainer)
 
         container = jbroot(container);
     }
-    else if(identifier) {
-        
+    else if(identifier)
+    {
         //check before stripping .plist suffix
         if([identifier isEqualToString:(__bridge NSString*)kCFPreferencesCurrentApplication]) {
             identifier = bundleIdentifier;
@@ -150,9 +160,8 @@ BOOL prefsRedirection(NSString** pidentifier, NSString** pcontainer)
                                 || [identifier hasPrefix:@"systemgroup.com.apple."]) )
             {
                 /* a sandbox process can also be able to read some built-in com.apple.* preferences
-                so we need to skip them if a removable system app is unsandboxed(enabled tweaks).
-                */
-                if (sandbox_check(getpid(), "process-fork", SANDBOX_CHECK_NO_REPORT, NULL) == 0)
+                    so we need to skip them if a removable system app is unsandboxed(enabled tweaks). */
+                if(!proc_is_containerized())
                 {
                     //Not very reliable but we don't seem to have any other better way to determine it
                     if([homeContainer hasPrefix:@"/var/mobile/Containers/"] || [homeContainer hasPrefix:@"/private/var/mobile/Containers/"]) {
@@ -160,13 +169,6 @@ BOOL prefsRedirection(NSString** pidentifier, NSString** pcontainer)
                             return NO;
                         }
                     } else {
-                        return NO;
-                    }
-                }
-                else
-                {
-                    uint64_t flags = SANDBOX_CHECK_NO_REPORT|SANDBOX_CHECK_ALLOW_APPROVAL|SANDBOX_FILTER_GLOBAL_NAME|SANDBOX_FILTER_APPLEEVENT_DESTINATION;
-                    if(sandbox_check(getpid(), "user-preference-read", flags, identifier.UTF8String) == 0) {
                         return NO;
                     }
                 }
@@ -184,15 +186,35 @@ BOOL prefsRedirection(NSString** pidentifier, NSString** pcontainer)
 
         container = homeContainer;
     }
-    else
-    {
-        identifier = bundleIdentifier;
-        container = NSHomeDirectory();
-    }
+
+    SYSLOG("user-preference sandbox post check %@ read=%d write=%d", identifier,
+        sandbox_check(getpid(), "user-preference-read", sandbox_preference_check_flags, identifier.UTF8String) == 0,
+        sandbox_check(getpid(), "user-preference-write", sandbox_preference_check_flags, identifier.UTF8String) == 0
+    );
 
     //cfprefsd may reject a non-sandbox apple app to read/write preferences with container=/var/mobile
+    //sandboxed but not containerized???
     if([container isEqualToString:@"/var/mobile"]) {
         return NO;
+    }
+
+    if(proc_is_sandboxed())
+    {
+        /*
+        sandbox_init*
+        <seatbelt-profiles>
+        <com.apple.private.sandbox.profile>
+        <com.apple.private.sandbox.profile:embedded>
+        <com.apple.private.security.container-required>
+        <com.apple.security.exception.shared-preference.read-only>
+        <com.apple.security.exception.shared-preference.read-write>
+        <com.apple.security.temporary-exception.shared-preference.read-only>
+        <com.apple.security.temporary-exception.shared-preference.read-write>
+        and more?
+        */
+        if(sandbox_check(getpid(), "user-preference-read", sandbox_preference_check_flags, identifier.UTF8String) == 0) {
+            return NO;
+        }
     }
 
     //migrating plist from previous versions
@@ -208,7 +230,7 @@ BOOL prefsRedirection(NSString** pidentifier, NSString** pcontainer)
         }
     }
 
-    SYSLOG("prefshook: prefs redirect to %@ : %@", identifier, container);
+    SYSLOG("prefsRedirection: redirect to %@ : %@", identifier, container);
     *pcontainer = container;
     *pidentifier = identifier;
     return YES;
@@ -221,7 +243,9 @@ void SynchronizePlist(NSString* identifier, NSString* container)
 {
     SYSLOG("SynchronizePlist: %@ : %@", identifier, container);
 
-    if (sandbox_check(getpid(), "process-fork", SANDBOX_CHECK_NO_REPORT, NULL) == 0)
+    NSString* plistDir = [NSString stringWithFormat:@"%@/Library/Preferences/", container];
+
+    if (sandbox_check(getpid(), "file-write-data", SANDBOX_FILTER_PATH | SANDBOX_CHECK_NO_REPORT, plistDir.fileSystemRepresentation) == 0)
     {
 
         NSString* plistPath = [NSString stringWithFormat:@"%@/Library/Preferences/%@.plist", container, identifier];
@@ -239,28 +263,6 @@ void SynchronizePlist(NSString* identifier, NSString* container)
             CFRelease(keyList);
         }
     }
-}
-
-
-#include <objc/runtime.h>
-void hook_class_method(Class clazz, SEL selector, void* replacement, void** old_ptr){
-    Method method = class_getClassMethod(clazz, selector);
-    if (method == NULL) {
-        SYSLOG("hook_class_method: method not found: %@ : %@", NSStringFromClass(clazz), NSStringFromSelector(selector));
-        return;
-    }
-    *old_ptr = (void*)method_getImplementation(method);
-    method_setImplementation(method, (IMP)replacement);
-}
-
-void hook_instance_method(Class clazz, SEL selector, void* replacement, void** old_ptr){
-    Method method = class_getInstanceMethod(clazz, selector);
-    if (method == NULL) {
-        SYSLOG("hook_instance_method: method not found: %@ : %@", NSStringFromClass(clazz), NSStringFromSelector(selector));
-        return;
-    }
-    *old_ptr = (void*)method_getImplementation(method);
-    method_setImplementation(method, (IMP)replacement);
 }
 
 NSUserDefaults* (*orig_NSUserDefaults__initWithSuiteName_container_)(id self, SEL _cmd, NSString* suiteName, NSURL* container);

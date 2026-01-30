@@ -1,5 +1,5 @@
 #include <private/bsm/audit.h>
-
+#include <kern_memorystatus.h>
 #include <sys/clonefile.h>
 #include <mach-o/dyld.h>
 #include <sys/stat.h>
@@ -159,6 +159,14 @@ xpc_object_t new_xpc_dictionary_get_value(xpc_object_t xdict, const char *key)
 	return origXvalue;
 }
 
+int (*oirg_memorystatus_control)(uint32_t command, int32_t pid, uint32_t flags, void *buffer, size_t buffersize) = memorystatus_control;
+int new_memorystatus_control(uint32_t command, int32_t pid, uint32_t flags, void *buffer, size_t buffersize)
+{
+    if (command == MEMORYSTATUS_CMD_SET_JETSAM_TASK_LIMIT) {
+        return 0;
+    }
+    return oirg_memorystatus_control(command, pid, flags, buffer, buffersize);
+}
 
 int jbserver_received_xpc_message(xpc_object_t xmsg);
 int xpc_receive_mach_msg(void *msg, void *a2, void *a3, void *a4, xpc_object_t *xOut);
@@ -342,6 +350,18 @@ int new_posix_spawn(pid_t *restrict pidp, const char *restrict path, const posix
 			envbuf_setenv(&envc, "DYLD_INSERT_LIBRARIES", newpreload, 1);
 		} else {
 			envbuf_setenv(&envc, "DYLD_INSERT_LIBRARIES", insertlib, 1);
+		}
+
+		uint8_t *attrStruct = *attrp;
+		if(attrStruct) {
+			int memlimit_active = *(int*)(attrStruct + POSIX_SPAWNATTR_OFF_MEMLIMIT_ACTIVE);
+			if (memlimit_active != -1) {
+				*(int*)(attrStruct + POSIX_SPAWNATTR_OFF_MEMLIMIT_ACTIVE) = memlimit_active * JETSAM_DEFAULT_MULTIPLIER;
+			}
+			int memlimit_inactive = *(int*)(attrStruct + POSIX_SPAWNATTR_OFF_MEMLIMIT_INACTIVE);
+			if (memlimit_inactive != -1) {
+				*(int*)(attrStruct + POSIX_SPAWNATTR_OFF_MEMLIMIT_INACTIVE) = memlimit_inactive * JETSAM_DEFAULT_MULTIPLIER;
+			}
 		}
 	}
 
@@ -536,3 +556,4 @@ DYLD_INTERPOSE(new_sandbox_check_by_audit_token, sandbox_check_by_audit_token)
 DYLD_INTERPOSE(new_xpc_receive_mach_msg, xpc_receive_mach_msg)
 DYLD_INTERPOSE(new_xpc_pipe_routine_reply, xpc_pipe_routine_reply)
 DYLD_INTERPOSE(new_xpc_dictionary_create_reply, xpc_dictionary_create_reply)
+DYLD_INTERPOSE(new_memorystatus_control, memorystatus_control)

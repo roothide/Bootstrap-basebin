@@ -199,15 +199,15 @@ struct DYLDINFO* loadDyldInfo(const char* path)
 
     struct mach_header_64* header = (struct mach_header_64*)dyld;
 
-    struct fgetsigsinfo siginfo = {0, GETSIGSINFO_PLATFORM_BINARY, 0};
-    FileLogDebug("fcntl(F_GETSIGSINFO)=%d, %d", fcntl(fd, F_GETSIGSINFO, &siginfo), errno);
-    FileLogDebug("fg_sig_is_platform: %d", siginfo.fg_sig_is_platform);
-
     // load code signature before mmap text segment
     if(loadSinature(fd, header) != 0) {
         FileLogError("loadSinature failed: %s", path);
         goto failed;
     }
+
+    struct fgetsigsinfo siginfo = {0, GETSIGSINFO_PLATFORM_BINARY, 0};
+    FileLogDebug("fcntl F_GETSIGSINFO=%d, %d", fcntl(fd, F_GETSIGSINFO, &siginfo), errno);
+    FileLogDebug("siginfo: fg_sig_is_platform=%d", siginfo.fg_sig_is_platform);
 
     bool hasZeroFill = false;
     analyzeSegmentsLayout(header, &result->vmSpaceSize, &hasZeroFill);
@@ -326,14 +326,14 @@ struct DYLDINFO* loadDyldInfo(const char* path)
         goto failed;
     }
 
-    goto success;
+    goto final;
 
 failed:
     if(result->imageAddress) vm_deallocate(mach_task_self(), (vm_address_t)result->imageAddress, result->vmSpaceSize);
     free(result);
 	result = NULL;
 
-success:
+final:
     if(fd >= 0) close(fd);
     if(dyld != MAP_FAILED) munmap(dyld, sb.st_size);
     return result;
@@ -399,7 +399,7 @@ int proc_hook_dyld(pid_t pid)
 
     void* new_entry = (void*)(remoteLoadAddress + patchedDyldInfo->entrypoint);
 
-    bool threadPatched = false;
+    bool reentry = false;
     
     thread_act_array_t allThreads=NULL;
     mach_msg_type_number_t threadCount = 0;
@@ -456,31 +456,27 @@ int proc_hook_dyld(pid_t pid)
             kr = thread_set_state(allThreads[i], ARM_THREAD_STATE64, (thread_state_t)&threadState, threadStateCount);
             if(kr -= KERN_SUCCESS) {
                 FileLogError("thread_set_state failed: %d,%s", kr, mach_error_string(kr));
-                goto failed2;
+                goto reentry_end;
             }
 
-            threadPatched = true;
+            reentry = true;
             break;
-        }
-        else
-        {
-            FileLogError("thread[%d] pc=%llx not dyld entry=%llx\n", i, strippedPC, dyld_entry);
-            goto failed;
         }
     }
 
-failed2:
+reentry_end:
     for(int i=0; i<threadCount; i++) {
         mach_port_deallocate(mach_task_self(), allThreads[i]);
     }
     vm_deallocate(mach_task_self(), (mach_vm_address_t)allThreads, threadCount*sizeof(allThreads[0]));
 
-    if(!threadPatched) {
+    if(!reentry) {
         FileLogError("dyld entrypoint patch failed");
         goto failed;
     }
 
-    goto success;
+    FileLogDebug("dyld entrypoint updated: %p -> %p", (void*)dyld_entry, new_entry);
+    goto final;
 
 failed:
     ret = -1;
@@ -488,7 +484,7 @@ failed:
         vm_deallocate(task, remoteLoadAddress, patchedDyldInfo->vmSpaceSize);
     }
 
-success:
+final:
     if(MACH_PORT_VALID(task)) mach_port_deallocate(mach_task_self(), task);
     return ret;
 }

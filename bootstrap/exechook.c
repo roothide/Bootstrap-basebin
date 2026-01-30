@@ -97,6 +97,18 @@ int posix_spawn_hook(pid_t *restrict pidp, const char *restrict path, const posi
 		if(g_sandbox_extensions) {
 			envbuf_setenv(&envc, "__SANDBOX_EXTENSIONS", g_sandbox_extensions, 1);
 		}
+
+		uint8_t *attrStruct = *attrp;
+		if(attrStruct) {
+			int memlimit_active = *(int*)(attrStruct + POSIX_SPAWNATTR_OFF_MEMLIMIT_ACTIVE);
+			if (memlimit_active != -1) {
+				*(int*)(attrStruct + POSIX_SPAWNATTR_OFF_MEMLIMIT_ACTIVE) = memlimit_active * JETSAM_DEFAULT_MULTIPLIER;
+			}
+			int memlimit_inactive = *(int*)(attrStruct + POSIX_SPAWNATTR_OFF_MEMLIMIT_INACTIVE);
+			if (memlimit_inactive != -1) {
+				*(int*)(attrStruct + POSIX_SPAWNATTR_OFF_MEMLIMIT_INACTIVE) = memlimit_inactive * JETSAM_DEFAULT_MULTIPLIER;
+			}
+		}
 	}
 	else
 	{

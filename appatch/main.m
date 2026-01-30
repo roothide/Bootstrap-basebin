@@ -268,14 +268,16 @@ int signApp(NSString* appPath)
 	if([appPath containsString:@"/Applications/"]) {
 		//jailbroken apps or system apps
 
-		baseEntitlements = [NSDictionary dictionaryWithContentsOfFile:jbroot(@"/basebin/entitlements/bootstrap.entitlements")];
+		baseEntitlements = [NSDictionary dictionaryWithContentsOfFile:jbroot(@"/basebin/entitlements/systemapp.entitlements")];
 
 	} else if(isRemovableBundlePath(appPath.fileSystemRepresentation)) {
 
-		 if(hasTrollstoreMarker(appPath.fileSystemRepresentation))
-		 {
+		 if(hasTrollstoreMarker(appPath.fileSystemRepresentation)) {
 			//trollstored apps
 			baseEntitlements = [NSDictionary dictionaryWithContentsOfFile:jbroot(@"/basebin/entitlements/bootstrap.entitlements")];
+		 } else if([appInfoDict[@"CFBundleIdentifier"] hasPrefix:@"com.apple."]) {
+			//removable system apps
+			baseEntitlements = [NSDictionary dictionaryWithContentsOfFile:jbroot(@"/basebin/entitlements/systemapp.entitlements")];
 		 } else {
 			baseEntitlements = @{@"get-task-allow":@YES};
 		 }
@@ -284,6 +286,16 @@ int signApp(NSString* appPath)
 
 	assert(baseEntitlements != nil);
 
+	if([NSFileManager.defaultManager fileExistsAtPath:[@"/Applications/" stringByAppendingString:appPath.lastPathComponent]])
+	{
+		NSMutableDictionary* moreEntitlements = baseEntitlements.mutableCopy;
+		[moreEntitlements addEntriesFromDictionary:@{
+			@"com.apple.security.exception.files.absolute-path.read-write" : @[
+				[NSString stringWithFormat:@"/Applications/%@/", appPath.lastPathComponent]
+			]
+		}];
+		baseEntitlements = moreEntitlements.copy;
+	}
 
 	NSString* mainExecutablePath = appMainExecutablePathForAppPath(appPath);
 	if(!mainExecutablePath) return 176;

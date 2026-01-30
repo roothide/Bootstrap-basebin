@@ -9,10 +9,10 @@
 	<key>com.apple.private.persona-mgmt</key>
 	<true/>
     
-    <!--<key>com.apple.private.security.container-manager</key>
+    <key>com.apple.private.security.container-manager</key>
     <true/>
     <key>com.apple.private.MobileContainerManager.allowed</key>
-    <true/>-->
+    <true/>
     <key>com.apple.private.security.storage.adprivacyd</key>
     <true/>
     <key>com.apple.private.security.storage.amfid</key>

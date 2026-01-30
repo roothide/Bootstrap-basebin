@@ -405,6 +405,7 @@ Baton merge_entitlements(std::string entitlements, const char* extra, const char
 
 
 extern "C" {
+#include <CoreFoundation/CoreFoundation.h>
 #include <choma/CSBlob.h>
 #include <choma/MachOByteOrder.h>
 #include <choma/MachO.h>
@@ -412,111 +413,210 @@ extern "C" {
 #include <choma/MemoryStream.h>
 #include <choma/FileStream.h>
 #include <choma/BufferedStream.h>
-#include <choma/SignOSSL.h>
 #include <choma/CodeDirectory.h>
 #include <choma/Base64.h>
+
+#include "Templates/CADetails.h"
+#include "Templates/DERTemplate.h"
 #include "Templates/AppStoreCodeDirectory.h"
-#include "Templates/SignatureBlob.h"
-#include "Templates/DecryptedSignature.h"
-#include "Templates/PrivateKey.h"
+#include "Templates/TemplateSignatureBlob.h"
 
-// We can use static offsets here because we use a template signature blob
-#define SIGNED_ATTRS_OFFSET 0x13C6 // SignedAttributes sequence
-#define HASHHASH_OFFSET 0x1470 // SHA256 hash SignedAttribute
-#define BASEBASE_OFFSET 0x15AD // Base64 hash SignedAttribute
-#define SIGNSIGN_OFFSET 0x1602 // Signature
+#include <openssl/pem.h>
+#include <openssl/err.h>
+#include <openssl/cms.h>
 
-#define DECRYPTED_SIGNATURE_HASH_OFFSET 0x13
+#define LOG(...)
 
 int update_signature_blob(CS_DecodedSuperBlob *superblob)
 {
+    CS_DecodedBlob *sha1CD = csd_superblob_find_blob(superblob, CSSLOT_CODEDIRECTORY, NULL);
+    if (!sha1CD) {
+        printf("Could not find SHA1 CodeDirectory blob!\n");
+        return -1;
+    }
     CS_DecodedBlob *sha256CD = csd_superblob_find_blob(superblob, CSSLOT_ALTERNATE_CODEDIRECTORIES, NULL);
     if (!sha256CD) {
-        printf("Could not find CodeDirectory blob!\n");
-        return -1;
-    }
-    CS_DecodedBlob *signatureBlob = csd_superblob_find_blob(superblob, CSSLOT_SIGNATURESLOT, NULL);
-    if (!signatureBlob) {
-        printf("Could not find signature blob!\n");
+        printf("Could not find SHA256 CodeDirectory blob!\n");
         return -1;
     }
 
-    uint8_t fullHash[CC_SHA256_DIGEST_LENGTH];
-    size_t dataSizeToRead = csd_blob_get_size(sha256CD);
-    uint8_t *data = (uint8_t*)malloc(dataSizeToRead);
-    memset(data, 0, dataSizeToRead);
-    csd_blob_read(sha256CD, 0, dataSizeToRead, data);
-    CC_SHA256(data, (CC_LONG)dataSizeToRead, fullHash);
-    free(data);
-    uint8_t secondCDSHA256Hash[CC_SHA256_DIGEST_LENGTH];
-    memcpy(secondCDSHA256Hash, fullHash, CC_SHA256_DIGEST_LENGTH);
-    // Print the hash
-    LOG("SHA256 hash: ");
-    for (int i = 0; i < CC_SHA256_DIGEST_LENGTH; i++) {
-        LOG("%02x", secondCDSHA256Hash[i]);
-    }
-    LOG("\n");
+    uint8_t sha1CDHash[CC_SHA1_DIGEST_LENGTH];
+    uint8_t sha256CDHash[CC_SHA256_DIGEST_LENGTH];
 
-    size_t base64OutLength = 0;
-    char *newBase64Hash = base64_encode(secondCDSHA256Hash, CC_SHA1_DIGEST_LENGTH, &base64OutLength);
-    if (!newBase64Hash) {
-        printf("Failed to base64 encode hash!\n");
+    {
+        size_t dataSizeToRead = csd_blob_get_size(sha1CD);
+        uint8_t *data = (uint8_t*)malloc(dataSizeToRead);
+        memset(data, 0, dataSizeToRead);
+        csd_blob_read(sha1CD, 0, dataSizeToRead, data);
+        CC_SHA1(data, (CC_LONG)dataSizeToRead, sha1CDHash);
+        free(data);
+        LOG("SHA1 hash: ");
+        for (int i = 0; i < CC_SHA1_DIGEST_LENGTH; i++) {
+            LOG("%02x", sha1CDHash[i]);
+        }
+        LOG("\n");
+    }
+
+    {
+        size_t dataSizeToRead = csd_blob_get_size(sha256CD);
+        uint8_t *data = (uint8_t*)malloc(dataSizeToRead);
+        memset(data, 0, dataSizeToRead);
+        csd_blob_read(sha256CD, 0, dataSizeToRead, data);
+        CC_SHA256(data, (CC_LONG)dataSizeToRead, sha256CDHash);
+        free(data);
+        LOG("SHA256 hash: ");
+        for (int i = 0; i < CC_SHA256_DIGEST_LENGTH; i++) {
+            LOG("%02x", sha256CDHash[i]);
+        }
+        LOG("\n");
+    }
+
+    const uint8_t *cmsDataPtr = AppStoreSignatureBlob + offsetof(CS_GenericBlob, data);
+    size_t cmsDataSize = AppStoreSignatureBlob_len - sizeof(CS_GenericBlob);
+    CMS_ContentInfo *cms = d2i_CMS_ContentInfo(NULL, (const unsigned char**)&cmsDataPtr, cmsDataSize);
+    if (!cms) {
+        printf("Failed to parse CMS blob: %s!\n", ERR_error_string(ERR_get_error(), NULL));
         return -1;
     }
 
-    // Print the base64 hash
-    LOG("Base64 hash: %.*s\n", CC_SHA256_DIGEST_LENGTH, newBase64Hash);
-
-    int ret = csd_blob_write(signatureBlob, HASHHASH_OFFSET, CC_SHA256_DIGEST_LENGTH, secondCDSHA256Hash);
-    if (ret != 0) {
-        printf("Failed to write SHA256 hash to signature blob!\n");
-        free(newBase64Hash);
+    // Load private key
+    FILE* privateKeyFile = fmemopen(CAKey, CAKeyLength, "r");
+    if (!privateKeyFile) {
+        printf("Failed to open private key file!\n");
         return -1;
     }
+    EVP_PKEY* privateKey = PEM_read_PrivateKey(privateKeyFile, NULL, NULL, NULL);
+    fclose(privateKeyFile);
+    if (!privateKey) {
+        printf("Failed to read private key file!\n");
+        return -1;
+    }
+
+    // Load certificate
+    FILE* certificateFile = fmemopen(CACert, CACertLength, "r");
+    if (!certificateFile) {
+        printf("Failed to open certificate file!\n");
+        return -1;
+    }
+    X509* certificate = PEM_read_X509(certificateFile, NULL, NULL, NULL);
+    fclose(certificateFile);
+    if (!certificate) {
+        printf("Failed to read certificate file!\n");
+        return -1;
+    }
+
+    // Add signer
+    CMS_SignerInfo* newSigner = CMS_add1_signer(cms, certificate, privateKey, EVP_sha256(), CMS_PARTIAL | CMS_REUSE_DIGEST | CMS_NOSMIMECAP);
+    if (!newSigner) {
+        printf("Failed to add signer: %s!\n", ERR_error_string(ERR_get_error(), NULL));
+        return -1;
+    }
+
+    CFMutableArrayRef cdHashesArray = CFArrayCreateMutable(NULL, 2, &kCFTypeArrayCallBacks);
+    if (!cdHashesArray) {
+        printf("Failed to create CDHashes array!\n");
+        return -1;
+    }
+
+    CFDataRef sha1CDHashData = CFDataCreate(NULL, sha1CDHash, CC_SHA1_DIGEST_LENGTH);
+    if (!sha1CDHashData) {
+        printf("Failed to create CFData from SHA1 CDHash!\n");
+        CFRelease(cdHashesArray);
+        return -1;
+    }
+    CFArrayAppendValue(cdHashesArray, sha1CDHashData);
+    CFRelease(sha1CDHashData);
+
+    // In this plist, the SHA256 hash is truncated to SHA1 length
+    CFDataRef sha256CDHashData = CFDataCreate(NULL, sha256CDHash, CC_SHA1_DIGEST_LENGTH);
+    if (!sha256CDHashData) {
+        printf("Failed to create CFData from SHA256 CDHash!\n");
+        CFRelease(cdHashesArray);
+        return -1;
+    }
+    CFArrayAppendValue(cdHashesArray, sha256CDHashData);
+    CFRelease(sha256CDHashData);
     
-    ret = csd_blob_write(signatureBlob, BASEBASE_OFFSET, base64OutLength, newBase64Hash);
-    if (ret != 0) {
-        printf("Failed to write base64 hash to signature blob!\n");
-        free(newBase64Hash);
+    CFMutableDictionaryRef cdHashesDictionary = CFDictionaryCreateMutable(NULL, 1, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+    if (!cdHashesDictionary) {
+        printf("Failed to create CDHashes dictionary!\n");
+        CFRelease(cdHashesArray);
+        return -1;
+    }
+    CFDictionarySetValue(cdHashesDictionary, CFSTR("cdhashes"), cdHashesArray);
+    CFRelease(cdHashesArray);
+
+    CFErrorRef error = NULL;
+    CFDataRef cdHashesDictionaryData = CFPropertyListCreateData(NULL, cdHashesDictionary, kCFPropertyListXMLFormat_v1_0, 0, &error);
+    CFRelease(cdHashesDictionary);
+    if (!cdHashesDictionaryData) {
+        // CFStringGetCStringPtr, unfortunately, does not always work
+        CFStringRef errorString = CFErrorCopyDescription(error);
+        CFIndex maxSize = CFStringGetMaximumSizeForEncoding(CFStringGetLength(errorString), kCFStringEncodingUTF8) + 1;
+        char *buffer = (char *)malloc(maxSize);
+        if (CFStringGetCString(errorString, buffer, maxSize, kCFStringEncodingUTF8)) {
+            printf("Failed to encode CDHashes plist: %s\n", buffer);
+        } else {
+            printf("Failed to encode CDHashes plist: unserializable error\n");
+        }
+        free(buffer);
         return -1;
     }
 
-    free(newBase64Hash);
-
-    unsigned char *newSignature = NULL;
-    size_t newSignatureSize = 0;
-
-    unsigned char newDecryptedSignature[0x33];
-    memset(newDecryptedSignature, 0, 0x33);
-    memcpy(newDecryptedSignature, DecryptedSignature, 0x33);
-
-    // Get the signed attributes hash
-    unsigned char signedAttrs[0x229];
-    memset(signedAttrs, 0, 0x229);
-    csd_blob_read(signatureBlob, SIGNED_ATTRS_OFFSET, 0x229, signedAttrs);
-    signedAttrs[0] = 0x31;
-    
-    // Hash
-    uint8_t fullAttributesHash[CC_SHA256_DIGEST_LENGTH];
-    CC_SHA256(signedAttrs, (CC_LONG)0x229, fullAttributesHash);
-    memcpy(newDecryptedSignature + DECRYPTED_SIGNATURE_HASH_OFFSET, fullAttributesHash, CC_SHA256_DIGEST_LENGTH);
-
-    newSignature = signWithRSA(newDecryptedSignature, DecryptedSignature_len, CAKey, CAKeyLength, &newSignatureSize);
-
-    if (!newSignature) {
-        printf("Failed to sign the decrypted signature!\n");
+    // Add text CDHashes attribute
+    if (!CMS_signed_add1_attr_by_txt(newSigner, "1.2.840.113635.100.9.1", V_ASN1_OCTET_STRING, CFDataGetBytePtr(cdHashesDictionaryData), CFDataGetLength(cdHashesDictionaryData))) {
+        printf("Failed to add text CDHashes attribute: %s!\n", ERR_error_string(ERR_get_error(), NULL));
         return -1;
     }
 
-    if (newSignatureSize != 0x100) {
-        printf("The new signature is not the correct size!\n");
-        free(newSignature);
+    // Create DER-encoded CDHashes (see DERTemplate.h for details)
+    uint8_t cdHashesDER[78];
+    memset(cdHashesDER, 0, sizeof(cdHashesDER));
+    memcpy(cdHashesDER, CDHashesDERTemplate, sizeof(CDHashesDERTemplate));
+    memcpy(cdHashesDER + CDHASHES_DER_SHA1_OFFSET, sha1CDHash, CC_SHA1_DIGEST_LENGTH);
+    memcpy(cdHashesDER + CDHASHES_DER_SHA256_OFFSET, sha256CDHash, CC_SHA256_DIGEST_LENGTH);
+
+    // Add DER CDHashes attribute
+    if (!CMS_signed_add1_attr_by_txt(newSigner, "1.2.840.113635.100.9.2", V_ASN1_SEQUENCE, cdHashesDER, sizeof(cdHashesDER))) {
+        printf("Failed to add CDHashes attribute: %s!\n", ERR_error_string(ERR_get_error(), NULL));
         return -1;
     }
 
-    ret = csd_blob_write(signatureBlob, SIGNSIGN_OFFSET, newSignatureSize, newSignature);
-    free(newSignature);
-    return ret;
+    // Sign the CMS structure
+    if (!CMS_SignerInfo_sign(newSigner)) {
+        printf("Failed to sign CMS structure: %s!\n", ERR_error_string(ERR_get_error(), NULL));
+        return -1;
+    }
+
+    // Encode the CMS structure into DER
+    uint8_t *newCMSData = NULL;
+    int newCMSDataSize = i2d_CMS_ContentInfo(cms, &newCMSData);
+    if (newCMSDataSize <= 0) {
+        printf("Failed to encode CMS structure: %s!\n", ERR_error_string(ERR_get_error(), NULL));
+        return -1;
+    }
+
+    // Copy CMS data into a new blob
+    uint32_t newCMSDataBlobSize = sizeof(CS_GenericBlob) + newCMSDataSize;
+    CS_GenericBlob *newCMSDataBlob = (CS_GenericBlob*)malloc(newCMSDataBlobSize);
+    newCMSDataBlob->magic = HOST_TO_BIG((uint32_t)CSMAGIC_BLOBWRAPPER);
+    newCMSDataBlob->length = HOST_TO_BIG(newCMSDataBlobSize);
+    memcpy(newCMSDataBlob->data, newCMSData, newCMSDataSize);
+    free(newCMSData);
+
+    // Remove old signature blob if it exists
+    CS_DecodedBlob *oldSignatureBlob = csd_superblob_find_blob(superblob, CSSLOT_SIGNATURESLOT, NULL);
+    if (oldSignatureBlob) {
+        csd_superblob_remove_blob(superblob, oldSignatureBlob);
+        csd_blob_free(oldSignatureBlob);
+    }
+
+    // Append new signature blob
+    CS_DecodedBlob *signatureBlob = csd_blob_init(CSSLOT_SIGNATURESLOT, newCMSDataBlob);
+    free(newCMSDataBlob);
+
+    // Append new signature blob
+    return csd_superblob_append_blob(superblob, signatureBlob);
 }
 
 uint32_t magicTable[] = {
@@ -685,10 +785,6 @@ int apply_coretrust_bypass(const char *machoPath, const char* extra_entitlements
         csd_blob_free(signatureBlob);
     }
 
-    // Append new template blob
-    signatureBlob = csd_blob_init(CSSLOT_SIGNATURESLOT, (CS_GenericBlob *)TemplateSignatureBlob);
-    csd_superblob_append_blob(decodedSuperblob, signatureBlob);
-
     // After Modification:
     // 1. App Store CodeDirectory (SHA1)
     // ?. Requirements
@@ -701,7 +797,8 @@ int apply_coretrust_bypass(const char *machoPath, const char* extra_entitlements
 
     // Get team ID from AppStore code directory
     // For the bypass to work, both code directories need to have the same team ID
-    char *appStoreTeamID = csd_code_directory_copy_team_id(appStoreCodeDirectoryBlob, NULL);
+    // char *appStoreTeamID = csd_code_directory_copy_team_id(appStoreCodeDirectoryBlob, NULL);
+    char *appStoreTeamID = strdup("T8ALTGMVXN"); //fixed TeamID
     if (!appStoreTeamID) {
         printf("Error: Unable to determine AppStore Team ID\n");
         return -1;
@@ -785,8 +882,18 @@ int apply_coretrust_bypass(const char *machoPath, const char* extra_entitlements
         }
     }
 
-    LOG("Updating code slot hashes...\n");
+    LOG("Allocating code slot hashes...\n");
     csd_code_directory_alloc(realCodeDirBlob, macho);
+    
+    int ret = 0;
+
+    // 6. Signature blob
+    LOG("Doing initial signing to calculate size...\n");
+    ret = update_signature_blob(decodedSuperblob);
+    if(ret == -1) {
+        printf("Error: failed to create new signature blob!\n");
+        return -1;
+    }
 
     LOG("Encoding unsigned superblob...\n");
     CS_SuperBlob *encodedSuperblobUnsigned = csd_superblob_encode(decodedSuperblob);
@@ -802,7 +909,6 @@ int apply_coretrust_bypass(const char *machoPath, const char* extra_entitlements
     void csd_code_directory_update_fast(CS_DecodedBlob *codeDirBlob, MachO *macho);
     csd_code_directory_update_fast(realCodeDirBlob, macho);
 
-    int ret = 0;
     LOG("Signing binary...\n");
     ret = update_signature_blob(decodedSuperblob);
     if(ret == -1) {
@@ -829,6 +935,7 @@ int apply_coretrust_bypass(const char *machoPath, const char* extra_entitlements
 #include <choma/FileStream.h>
 #include <choma/Host.h>
 #include <copyfile.h>
+#include <sys/clonefile.h>
 
 char *extract_preferred_slice(const char *fatPath)
 {
@@ -867,38 +974,40 @@ int realstore(const char* path, const char* extra_entitlements, const char* stri
 
     close(fd);
 
+    char *machoPath = NULL;
+
     if(magic == MH_MAGIC_64)
     {
-        LOG("Applying CoreTrust bypass...\n");
-        if (apply_coretrust_bypass(path, extra_entitlements, strip_entitlements, teamID) != 0) {
-            fprintf(stderr, "Failed applying CoreTrust bypass\n");
+        machoPath = strdup(tmpnam(NULL));
+        if(clonefile(path, machoPath, 0) != 0) {
+            perror("clonefile");
             return -1;
         }
     }
     else
     {
-        char *machoPath = extract_preferred_slice(path);
+        machoPath = extract_preferred_slice(path);
         if(!machoPath) {
             printf("extracted failed %s\n", path);
             return -1;
         }
 
         LOG("Extracted %s best slice to %s\n", (path), machoPath);
-
-        LOG("Applying CoreTrust bypass...\n");
-
-        if (apply_coretrust_bypass(machoPath, extra_entitlements, strip_entitlements, teamID) != 0) {
-            fprintf(stderr, "Failed applying CoreTrust bypass\n");
-            return -1;
-        }
-
-        if (copyfile(machoPath, path, 0, COPYFILE_ALL | COPYFILE_MOVE | COPYFILE_UNLINK) != 0) {
-            perror("copyfile");
-            return -1;
-        }
-
-        free(machoPath);
     }
+
+    LOG("Applying CoreTrust bypass...\n");
+
+    if (apply_coretrust_bypass(machoPath, extra_entitlements, strip_entitlements, teamID) != 0) {
+        fprintf(stderr, "Failed applying CoreTrust bypass\n");
+        return -1;
+    }
+
+    if (copyfile(machoPath, path, 0, COPYFILE_ALL | COPYFILE_MOVE | COPYFILE_UNLINK) != 0) {
+        perror("copyfile");
+        return -1;
+    }
+
+    free(machoPath);
 
     LOG("Applied CoreTrust Bypass!\n");
     chown(path, st.st_uid, st.st_gid);

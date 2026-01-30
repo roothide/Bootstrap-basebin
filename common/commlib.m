@@ -188,6 +188,17 @@ bool proc_traced(pid_t pid)
 	return false;
 }
 
+bool proc_is_sandboxed()
+{
+  return sandbox_check(getpid(), NULL, 0)==1;
+}
+
+bool proc_is_containerized()
+{
+extern bool _sandbox_in_a_container();
+  return _sandbox_in_a_container();
+}
+
 // (inherit)
 bool is_app_coalition()
 {
@@ -475,14 +486,10 @@ int spawn_root(NSString* path, NSArray* args, __strong NSString** stdOut, __stro
     return retval;
 }
 
-bool checkpatchedexe()
+bool checkpatchedexe(const char* executable_path)
 {
-	char executablePath[PATH_MAX]={0};
-	uint32_t bufsize=sizeof(executablePath);
-	assert(_NSGetExecutablePath(executablePath, &bufsize) == 0);
-	
 	char patcher[PATH_MAX];
-	snprintf(patcher, sizeof(patcher), "%s.roothidepatch", executablePath);
+	snprintf(patcher, sizeof(patcher), "%s.roothidepatch", executable_path);
 	if(access(patcher, F_OK)==0) 
 		return false;
 
@@ -978,11 +985,10 @@ void unsandbox(const char* sbtoken)
 	}
 }
 
-const char* roothide_get_sandbox_profile(pid_t pid, char buffer[255])
+NSDictionary* proc_get_entitlements(pid_t pid)
 {
-    static char __thread threadbuffer[255];
-    if(!buffer) buffer = threadbuffer;
-    
+    NSDictionary* plist = nil;
+
     struct csheader {
         uint32_t magic;
         uint32_t length;
@@ -990,7 +996,7 @@ const char* roothide_get_sandbox_profile(pid_t pid, char buffer[255])
     
     int result = csops(pid, CS_OPS_ENTITLEMENTS_BLOB, &header, sizeof(header));
     if (result != 0 && errno != ERANGE) {
-        return NULL;
+        return nil;
     }
     
     uint32_t bufferLen = ntohl(header.length);
@@ -1003,14 +1009,29 @@ const char* roothide_get_sandbox_profile(pid_t pid, char buffer[255])
 
     char* csbuffer = malloc(bufferLen);
     if (!csbuffer) {
-        return NULL;
+        return nil;
     }
     
     result = csops(pid, CS_OPS_ENTITLEMENTS_BLOB, csbuffer, bufferLen);
     if (result == 0) {
         char* entitlements = csbuffer + sizeof(CS_GenericBlob);
         NSData* data = [NSData dataWithBytes:entitlements length:(bufferLen - sizeof(CS_GenericBlob))];
-        NSDictionary* plist = [NSPropertyListSerialization propertyListWithData:data options:0 format:nil error:nil];
+        plist = [NSPropertyListSerialization propertyListWithData:data options:0 format:nil error:nil];
+    }
+
+    free(csbuffer);
+    csbuffer = NULL;
+
+    return plist;
+}
+
+const char* roothide_get_sandbox_profile(pid_t pid, char buffer[255])
+{
+    static char __thread threadbuffer[255];
+    if(!buffer) buffer = threadbuffer;
+
+    NSDictionary* plist = proc_get_entitlements(pid);
+    if(plist) {
         
         NSString* profile = nil;
 
@@ -1031,10 +1052,7 @@ const char* roothide_get_sandbox_profile(pid_t pid, char buffer[255])
             buffer = NULL;
         }
     }
-
-    free(csbuffer);
-    csbuffer = NULL;
-
+    
     return buffer;
 }
 
@@ -1088,4 +1106,27 @@ int roothide_config_set_blacklist_enable(bool enabled)
         return -1;
     }
     return 0;
+}
+
+#include <objc/runtime.h>
+void hook_class_method(Class clazz, SEL selector, void* replacement, void** old_ptr)
+{
+    Method method = class_getClassMethod(clazz, selector);
+    if (method == NULL) {
+        SYSLOG("hook_class_method: method not found: %@ : %@", NSStringFromClass(clazz), NSStringFromSelector(selector));
+        return;
+    }
+    *old_ptr = (void*)method_getImplementation(method);
+    method_setImplementation(method, (IMP)replacement);
+}
+
+void hook_instance_method(Class clazz, SEL selector, void* replacement, void** old_ptr)
+{
+    Method method = class_getInstanceMethod(clazz, selector);
+    if (method == NULL) {
+        SYSLOG("hook_instance_method: method not found: %@ : %@", NSStringFromClass(clazz), NSStringFromSelector(selector));
+        return;
+    }
+    *old_ptr = (void*)method_getImplementation(method);
+    method_setImplementation(method, (IMP)replacement);
 }

@@ -51,6 +51,8 @@ int sandbox_init_with_parameters_hook(const char *profile, uint64_t flags, const
 	return retval;
 }
 
+//removed api on ios18, define as weak symbol
+__attribute__((weak,weak_import)) int sandbox_init_with_extensions(const char *profile, uint64_t flags, const char *const extensions[], char **errorbuf) asm("_sandbox_init_with_extensions");
 int sandbox_init_with_extensions_hook(const char *profile, uint64_t flags, const char *const extensions[], char **errorbuf)
 {
 	int retval = sandbox_init_with_extensions(profile, flags, extensions, errorbuf);
@@ -427,7 +429,7 @@ static void __attribute__((__constructor__)) bootstrap()
 #if DEBUG
 	enableCommLog(bootstrapLog, bootstrapLog);
 	bootstrapLogFunction = bootstrapLog;
-	SYSLOG("Bootstrap loaded...");
+	SYSLOG("Bootstrap loaded... sandboxed=%d containerized=%d", proc_is_sandboxed(), proc_is_containerized());
 #endif
 
 	const char* exepath = rootfs(executablePath);
@@ -442,14 +444,6 @@ static void __attribute__((__constructor__)) bootstrap()
 			ASSERT(bsd_tick_mach_service());
 		}
 	}
-
-    // SYSLOG("bootstrap....%s\n", exepath);
-	// SYSLOG("HOME=%s\n%s\n%s", getenv("HOME"), getenv("CFFIXED_USER_HOME"), getenv("TMPDIR"));
-	
-	// struct dl_info di={0};
-    // dladdr((void*)bootstrap, &di);
-	// bootstrapath = strdup(di.dli_fname);
-
 
 	const char* bundleIdentifier = NULL;
 	CFBundleRef mainBundle = CFBundleGetMainBundle();
@@ -477,10 +471,14 @@ static void __attribute__((__constructor__)) bootstrap()
 		redirect_paths(jbrootdir);
 	}
 
-    const char* preload = getenv("DYLD_INSERT_LIBRARIES");
-    if(!preload || !strstr(preload,"/basebin/bootstrap.dylib"))
-    {
-		if (sandbox_check(getpid(), "process-fork", SANDBOX_CHECK_NO_REPORT, NULL) == 0) {
+	const char* preload = getenv("DYLD_INSERT_LIBRARIES");
+	if (sandbox_check(getpid(), "process-fork", SANDBOX_CHECK_NO_REPORT, NULL) == 0)
+	{
+		void hook_NSTask(void);
+		 hook_NSTask();
+		 
+		if(!preload || !strstr(preload,"/basebin/bootstrap.dylib"))
+		{
 			void _dynamic_interpose();
 			_dynamic_interpose();
 		}
@@ -577,10 +575,11 @@ static void __attribute__((__constructor__)) bootstrap()
 
 	//load first
 	if(!dlopen(jbroot("/usr/lib/roothidepatch.dylib"), RTLD_NOW)) { // require jit
-		ASSERT(checkpatchedexe());
+		ASSERT(checkpatchedexe(executablePath));
 	}
 	
-	if(!string_has_suffix(executablePath, "/usr/sbin/cfprefsd")) {
+	// if(!string_has_suffix(executablePath, "/usr/sbin/cfprefsd")) {
+	if(!launchctl_support()) {
 		void init_prefs_objchook();
 		init_prefs_objchook();
 	}
@@ -634,7 +633,8 @@ static void __attribute__((__constructor__)) bootstrap()
 			break;
 		}
 
-		if(!string_has_suffix(executablePath, "/usr/sbin/cfprefsd")) {
+		// if(!string_has_suffix(executablePath, "/usr/sbin/cfprefsd")) {
+		if(!launchctl_support()) {
 			void init_prefs_inlinehook();
 			init_prefs_inlinehook();
 		}

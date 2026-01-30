@@ -44,8 +44,7 @@ int child_execve(char *exceptionPortName, char *path) {
     char *argv2[] = { path, NULL };
     int ret =posix_spawn(NULL, argv2[0], NULL, &attr, argv2, environ);
     printf("posix_spawn error: %s\n", strerror(ret));
-    abort();
-    return 1;
+    return ret;
 }
 
 @interface TaskPortHaxx : NSObject

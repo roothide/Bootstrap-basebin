@@ -105,8 +105,7 @@ int handleRequest(int conn, pid_t pid, int reqId, NSDictionary* msg)
 #include <paths.h>
 #include <fcntl.h>
 int
-_daemon(nochdir, noclose)
-	int nochdir, noclose;
+_daemon(int nochdir, int noclose)
 {
 	struct sigaction osa, sa;
 	int fd;

@@ -89,9 +89,7 @@ void fixsuid()
         unsetenv("GIDFIX");
     }
 
-    char path[PATH_MAX]={0};
-    uint32_t bufsize=sizeof(path);
-    ASSERT(_NSGetExecutablePath(path, &bufsize) == 0);
+    char* path = g_executable_path;
 
     struct stat st;
 	ASSERT(stat(path, &st) == 0);

@@ -740,7 +740,6 @@ void registerPath(NSString *path, BOOL forceSystem)
 	NSDictionary *systemGroupContainers = constructGroupsContainersForEntitlements(entitlements, YES);
 	NSMutableDictionary *groupContainers = [NSMutableDictionary new];
 	[groupContainers addEntriesFromDictionary:appGroupContainers];
-	[groupContainers addEntriesFromDictionary:systemGroupContainers];
 	if (groupContainers.count) {
 		if (appGroupContainers.count) {
 			dictToRegister[@"HasAppGroupContainers"] = @YES;
@@ -887,7 +886,6 @@ void registerPath(NSString *path, BOOL forceSystem)
 		NSDictionary *pluginSystemGroupContainers = constructGroupsContainersForEntitlements(pluginEntitlements, YES);
 		NSMutableDictionary *pluginGroupContainers = [NSMutableDictionary new];
 		[pluginGroupContainers addEntriesFromDictionary:pluginAppGroupContainers];
-		[pluginGroupContainers addEntriesFromDictionary:pluginSystemGroupContainers];
 		if (pluginGroupContainers.count) {
 			if (pluginAppGroupContainers.count) {
 				pluginDict[@"HasAppGroupContainers"] = @YES;

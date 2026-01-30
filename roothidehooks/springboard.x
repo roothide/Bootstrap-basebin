@@ -7,6 +7,7 @@
 	if (cmd == F_SETPROTECTIONCLASS) {
 		char filePath[PATH_MAX];
 		if (fcntl(fildes, F_GETPATH, filePath) != -1) {
+			NSLog(@"fcntl F_SETPROTECTIONCLASS called on file: %s", filePath);
 			// Skip setting protection class on jailbreak apps, this doesn't work and causes snapshots to not be saved correctly
 			if (isSubPathOf(filePath, jbroot("/var/mobile/Library/SplashBoard/Snapshots/"))) {
 				return 0;
@@ -48,7 +49,7 @@
 -(NSString *)snapshotContainerPath {
     NSString* path = %orig;
 
-    if([path hasPrefix:@"/var/mobile/Library/SplashBoard/Snapshots/"] && ![self.bundleIdentifier hasPrefix:@"com.apple."]) {
+    if([path hasPrefix:@"/var/mobile/Library/SplashBoard/Snapshots/"] && (![self.bundleIdentifier hasPrefix:@"com.apple."] || is_apple_internal_identifier(self.bundleIdentifier.UTF8String))) {
         NSLog(@"snapshotContainerPath redirect %@ : %@", self.bundleIdentifier, path);
         path = jbroot(path);
     }
@@ -110,8 +111,13 @@ static const void *kDenyQueryTagKey = &kDenyQueryTagKey;
 }
 %end
 
+%hookf(int, XBValidateStoryboard) {
+    return 0;
+}
+
 void sbInit(void)
 {
 	NSLog(@"sbInit...");
-	%init();
+	// %init();
+	%init(XBValidateStoryboard=MSFindSymbol(MSGetImageByName("/System/Library/PrivateFrameworks/SplashBoard.framework/SplashBoard"), "_XBValidateStoryboard"));
 }

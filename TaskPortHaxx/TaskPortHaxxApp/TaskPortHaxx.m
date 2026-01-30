@@ -29,7 +29,7 @@
 int load_trust_cache(NSString *tcPath) {
     NSData *tcData = [NSData dataWithContentsOfFile:tcPath];
     if (!tcData) {
-        printf("Trust cache file not found: %s\n", tcPath.fileSystemRepresentation);
+        fprintf(stderr, "Trust cache file not found: %s\n", tcPath.fileSystemRepresentation);
         abort();
     }
     CFDictionaryRef match = IOServiceMatching("AppleMobileFileIntegrity");
@@ -40,7 +40,7 @@ int load_trust_cache(NSString *tcPath) {
     assert(MACH_PORT_VALID(conn));
     kern_return_t kr = IOConnectCallMethod(conn, 2, NULL, 0, tcData.bytes, tcData.length, NULL, NULL, NULL, NULL);
     if (kr != KERN_SUCCESS) {
-        printf("IOConnectCallMethod failed: %s\n", mach_error_string(kr));
+        fprintf(stderr, "IOConnectCallMethod failed: %s\n", mach_error_string(kr));
         abort();
     }
     printf("Loaded trust cache from %s\n", tcPath.fileSystemRepresentation);
@@ -82,10 +82,17 @@ const char* createLaunchdSymlink()
 }
 
 int child_stage1_prepare(NSString* execDir)
-{    
+{  
+    NSError* error;
+
     NSFileManager *fm = NSFileManager.defaultManager;
     NSString *outDir = jbroot(@TASKPORTHAXX_CACHE_DIR"/UpdateBrainService");
-    [fm createDirectoryAtPath:outDir withIntermediateDirectories:YES attributes:nil error:nil];
+
+    error = nil;
+    if(![fm createDirectoryAtPath:outDir withIntermediateDirectories:YES attributes:nil error:&error]) {
+        NSLog(@"Failed to create cache directory: %@", error);
+        return __LINE__;
+    }
 
     NSString *zipPath = [outDir stringByAppendingPathComponent:@"UpdateBrainService.zip"];
     NSString *assetDir = [outDir stringByAppendingPathComponent:@"AssetData"];
@@ -96,23 +103,29 @@ int child_stage1_prepare(NSString* execDir)
         NSURL *url = [NSURL URLWithString:@"https://updates.cdn-apple.com/2022FallFCS/patches/012-73541/F0A2BDFD-317B-4557-BD18-269079BDB196/com_apple_MobileAsset_MobileSoftwareUpdate_UpdateBrain/f9886a753f7d0b2fc3378a28ab6975769f6b1c26.zip"];
         NSData *urlData = [NSData dataWithContentsOfURL:url];
         if (!urlData) {
-            printf("Failed to download UpdateBrainService\n");
-            return 1;
+            NSLog(@"Failed to download UpdateBrainService\n");
+            return __LINE__;
         }
         
         // Save and extract UpdateBrainService
-        [urlData writeToFile:zipPath atomically:YES];
+        assert([urlData writeToFile:zipPath atomically:YES]);
         printf("Downloaded UpdateBrainService to %s\n", zipPath.fileSystemRepresentation);
+
         printf("Extracting UpdateBrainService\n");
         assert(extract(zipPath, outDir, NULL) == 0);
-        [NSFileManager.defaultManager removeItemAtPath:zipPath error:nil];
+        assert([NSFileManager.defaultManager removeItemAtPath:zipPath error:nil]);
     }
 
     clearXpcStagingFiles();
     
     // Copy xpc service
 
-    [fm createDirectoryAtPath:execDir withIntermediateDirectories:YES attributes:nil error:nil];
+    error = nil;
+    if(![fm createDirectoryAtPath:execDir withIntermediateDirectories:YES attributes:nil error:&error]) {
+        NSLog(@"Failed to create exec directory: %@", error);
+        return __LINE__;
+    }
+
     NSString *xpcName = @"com.apple.MobileSoftwareUpdate.UpdateBrainService.xpc";
     NSString *outXPCPath = [execDir stringByAppendingPathComponent:xpcName];
     if (![fm fileExistsAtPath:outXPCPath]) {
@@ -120,19 +133,24 @@ int child_stage1_prepare(NSString* execDir)
         [fm copyItemAtPath:[assetDir stringByAppendingPathComponent:xpcName] toPath:outXPCPath error:&error];
         if (error) {
             NSLog(@"Failed to copy UpdateBrainService.xpc: %@", error);
-            return 2;
+            return __LINE__;
         }
     }
 
     {
-        [NSFileManager.defaultManager createDirectoryAtPath:execDir withIntermediateDirectories:YES attributes:nil error:nil];
+        error = nil;
+        if(![NSFileManager.defaultManager createDirectoryAtPath:execDir withIntermediateDirectories:YES attributes:nil error:&error]) {
+            NSLog(@"Failed to create exec directory: %@", error);
+            return __LINE__;
+        }
+
         NSString *outDir = [execDir stringByAppendingPathComponent:@"com.apple.dt.instruments.dtsecurity.xpc"];
         if (![[NSFileManager defaultManager] fileExistsAtPath:outDir]) {
             NSError *error = nil;
             [NSFileManager.defaultManager copyItemAtPath:@"/System/Library/PrivateFrameworks/DVTInstrumentsFoundation.framework/XPCServices/com.apple.dt.instruments.dtsecurity.xpc" toPath:outDir error:&error];
             if (error) {
                 NSLog(@"Failed to copy dtsecurity.xpc: %@", error);
-                return 3;
+                return __LINE__;
             }
         }
     }
@@ -284,7 +302,7 @@ if(IS_ARM64E_DEVICE()) {
 
 }
 
-    _alt_dyld_get_all_image_infos();
+    // _alt_dyld_get_all_image_infos();
 
 }
 

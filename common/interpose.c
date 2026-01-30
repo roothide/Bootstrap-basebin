@@ -42,6 +42,9 @@ typedef struct nlist nlist_t;
 
 #include "common.h"
 
+#undef SYSLOG
+#define SYSLOG(...) 
+
 struct _dyld_interpose {
     void* hook;
     void* orig;

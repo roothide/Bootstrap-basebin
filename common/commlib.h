@@ -11,12 +11,16 @@ extern char*const* environ;
 
 void enableCommLog(void* debugLog, void* errorLog);
 
+#define JETSAM_DEFAULT_MULTIPLIER 3
+#define POSIX_SPAWNATTR_OFF_MEMLIMIT_ACTIVE 0x48
+#define POSIX_SPAWNATTR_OFF_MEMLIMIT_INACTIVE 0x4C
+
 #define POSIX_SPAWN_PERSONA_FLAGS_OVERRIDE 1
 extern int posix_spawnattr_set_persona_np(const posix_spawnattr_t* __restrict, uid_t, uint32_t);
 extern int posix_spawnattr_set_persona_uid_np(const posix_spawnattr_t* __restrict, uid_t);
 extern int posix_spawnattr_set_persona_gid_np(const posix_spawnattr_t* __restrict, uid_t);
 
-extern int posix_spawnattr_set_launch_type_np(const posix_spawnattr_t *attr, uint8_t launch_type);
+extern int posix_spawnattr_set_launch_type_np(const posix_spawnattr_t *attr, uint8_t launch_type) __API_AVAILABLE(macos(13.0), ios(16.0), tvos(16.0), watchos(9.0));
 extern int posix_spawnattr_getmacpolicyinfo_np(const posix_spawnattr_t * __restrict attr, const char *policyname, void **datap, size_t *datalenp);
 
 #define POSIX_SPAWN_PROC_TYPE_DRIVER 0x700
@@ -31,8 +35,6 @@ int spawn_bootstrap_binary(char*const* argv, __strong NSString** stdOut, __stron
 #endif
 
 pid_t get_real_ppid();
-
-bool checkpatchedexe();
 
 bool launchctl_support();
 
@@ -49,6 +51,9 @@ char* proc_get_identifier(pid_t pid, char buffer[255]);
 
 int proc_hook_dyld(pid_t pid);
 int proc_enable_jit(pid_t pid, bool suspended);
+
+bool proc_is_sandboxed();
+bool proc_is_containerized();
 
 bool is_app_coalition(); // (inherit)
 
@@ -92,6 +97,15 @@ bool machoGetInfo(const char* path, bool* isMachO, bool* isLibrary);
 
 int roothide_config_set_blacklist_enable(bool enabled);
 
+bool checkpatchedexe(const char* executable_path);
+
+#ifdef __OBJC__
+
+void hook_class_method(Class clazz, SEL selector, void* replacement, void** old_ptr);
+void hook_instance_method(Class clazz, SEL selector, void* replacement, void** old_ptr);
+
+NSDictionary* proc_get_entitlements(pid_t pid);
+
 #define APPLE_INTERNAL_IDENTIFIERS @[\
     @"com.apple.atrun",\
     @"com.apple.kdumpd",\
@@ -106,3 +120,5 @@ int roothide_config_set_blacklist_enable(bool enabled);
     @"com.opa334.Dopamine.roothide",\
     @"com.opa334.Dopamine-roothide",\
 ]
+
+#endif

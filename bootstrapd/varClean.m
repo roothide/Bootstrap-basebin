@@ -111,7 +111,7 @@ static void cleanSplashBoardSnapshots()
 {
 	for(NSString* item in [NSFileManager.defaultManager directoryContentsAtPath:@(SPLASHBOARD_SNAPSHOTS_DIR)])
     {
-		if(![item hasPrefix:@"com.apple."])
+		if(![item hasPrefix:@"com.apple."] || is_apple_internal_identifier(item.UTF8String))
 		{
 			NSString* path = [NSString stringWithFormat:@"%s/%@", SPLASHBOARD_SNAPSHOTS_DIR, item];
 			BOOL ret = [NSFileManager.defaultManager removeItemAtPath:path error:nil];
@@ -129,6 +129,10 @@ static void varCleanAutoClean()
 	
 	//first clean
 	cleanSplashBoardSnapshots();
+
+	if(launchctl_support()) {
+		return;
+	}
 
 	static dispatch_queue_t varCleanAutoCleanQueue;
 	varCleanAutoCleanQueue = dispatch_queue_create("varCleanAutoClean", DISPATCH_QUEUE_SERIAL);
@@ -165,7 +169,5 @@ static void varCleanAutoClean()
 
 void varclean_init(void)
 {
-	if(!launchctl_support()) {
-		varCleanAutoClean();
-	}
+	varCleanAutoClean();
 }

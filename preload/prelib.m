@@ -100,7 +100,11 @@ static void __attribute__((__constructor__)) preload()
 		
 		if(!dlopen("@executable_path/.jbroot/basebin/bootstrap.dylib", RTLD_NOW)) {
 			NSLog(@"dlopen failed: %s", dlerror());
-			ASSERT(checkpatchedexe());
+
+			char executablePath[PATH_MAX]={0};
+			uint32_t bufsize=sizeof(executablePath);
+			assert(_NSGetExecutablePath(executablePath, &bufsize) == 0);
+			ASSERT(checkpatchedexe(executablePath));
 		}
 	}
 
