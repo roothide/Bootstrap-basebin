@@ -6,7 +6,7 @@
 #include <string.h>
 #include "commlib.h"
 
-extern char** NXArgv; // __NSGetArgv() not working on ctor
+extern char** NXArgv; // _NSGetArgv() may not working on ctor
 extern int    NXArgc;
 
 extern char* g_executable_path;

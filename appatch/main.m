@@ -253,8 +253,8 @@ BOOL isMachoFile(NSString* filePath)
 	return ismacho;
 }
 
-NSArray* blockedResignBundles = @[
-    @"com.apple.Safari.SandboxBroker",
+NSArray* InjectAppPlugins = @[
+
 ];
 
 int signApp(NSString* appPath)
@@ -263,7 +263,10 @@ int signApp(NSString* appPath)
 
 	NSDictionary* appInfoDict = infoDictionaryForAppPath(appPath);
 	if(!appInfoDict) return 172;
+	
+	NSString* appBundleID = [appInfoDict objectForKey:@"CFBundleIdentifier"];
 
+	BOOL isAppleBundle = [appBundleID hasPrefix:@"com.apple."] && !is_apple_internal_identifier(appBundleID.UTF8String);
 
 	if([appPath containsString:@"/Applications/"]) {
 		//jailbroken apps or system apps
@@ -275,7 +278,7 @@ int signApp(NSString* appPath)
 		 if(hasTrollstoreMarker(appPath.fileSystemRepresentation)) {
 			//trollstored apps
 			baseEntitlements = [NSDictionary dictionaryWithContentsOfFile:jbroot(@"/basebin/entitlements/bootstrap.entitlements")];
-		 } else if([appInfoDict[@"CFBundleIdentifier"] hasPrefix:@"com.apple."]) {
+		 } else if(isAppleBundle) {
 			//removable system apps
 			baseEntitlements = [NSDictionary dictionaryWithContentsOfFile:jbroot(@"/basebin/entitlements/systemapp.entitlements")];
 		 } else {
@@ -335,7 +338,7 @@ int signApp(NSString* appPath)
 			NSString* platformName = infoDict[@"DTPlatformName"];
 			NSArray* supportedPlatforms = infoDict[@"CFBundleSupportedPlatforms"];
 
-			if([blockedResignBundles containsObject:bundleId] || [platformName isEqualToString:@"watchos"] || [supportedPlatforms containsObject:@"WatchOS"]) {
+			if([platformName isEqualToString:@"watchos"] || [supportedPlatforms containsObject:@"WatchOS"]) {
 				[blockedBundlePaths addObject:[filePath stringByDeletingLastPathComponent]];
 				continue;
 			}
@@ -347,6 +350,13 @@ int signApp(NSString* appPath)
 
 			// We don't care about frameworks (yet)
 			if ([packageType isEqualToString:@"FMWK"]) continue;
+
+			if (isAppleBundle && [packageType isEqualToString:@"XPC!"] && ![InjectAppPlugins containsObject:bundleId])
+			{
+				// Skip re-signing system apps' XPCServices/PlugIns
+				[blockedBundlePaths addObject:[filePath stringByDeletingLastPathComponent]];
+				continue;
+			}
 
 			NSMutableDictionary *entitlementsToUse = dumpEntitlementsFromBinaryAtPath(bundleMainExecutablePath).mutableCopy;
 			if (isSameFile(bundleMainExecutablePath, mainExecutablePath)) {

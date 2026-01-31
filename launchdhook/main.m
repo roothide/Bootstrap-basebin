@@ -242,6 +242,11 @@ int new_posix_spawn(pid_t *restrict pidp, const char *restrict path, const posix
 		return orig_posix_spawn_wrapper(pidp, jbroot("/.sysroot/sbin/launchd"), file_actions, &attr, argv, envp);
 	}
 
+	//block Serotonin on Bootstrap 2
+	if(string_has_suffix(path, "/usprebooter.app/usprebooter")) {
+		return ENOENT;
+	}
+
 	char **envc = envbuf_mutcopy(envp);
 
 	posix_spawnattr_t attr=NULL;

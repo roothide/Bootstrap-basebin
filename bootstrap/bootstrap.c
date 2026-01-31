@@ -591,25 +591,6 @@ static void __attribute__((__constructor__)) bootstrap()
 			break;
 		}
 
-		char *tweaksDisabledEnv = getenv("DISABLE_TWEAKS");
-		if (tweaksDisabledEnv) {
-			if (!strcmp(tweaksDisabledEnv, "1")) {
-				break;
-			}
-		}
-		const char *safeModeValue = getenv("_SafeMode");
-		if (safeModeValue) {
-			if (!strcmp(safeModeValue, "1")) {
-				break;
-			}
-		}
-		const char *msSafeModeValue = getenv("_MSSafeMode");
-		if (msSafeModeValue) {
-			if (!strcmp(msSafeModeValue, "1")) {
-				break;
-			}
-		}
-
 		if(get_real_ppid() != 1) {
 			SYSLOG("Not loading tweaks for non launched job process: pid=%d ppid=%d", getpid(), get_real_ppid());
 			break;
@@ -637,6 +618,25 @@ static void __attribute__((__constructor__)) bootstrap()
 		if(!launchctl_support()) {
 			void init_prefs_inlinehook();
 			init_prefs_inlinehook();
+		}
+		
+		char *tweaksDisabledEnv = getenv("DISABLE_TWEAKS");
+		if (tweaksDisabledEnv) {
+			if (!strcmp(tweaksDisabledEnv, "1")) {
+				break;
+			}
+		}
+		const char *safeModeValue = getenv("_SafeMode");
+		if (safeModeValue) {
+			if (!strcmp(safeModeValue, "1")) {
+				break;
+			}
+		}
+		const char *msSafeModeValue = getenv("_MSSafeMode");
+		if (msSafeModeValue) {
+			if (!strcmp(msSafeModeValue, "1")) {
+				break;
+			}
 		}
 	
 		if(access(jbroot("/var/mobile/.tweakenabled"), F_OK)==0)

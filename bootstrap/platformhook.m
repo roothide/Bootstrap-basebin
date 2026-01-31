@@ -1,5 +1,6 @@
 #include <private/bsm/audit.h>
 #include <Foundation/Foundation.h>
+#include <sys/sysctl.h>
 #include <roothide.h>
 #include <codesign.h>
 #include <dlfcn.h>
@@ -217,7 +218,8 @@ void os_thread_self_restrict_tpro_to_ro(void)
 }
 #endif
 
-extern char**_CFGetProcessPath();
+extern char*** _NSGetArgv(void);
+extern char** _CFGetProcessPath();
 
 void init_process_path_hook()
 {
@@ -240,7 +242,23 @@ void init_process_path_hook()
     {
         DobbyHook(_NSGetExecutablePath, new__NSGetExecutablePath, (void**)&orig__NSGetExecutablePath);
 
+        NXArgv[0] = (char*)g_fixed_executable_path;
+        (*_NSGetArgv())[0] = (char*)g_fixed_executable_path;
         *_CFGetProcessPath() = (char*)g_fixed_executable_path;
+
+        char args_buffer[4096] = {0};
+        size_t args_buffer_size = sizeof(args_buffer);
+        ASSERT(sysctl((int[]){ CTL_KERN, KERN_PROCARGS2, getpid() }, 3, args_buffer, &args_buffer_size, NULL, 0)==0);
+        char* arg0 = args_buffer + sizeof(int);
+        SYSLOG("KERN_PROCARGS2[0] = %d,%s", args_buffer_size, arg0);
+
+        uint64_t usrstack=0;
+        size_t len = sizeof(usrstack);
+        ASSERT(sysctlbyname("kern.usrstack64", &usrstack, &len, NULL, 0) == 0);
+        char* arg_addr = (char*)(usrstack - (args_buffer_size - sizeof(int)));
+        SYSLOG("usrstack=%llx arg0=%p,%s", usrstack, arg_addr, arg_addr);
+        ASSERT(strlen(arg_addr) >= strlen(g_fixed_executable_path));
+        strcpy((char*)arg_addr, (char*)g_fixed_executable_path);
 
         NSMutableArray* new_arguments = NSProcessInfo.processInfo.arguments.mutableCopy;
         new_arguments[0] = @(g_fixed_executable_path);
@@ -277,20 +295,22 @@ void init_process_path_hook()
         }
 
         uint8_t* __initedMainBundle = DobbySymbolResolver("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation", "__initedMainBundle");
-        SYSLOG("__initedMainBundle=%p/%d", __initedMainBundle, __initedMainBundle ? *__initedMainBundle : 0);
+        SYSLOG("__initedMainBundle=%p,%d", __initedMainBundle, __initedMainBundle ? *__initedMainBundle : 0);
         *__initedMainBundle = 0; // force re-init main bundle
     }
 
+    SYSLOG("NXArgv[0] = %s", NXArgv[0]);
+    SYSLOG("_NSGetArgv()[0] = %s", (*_NSGetArgv())[0]);
     SYSLOG("_CFGetProcessPath = %s", *_CFGetProcessPath());
-    SYSLOG("NSBundle.mainBundle.bundlePath = %d/%@", NSBundle.mainBundle.isLoaded, NSBundle.mainBundle.bundlePath);
-    SYSLOG("NSBundle.mainBundle.executablePath = %d/%@", NSBundle.mainBundle.isLoaded, NSBundle.mainBundle.executablePath);
+    SYSLOG("NSBundle.mainBundle.bundlePath = %d,%@", NSBundle.mainBundle.isLoaded, NSBundle.mainBundle.bundlePath);
+    SYSLOG("NSBundle.mainBundle.executablePath = %d,%@", NSBundle.mainBundle.isLoaded, NSBundle.mainBundle.executablePath);
     SYSLOG("CFMainBundleURL = %@", (__bridge NSURL*)CFBundleCopyBundleURL(CFBundleGetMainBundle()));
     SYSLOG("CFMainBundleExecutableURL = %@", (__bridge NSURL*)CFBundleCopyExecutableURL(CFBundleGetMainBundle()));
     SYSLOG("NSProcessInfo.processInfo.arguments = %@", NSProcessInfo.processInfo.arguments);
-    SYSLOG("dyld_image_path_containing_address = %p/%s", dyld_image_path_containing_address(_dyld_get_prog_image_header()), dyld_image_path_containing_address(_dyld_get_prog_image_header()));
+    SYSLOG("dyld_image_path_containing_address = %p,%s", dyld_image_path_containing_address(_dyld_get_prog_image_header()), dyld_image_path_containing_address(_dyld_get_prog_image_header()));
     for(int i=0; i<_dyld_image_count(); i++) {
         if((void*)_dyld_get_image_header(i) == (void*)_dyld_get_prog_image_header()) {
-            SYSLOG("_dyld_get_image_name(%d) = %p/%s", i, _dyld_get_image_name(i), _dyld_get_image_name(i));
+            SYSLOG("_dyld_get_image_name(%d) = %p,%s", i, _dyld_get_image_name(i), _dyld_get_image_name(i));
         }
     }
 }

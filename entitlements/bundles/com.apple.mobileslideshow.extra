@@ -15,6 +15,18 @@
 	<array>
 		<string>/Library/Application Support/com.apple.mobileslideshow/</string>
 	</array>
+	<key>com.apple.security.exception.mach-lookup.global-name</key>
+	<array>
+		<string>com.apple.datamigrator</string>
+		<string>com.apple.Honeybee.event-notify</string>
+		<string>com.apple.mobile.usermanagerd.xpc</string>
+		<string>com.apple.SharedWebCredentials</string>
+		<string>com.apple.osanalytics.osanalyticshelper</string>
+	</array>
+	<key>com.apple.security.exception.sysctl.read-only</key>
+	<array>
+		<string>kern.bootargs</string>
+	</array>
 
 	<key>com.apple.security.exception.process-info</key>
 	<true/>

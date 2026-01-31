@@ -362,8 +362,8 @@ NSArray* blockedAppPlugins = @[
 	@"com.opa334.CraneApplication.CraneShortcuts",
 ];
 
-NSArray* patchRequiredAppPlugins = @[
-    @"com.apple.shortcuts.Run-Workflow",
+NSArray* InjectAppPlugins = @[
+
 ];
 
 //sometimes launching the app may lose those environment variables(if not being containerized in lsd registry?)
@@ -781,10 +781,23 @@ void registerPath(NSString *path, BOOL forceSystem)
 		unlink([pluginPath stringByAppendingPathComponent:@".jbroot"].fileSystemRepresentation);
 
 		NSString* rebuildFilePath = [pluginPath stringByAppendingPathComponent:@".rebuild"];
-			
-		if(jbrootexists && [patchRequiredAppPlugins containsObject:pluginBundleID] && pluginExecutablePath && pluginExecutablePath.length)
+		
+		NSString* pluginRegisterPath = pluginPath;
+
+		if(jbrootexists && ![InjectAppPlugins containsObject:pluginBundleID] && isAppleBundle)
 		{
-			[NSFileManager.defaultManager copyItemAtPath:jbrootpath toPath:[pluginPath stringByAppendingPathComponent:@".jbroot"] error:nil];
+			NSString* stockPluginPath = rootfs(pluginPath);
+			if([NSFileManager.defaultManager fileExistsAtPath:stockPluginPath])
+			{
+				pluginRegisterPath = stockPluginPath;
+				// assert([NSFileManager.defaultManager removeItemAtPath:pluginPath error:nil]);
+				// assert([NSFileManager.defaultManager createSymbolicLinkAtPath:pluginPath withDestinationPath:stockPluginPath error:nil]);
+			}
+		}
+
+		if(jbrootexists && [InjectAppPlugins containsObject:pluginBundleID] && pluginExecutablePath && pluginExecutablePath.length)
+		{
+			assert([NSFileManager.defaultManager createSymbolicLinkAtPath:[pluginPath stringByAppendingPathComponent:@".jbroot"] withDestinationPath:jbrootpath error:nil]);
 
 			NSDictionary* rebuildStatus = [NSDictionary dictionaryWithContentsOfFile:rebuildFilePath];
 
@@ -871,7 +884,7 @@ void registerPath(NSString *path, BOOL forceSystem)
 		pluginDict[@"Container"] = pluginContainerPath;
 		pluginDict[@"EnvironmentVariables"] = constructEnvironmentVariablesForContainerPath(appBundleID, path, pluginContainerPath, pluginContainerized);
 
-		pluginDict[@"Path"] = pluginPath;
+		pluginDict[@"Path"] = pluginRegisterPath;
 		pluginDict[@"PluginOwnerBundleID"] = appBundleID;
 		pluginDict[@"SignerOrganization"] = @"Apple Inc.";
 		pluginDict[@"SignatureVersion"] = @132352;
@@ -981,7 +994,11 @@ void infoForBundleID(NSString *bundleID) {
 		for(LSPlugInKitProxy *plugin in app.plugInKitPlugins) {
 			NSURL* pluginURL = plugin.dataContainerURL;
 			if(pluginURL) {
-				printf(_("App Plugin Container: %s -> %s\n"), plugin.bundleIdentifier.UTF8String, pluginURL.fileSystemRepresentation);
+				printf(_("App Plugin: %s\n"), plugin.bundleIdentifier.UTF8String);
+				printf(_("\tContainerized: %s\n"), [plugin isContainerized] ? _("true") : _("false"));
+				printf(_("\tPath: %s\n"), plugin.bundleURL.fileSystemRepresentation);
+				printf(_("\tContainer: %s\n"), pluginURL.fileSystemRepresentation);
+				printf("\n");
 			}
 		}
 
