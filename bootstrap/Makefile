@@ -10,7 +10,7 @@ include $(THEOS)/makefiles/common.mk
 LIBRARY_NAME = bootstrap
 
 bootstrap_FILES = $(wildcard *.c *.x *.m *.S)
-bootstrap_CFLAGS = -I../common -fobjc-arc -Wno-deprecated-declarations -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-unused-value -Wno-format-invalid-specifier
+bootstrap_CFLAGS = -I../common -fobjc-arc -Wno-deprecated-declarations -Wno-unused-variable -Wno-unused-function -Wno-unused-but-set-variable -Wno-unused-value -Wno-format-invalid-specifier -Wno-unsupported-availability-guard
 bootstrap_LDFLAGS = -L../common/lib -lcommon -ldobby -lc++ -lbsm
 bootstrap_INSTALL_PATH = /basebin
 

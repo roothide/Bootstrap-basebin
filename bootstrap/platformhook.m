@@ -256,11 +256,21 @@ void init_process_path_hook()
 
         for(int i=0; i<_dyld_image_count(); i++) {
             if((void*)_dyld_get_image_header(i) == (void*)_dyld_get_prog_image_header()) {
-                strcpy((char*)_dyld_get_image_name(i), (char*)g_fixed_executable_path);
+                const char* image_path = _dyld_get_image_name(i);
+                ASSERT(strlen(image_path) >= strlen(g_fixed_executable_path));
+		        if (!__builtin_available(iOS 16.0, *)) {
+                    ASSERT(vm_protect(mach_task_self(), (vm_address_t)image_path, strlen(image_path)+1, 0, VM_PROT_READ|VM_PROT_WRITE|VM_PROT_COPY)==KERN_SUCCESS);
+                }
+                strcpy((char*)image_path, (char*)g_fixed_executable_path);
             }
         }
 
-        strcpy((char*)dyld_image_path_containing_address(_dyld_get_prog_image_header()), (char*)g_fixed_executable_path);
+        const char* prog_image_path = dyld_image_path_containing_address(_dyld_get_prog_image_header());
+        ASSERT(strlen(prog_image_path) >= strlen(g_fixed_executable_path));
+        if (!__builtin_available(iOS 16.0, *)) {
+            ASSERT(vm_protect(mach_task_self(), (vm_address_t)prog_image_path, strlen(prog_image_path)+1, 0, VM_PROT_READ|VM_PROT_WRITE|VM_PROT_COPY)==KERN_SUCCESS);
+        }
+        strcpy((char*)prog_image_path, (char*)g_fixed_executable_path);
 
         if (needsTPRORevert) {
             os_thread_self_restrict_tpro_to_ro();

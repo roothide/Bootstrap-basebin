@@ -339,6 +339,14 @@ int new_posix_spawn(pid_t *restrict pidp, const char *restrict path, const posix
 				posix_spawnattr_set_launch_type_np(attrp, 0);
 			}
 		}
+		else if(isSubPathOf(path, jbroot("/")))
+		{
+			newpath = strdup(path);
+
+			insertlib = strdup(jbroot("/basebin/bootstrap.dylib"));
+
+			envbuf_setenv(&envc, "__SANDBOX_EXTENSIONS", g_sandbox_extensions_ext, 1);
+		}
 	}
 
 	if(newpath && insertlib)
