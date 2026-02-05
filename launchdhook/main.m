@@ -34,14 +34,26 @@ int new_csops(pid_t pid, unsigned int  ops, void * useraddr, size_t usersize)
 {
 	int ret = orig_csops(pid, ops, useraddr, usersize);
 
-	if(isBlacklistedPid(pid)) {
-		return ret;
-	}
+	if(ops==CS_OPS_STATUS && useraddr)
+	{
+		uint32_t csflags = *(uint32_t*)useraddr;
+		if(ret == 0)
+		{
+			if((csflags & CS_PLATFORM_BINARY) == 0)
+			{
+				char teamid[255]={0};
+				if(!proc_get_teamid(pid, teamid) || strcmp(teamid, "T8ALTGMVXN")!=0) {
+					return ret;
+				}
 
-	if(ret==0 && ops==CS_OPS_STATUS && useraddr) {
-		*(uint32_t*)useraddr |= CS_VALID;
-		*(uint32_t*)useraddr |= CS_PLATFORM_BINARY;
-		*(uint32_t*)useraddr &= ~CS_PLATFORM_PATH;
+				*(uint32_t*)useraddr |= CS_VALID;
+				*(uint32_t*)useraddr |= CS_PLATFORM_BINARY;
+				*(uint32_t*)useraddr &= ~CS_PLATFORM_PATH;
+			}
+			else { //palehide
+				*(uint32_t*)useraddr |= CS_VALID;
+			}
+		}
 	}
 
 	return ret;
@@ -52,15 +64,27 @@ int new_csops_audittoken(pid_t pid, unsigned int  ops, void * useraddr, size_t u
 {
     int ret = orig_csops_audittoken(pid, ops, useraddr, usersize, token);
 
-	if(isBlacklistedToken(token)) {
-		return ret;
-	}
+	if(ops==CS_OPS_STATUS && useraddr)
+	{
+		uint32_t csflags = *(uint32_t*)useraddr;
+		if(ret == 0)
+		{
+			if((csflags & CS_PLATFORM_BINARY) == 0)
+			{
+				char teamid[255]={0};
+				if(!proc_get_teamid(pid, teamid) || strcmp(teamid, "T8ALTGMVXN")!=0) {
+					return ret;
+				}
 
-    if(ret==0 && ops==CS_OPS_STATUS && useraddr) {
-        *(uint32_t*)useraddr |= CS_VALID;
-        *(uint32_t*)useraddr |= CS_PLATFORM_BINARY;
-        *(uint32_t*)useraddr &= ~CS_PLATFORM_PATH;
-    }
+				*(uint32_t*)useraddr |= CS_VALID;
+				*(uint32_t*)useraddr |= CS_PLATFORM_BINARY;
+				*(uint32_t*)useraddr &= ~CS_PLATFORM_PATH;
+			}
+			else { //palehide
+				*(uint32_t*)useraddr |= CS_VALID;
+			}
+		}
+	}
 
     return ret;
 }
@@ -246,6 +270,9 @@ int new_posix_spawn(pid_t *restrict pidp, const char *restrict path, const posix
 	if(string_has_suffix(path, "/usprebooter.app/usprebooter")) {
 		return ENOENT;
 	}
+	if(string_has_suffix(path, "/Dopamine.app/Dopamine")) {
+		return ENOENT;
+	}
 
 	char **envc = envbuf_mutcopy(envp);
 
@@ -351,6 +378,18 @@ int new_posix_spawn(pid_t *restrict pidp, const char *restrict path, const posix
 			insertlib = strdup(jbroot("/basebin/bootstrap.dylib"));
 
 			envbuf_setenv(&envc, "__SANDBOX_EXTENSIONS", g_sandbox_extensions_ext, 1);
+		}
+		else if(string_has_prefix(path, "/Applications/"))
+		{
+			const char* resigned_path = jbroot(path);
+
+			if(isSubPathOf(resigned_path, jbroot("/Applications/")))
+			{
+				should_patch = true;
+				newpath = strdup(resigned_path);
+				insertlib = strdup(jbroot("/basebin/bootstrap.dylib"));
+				envbuf_setenv(&envc, "__SANDBOX_EXTENSIONS", g_sandbox_extensions_ext, 1);
+			}
 		}
 	}
 

@@ -47,7 +47,7 @@ int openssh_start()
             char **envc = envbuf_mutcopy(environ);
             envbuf_setenv(&envc, "DYLD_INSERT_LIBRARIES", jbroot("/basebin/bootstrap.dylib"), 1);
             
-            int ret = spawn(jbroot(argv[0]), (char*const*)argv, (char*const*)envc, ^(pid_t pid) {
+            int ret = spawn_binary(jbroot(argv[0]), (char*const*)argv, (char*const*)envc, ^(pid_t pid) {
                 FILE* fp = fopen(jbroot("/basebin/.sshd.pid"), "w");
                 ASSERT(fp != NULL);
                 fprintf(fp, "%d", pid);

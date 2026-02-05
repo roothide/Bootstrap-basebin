@@ -121,6 +121,39 @@ char* proc_get_identifier(pid_t pid, char buffer[255])
     return buffer;
 }
 
+char* proc_get_teamid(pid_t pid, char buffer[255])
+{
+    static char __thread threadbuffer[255];
+    if(!buffer) buffer = threadbuffer;
+    
+    struct csheader {
+        uint32_t magic;
+        uint32_t length;
+    } header = {0};
+    
+    int result = csops(pid, CS_OPS_TEAMID, &header, sizeof(header));
+    if (result != 0 && errno != ERANGE) {
+        return NULL;
+    }
+    
+    uint32_t bufferLen = ntohl(header.length);
+
+    char* csbuffer = malloc(bufferLen);
+    if (!csbuffer) {
+        return NULL;
+    }
+    
+    result = csops(pid, CS_OPS_TEAMID, csbuffer, bufferLen);
+    if (result == 0) {
+        char* identity = csbuffer + sizeof(struct csheader);
+        strlcpy(buffer, identity, 255);
+    }
+    
+    free(csbuffer);
+
+    return buffer;
+}
+
 int proc_get_status(int pid) 
 {
     struct proc_bsdinfo procInfo = {0};
@@ -215,14 +248,13 @@ void killAllForBundle(const char* bundlePath)
 {
     SYSLOG("killAllForBundle: %s", bundlePath);
     
-    char realBundlePath[PATH_MAX+1];
-    if(!realpath(bundlePath, realBundlePath))
-        return;
-    
-    size_t realBundlePathLen = strlen(realBundlePath);
-    if(realBundlePath[realBundlePathLen] != '/') {
-        strcat(realBundlePath, "/");
-        realBundlePathLen++;
+    static int maxArgumentSize = 0;
+    if (maxArgumentSize == 0) {
+        size_t size = sizeof(maxArgumentSize);
+        if (sysctl((int[]){ CTL_KERN, KERN_ARGMAX }, 2, &maxArgumentSize, &size, NULL, 0) == -1) {
+            perror("sysctl argument size");
+            maxArgumentSize = 4096; // Default
+        }
     }
 
     int mib[3] = { CTL_KERN, KERN_PROC, KERN_PROC_ALL};
@@ -238,78 +270,109 @@ void killAllForBundle(const char* bundlePath)
         free(info);
         return;
     }
+
+    if(string_has_prefix(bundlePath, "/private/var/")) {
+        bundlePath += sizeof("/private")-1;
+    }
+    int pathlen = strlen(bundlePath);
+    char* fixedBundlePath = malloc(pathlen+2);
+    strcpy(fixedBundlePath, bundlePath);
+    if(fixedBundlePath[pathlen] != '/') {
+        strcat(fixedBundlePath, "/");
+    }
+
     count = length / sizeof(struct kinfo_proc);
     for (int i = 0; i < count; i++) {
         pid_t pid = info[i].kp_proc.p_pid;
         if (pid == 0) {
             continue;
         }
-        
-        char executablePath[PATH_MAX];
-        if(proc_pidpath(pid, executablePath, sizeof(executablePath)) > 0) {
-            char realExecutablePath[PATH_MAX];
-            if (realpath(executablePath, realExecutablePath)
-                && strncmp(realExecutablePath, realBundlePath, realBundlePathLen) == 0) {
-                int ret = kill(pid, SIGKILL);
-                SYSLOG("killAllForBundle %s -> %d", realExecutablePath, ret);
+        size_t size = maxArgumentSize;
+        char* buffer = (char *)malloc(size);
+        if (sysctl((int[]){ CTL_KERN, KERN_PROCARGS2, pid }, 3, buffer, &size, NULL, 0) == 0) {
+            char* executablePath = buffer + sizeof(int);
+            if(string_has_prefix(executablePath, "/private/var/")) {
+                executablePath += sizeof("/private")-1;
+            }
+            if(string_has_prefix(executablePath, fixedBundlePath)) {
+                SYSLOG("kill pid=%d path=%s\n", pid, executablePath);
+                kill(pid, SIGKILL);
             }
         }
+        free(buffer);
     }
     free(info);
+    free((void*)fixedBundlePath);
 }
 
-void killAllForExecutable(const char* path)
+void killAllForExecutable(const char* path, int signal)
 {
-    SYSLOG("killAllForExecutable %s", path);
-    
-    struct stat st;
-    if(stat(path, &st) < 0) return;
+    SYSLOG("killExecutable %s (signal=%d)", path, signal);
+
+    static int maxArgumentSize = 0;
+    if (maxArgumentSize == 0) {
+        size_t size = sizeof(maxArgumentSize);
+        if (sysctl((int[]){ CTL_KERN, KERN_ARGMAX }, 2, &maxArgumentSize, &size, NULL, 0) == -1) {
+            SYSLOG("sysctl KERN_ARGMAX failed %d,%s", errno, strerror(errno));
+            maxArgumentSize = 4096; // Default
+        }
+    }
 
     int mib[3] = { CTL_KERN, KERN_PROC, KERN_PROC_ALL};
     struct kinfo_proc *info;
     size_t length;
     size_t count;
     
-    if (sysctl(mib, 3, NULL, &length, NULL, 0) < 0)
+    if (sysctl(mib, 3, NULL, &length, NULL, 0) < 0) {
+        SYSLOG("killExecutable: sysctl KERN_PROC_ALL:size failed %d,%s", errno, strerror(errno));
         return;
-    if (!(info = malloc(length)))
+    }
+    if (!(info = malloc(length))) {
+        SYSLOG("killExecutable: malloc failed: %zu", length);
         return;
+    }
     if (sysctl(mib, 3, info, &length, NULL, 0) < 0) {
+        SYSLOG("killExecutable: sysctl KERN_PROC_ALL:data failed %d,%s", errno, strerror(errno));
         free(info);
         return;
     }
     count = length / sizeof(struct kinfo_proc);
+    SYSLOG("killExecutable: found %zu processes", count);
     for (int i = 0; i < count; i++) {
         pid_t pid = info[i].kp_proc.p_pid;
         if (pid == 0) {
             continue;
         }
-        
-        char procpath[PATH_MAX];
-        if(proc_pidpath(pid, procpath, sizeof(procpath)) > 0) {
-            struct stat st2;
-            if(stat(procpath, &st2) == 0) {
-                if(st.st_ino==st2.st_ino && st.st_dev==st2.st_dev) {
-                    int ret = kill(pid, SIGKILL);
-                    //SYSLOG("killAllForExecutable(%d) %s -> %d", sig, path, ret);
-                }
+        size_t size = maxArgumentSize;
+        char* buffer = (char *)malloc(size);
+        if (sysctl((int[]){ CTL_KERN, KERN_PROCARGS2, pid }, 3, buffer, &size, NULL, 0) == 0) {
+            char *executablePath = buffer + sizeof(int);
+            if (strcmp(executablePath, path) == 0) {
+                SYSLOG("kill(%d) pid=%d path=%s", signal, pid, executablePath);
+                kill(pid, signal);
             }
+        } else {
+            SYSLOG("killExecutable: sysctl KERN_PROCARGS2(%d) failed %d,%s", pid, errno, strerror(errno));
         }
+        free(buffer);
     }
     free(info);
 }
 
-int spawn(const char* path, char*const* argv, char*const* envp, void(^pid_out)(pid_t), void(^std_out)(char*,int), void(^err_out)(char*,int))
+int spawn_common(const char* path, char*const* argv, char*const* envp, posix_spawnattr_t* attrp, void(^pid_out)(pid_t), void(^std_out)(char*,int), void(^err_out)(char*,int))
 {
     SYSLOG("spawn %s", path);
     
     __block pid_t pid=0;
-    posix_spawnattr_t attr;
-    posix_spawnattr_init(&attr);
+    posix_spawnattr_t attr=NULL;
+    if(!attrp) {
+        attrp = &attr;
+        posix_spawnattr_init(&attr);
+    }
     
-    posix_spawnattr_set_persona_np(&attr, 99, POSIX_SPAWN_PERSONA_FLAGS_OVERRIDE);
-    posix_spawnattr_set_persona_uid_np(&attr, 0);
-    posix_spawnattr_set_persona_gid_np(&attr, 0);
+    posix_spawnattr_set_persona_np(attrp, 99, POSIX_SPAWN_PERSONA_FLAGS_OVERRIDE);
+    posix_spawnattr_set_persona_uid_np(attrp, 0);
+    posix_spawnattr_set_persona_gid_np(attrp, 0);
 
     posix_spawn_file_actions_t action;
     posix_spawn_file_actions_init(&action);
@@ -372,10 +435,10 @@ int spawn(const char* path, char*const* argv, char*const* envp, void(^pid_out)(p
     dispatch_resume(stdOutSource);
     dispatch_resume(stdErrSource);
     
-    int spawnError = posix_spawn(&pid, path, &action, &attr, argv, envp);
+    int spawnError = posix_spawn(&pid, path, &action, attrp, argv, envp);
     SYSLOG("spawn ret=%d, pid=%d", spawnError, pid);
     
-    posix_spawnattr_destroy(&attr);
+    if(attr) posix_spawnattr_destroy(&attr);
     posix_spawn_file_actions_destroy(&action);
     
     close(outPipe[1]);
@@ -409,6 +472,11 @@ int spawn(const char* path, char*const* argv, char*const* envp, void(^pid_out)(p
     return -1;
 }
 
+int spawn_binary(const char* path, char*const* argv, char*const* envp, void(^pid_out)(pid_t), void(^std_out)(char*,int), void(^err_out)(char*,int))
+{
+    return spawn_common(path, argv, envp, NULL, pid_out, std_out, err_out);
+}
+
 int spawn_bootstrap_binary(char*const* argv, __strong NSString** stdOut, __strong NSString** stdErr)
 {
     NSMutableArray* argArr = [[NSMutableArray alloc] init];
@@ -427,7 +495,7 @@ int spawn_bootstrap_binary(char*const* argv, __strong NSString** stdOut, __stron
     if(stdErr) errString = [NSMutableString new];
     
     
-    int retval = spawn(jbroot(@(argv[0])).fileSystemRepresentation, argv, envc, nil, ^(char* outstr, int length){
+    int retval = spawn_common(jbroot(@(argv[0])).fileSystemRepresentation, argv, envc, NULL, nil, ^(char* outstr, int length){
         NSString *str = [[NSString alloc] initWithBytes:outstr length:length encoding:NSASCIIStringEncoding];
         if(stdOut) [outString appendString:str];
     }, ^(char* errstr, int length){
@@ -466,13 +534,64 @@ int spawn_root(NSString* path, NSArray* args, __strong NSString** stdOut, __stro
     if(stdOut) outString = [NSMutableString new];
     if(stdErr) errString = [NSMutableString new];
     
-    int retval = spawn(path.fileSystemRepresentation, argsC, environ, nil, ^(char* outstr, int length){
+    int retval = spawn_common(path.fileSystemRepresentation, argsC, environ, NULL, nil, ^(char* outstr, int length){
         NSString *str = [[NSString alloc] initWithBytes:outstr length:length encoding:NSASCIIStringEncoding];
         if(stdOut) [outString appendString:str];
     }, ^(char* errstr, int length){
         NSString *str = [[NSString alloc] initWithBytes:errstr length:length encoding:NSASCIIStringEncoding];
         if(stdErr) [errString appendString:str];
     });
+    
+    if(stdOut) *stdOut = outString.copy;
+    if(stdErr) *stdErr = errString.copy;
+    
+    for (NSUInteger i = 0; i < argCount; i++)
+    {
+        free(argsC[i]);
+    }
+    free(argsC);
+    
+    return retval;
+}
+
+int spawn_daemon(NSString* path, NSArray* args, __strong NSString** stdOut, __strong NSString** stdErr)
+{
+    SYSLOG("spawn_daemon %s with %s", path.fileSystemRepresentation, args.debugDescription.UTF8String);
+    
+    NSMutableArray* argsM = args.mutableCopy ?: [NSMutableArray new];
+    [argsM insertObject:path atIndex:0];
+    
+    NSUInteger argCount = [argsM count];
+    char **argsC = (char **)malloc((argCount + 1) * sizeof(char*));
+
+    for (NSUInteger i = 0; i < argCount; i++)
+    {
+        argsC[i] = strdup([[argsM objectAtIndex:i] UTF8String]);
+    }
+    argsC[argCount] = NULL;
+
+    
+    __block NSMutableString* outString=nil;
+    __block NSMutableString* errString=nil;
+    
+    if(stdOut) outString = [NSMutableString new];
+    if(stdErr) errString = [NSMutableString new];
+    
+
+    posix_spawnattr_t attr=NULL;
+    posix_spawnattr_init(&attr);
+
+    posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETPGROUP);
+
+    int retval = spawn_common(path.fileSystemRepresentation, argsC, environ, NULL, nil, ^(char* outstr, int length){
+        NSString *str = [[NSString alloc] initWithBytes:outstr length:length encoding:NSASCIIStringEncoding];
+        if(stdOut) [outString appendString:str];
+    }, ^(char* errstr, int length){
+        NSString *str = [[NSString alloc] initWithBytes:errstr length:length encoding:NSASCIIStringEncoding];
+        if(stdErr) [errString appendString:str];
+    });
+
+    posix_spawnattr_destroy(&attr);
     
     if(stdOut) *stdOut = outString.copy;
     if(stdErr) *stdErr = errString.copy;
@@ -846,6 +965,26 @@ void loadAppStoredIdentifiers()
                         }
                     }
                 }
+
+                NSString *extensionsPath = [appPath stringByAppendingPathComponent:@"Extensions"];
+                if ([fileManager fileExistsAtPath:extensionsPath]) 
+                {
+                    NSArray *extensions = [fileManager contentsOfDirectoryAtPath:extensionsPath error:nil];
+                    for (NSString *extension in extensions) 
+                    {
+                        NSString *extensionPath = [extensionsPath stringByAppendingPathComponent:extension];
+                        NSString *extensionInfoPath = [extensionPath stringByAppendingPathComponent:@"Info.plist"];
+                        NSDictionary *extensionInfo = [NSDictionary dictionaryWithContentsOfFile:extensionInfoPath];
+                        NSString *extensionBundleID = extensionInfo[@"CFBundleIdentifier"];
+                        
+                        if (extensionBundleID) {
+                            SYSLOG("  Extension: %s -> %s", extension.UTF8String, extensionBundleID.UTF8String);
+                            [StoredAppIdentifiers addObject:extensionBundleID];
+                        } else {
+                            SYSLOG("  *** No Bundle ID found: %s", extensionPath.UTF8String);
+                        }
+                    }
+                }
             }
         }
     }
@@ -1129,4 +1268,13 @@ void hook_instance_method(Class clazz, SEL selector, void* replacement, void** o
     }
     *old_ptr = (void*)method_getImplementation(method);
     method_setImplementation(method, (IMP)replacement);
+}
+
+bool is_same_file(const char* path1, const char* path2)
+{
+	struct stat sb1 = {0};
+	struct stat sb2 = {0};
+	if(stat(path1, &sb1) != 0) return false;
+	if(stat(path2, &sb2) != 0) return false;
+	return sb1.st_dev==sb2.st_dev && sb1.st_ino==sb2.st_ino;
 }

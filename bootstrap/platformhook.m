@@ -30,8 +30,8 @@ int new_csops(pid_t pid, unsigned int  ops, void * useraddr, size_t usersize)
         {
             if((csflags & CS_PLATFORM_BINARY) == 0)
             {
-                if(pid!=getpid() && launchctl_support() && jbclient_blacklist_check_pid(pid)) {
-                    SYSLOG("csops_audittoken: skip blacklisted pid=%d", pid);
+                char teamid[255]={0};
+                if(!proc_get_teamid(pid, teamid) || strcmp(teamid, "T8ALTGMVXN")!=0) {
                     return ret;
                 }
 
@@ -39,11 +39,14 @@ int new_csops(pid_t pid, unsigned int  ops, void * useraddr, size_t usersize)
                 *(uint32_t*)useraddr |= CS_PLATFORM_BINARY;
                 *(uint32_t*)useraddr &= ~CS_PLATFORM_PATH;
             }
+            else { //palehide
+                *(uint32_t*)useraddr |= CS_VALID;
+            }
 
         } else {
-            SYSLOG("csops_audittoken(CS_OPS_STATUS) failed? pid=%d,pidversion=%d", pid, proc_get_pidversion(pid));
+            SYSLOG("new_csops(CS_OPS_STATUS) failed? pid=%d,pidversion=%d", pid, proc_get_pidversion(pid));
             //*(uint32_t*)useraddr = CS_SIGNED|CS_PLATFORM_BINARY|CS_KILL|CS_ADHOC|CS_VALID;
-            /* a re-signed system executable may not have permission to call csops. 
+            /* a re-signed system executable may not have permission to call csops on other processes.
              In Bootstrap 1.x, we returned fake data with the caller's process via csops(getpid()), 
              but we should add `com.apple.security.exception.process-info` entitlement to the re-signed executable. */
         }
@@ -66,8 +69,8 @@ int new_csops_audittoken(pid_t pid, unsigned int  ops, void * useraddr, size_t u
         {
             if((csflags & CS_PLATFORM_BINARY) == 0)
             {
-                if(pid!=getpid() && launchctl_support() && jbclient_blacklist_check_pid(pid)) {
-                    SYSLOG("csops_audittoken: skip blacklisted pid=%d", pid);
+                char teamid[255]={0};
+                if(!proc_get_teamid(pid, teamid) || strcmp(teamid, "T8ALTGMVXN")!=0) {
                     return ret;
                 }
 
@@ -75,13 +78,16 @@ int new_csops_audittoken(pid_t pid, unsigned int  ops, void * useraddr, size_t u
                 *(uint32_t*)useraddr |= CS_PLATFORM_BINARY;
                 *(uint32_t*)useraddr &= ~CS_PLATFORM_PATH;
             }
+            else { //palehide
+                *(uint32_t*)useraddr |= CS_VALID;
+            }
 
         } else {
             extern int audit_token_to_pidversion(audit_token_t atoken);
             SYSLOG("csops_audittoken(CS_OPS_STATUS) failed? pid=%d,pidversion=%d token=%p/%d/%d", pid, proc_get_pidversion(pid),
                    token,  token ? audit_token_to_pid(*token) : -1, token ? audit_token_to_pidversion(*token) : -1);
             //*(uint32_t*)useraddr = CS_SIGNED|CS_PLATFORM_BINARY|CS_KILL|CS_ADHOC|CS_VALID;
-            /* a re-signed system executable may not have permission to call csops. 
+            /* a re-signed system executable may not have permission to call csops on other processes.
              In Bootstrap 1.x, we returned fake data with the caller's process via csops(getpid()), 
              but we should add `com.apple.security.exception.process-info` entitlement to the re-signed executable. */
         }
@@ -231,7 +237,7 @@ void init_process_path_hook()
     if(string_has_prefix(exepath, "/.sysroot/")) {
         g_fixed_executable_path = strdup(exepath + sizeof("/.sysroot")-1);
     }
-    else if(string_has_prefix(exepath, "/Applications/")) {
+    else if(string_has_prefix(exepath, "/Applications/") && access(exepath, F_OK)==0) {
         g_fixed_executable_path = strdup(exepath);
     }
 
@@ -249,16 +255,26 @@ void init_process_path_hook()
         char args_buffer[4096] = {0};
         size_t args_buffer_size = sizeof(args_buffer);
         ASSERT(sysctl((int[]){ CTL_KERN, KERN_PROCARGS2, getpid() }, 3, args_buffer, &args_buffer_size, NULL, 0)==0);
-        char* arg0 = args_buffer + sizeof(int);
-        SYSLOG("KERN_PROCARGS2[0] = %d,%s", args_buffer_size, arg0);
+        SYSLOG("KERN_PROCARGS2: size=%d, argc=%d executable_path=%s", args_buffer_size, *(int*)args_buffer, args_buffer + sizeof(int));
 
         uint64_t usrstack=0;
         size_t len = sizeof(usrstack);
         ASSERT(sysctlbyname("kern.usrstack64", &usrstack, &len, NULL, 0) == 0);
         char* arg_addr = (char*)(usrstack - (args_buffer_size - sizeof(int)));
-        SYSLOG("usrstack=%llx arg0=%p,%s", usrstack, arg_addr, arg_addr);
-        ASSERT(strlen(arg_addr) >= strlen(g_fixed_executable_path));
+        SYSLOG("usrstack=%llx executable_path=%p,%s", usrstack, arg_addr, arg_addr);
+        size_t executable_path_length = strlen(arg_addr);
+        size_t fixed_executable_path_length = strlen(g_fixed_executable_path);
+        ASSERT(executable_path_length >= fixed_executable_path_length);
+        ASSERT(is_same_file(arg_addr, g_executable_path));
+        memset(arg_addr, 0, executable_path_length);
         strcpy((char*)arg_addr, (char*)g_fixed_executable_path);
+        char* arg0 = arg_addr + executable_path_length+1;
+        while (*arg0 == 0) arg0++;
+        SYSLOG("arg0 = %s", arg0);
+        size_t arg0_length = strlen(arg0);
+        ASSERT(arg0_length >= fixed_executable_path_length);
+        memset(arg0, 0, arg0_length);
+        strcpy(arg0+arg0_length-fixed_executable_path_length, (char*)g_fixed_executable_path);
 
         NSMutableArray* new_arguments = NSProcessInfo.processInfo.arguments.mutableCopy;
         new_arguments[0] = @(g_fixed_executable_path);

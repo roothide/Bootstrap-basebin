@@ -33,7 +33,7 @@ int child_execve(char *exceptionPortName, char *path) {
     }
     
     if(posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETEXEC) != 0) {
-        perror("posix_spawnattr_set_flags");
+        perror("posix_spawnattr_setflags");
         return 1;
     }
     

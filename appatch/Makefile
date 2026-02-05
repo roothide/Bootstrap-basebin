@@ -24,7 +24,7 @@ clean::
 	
 before-package::
 	cp -a ../entitlements $(THEOS_STAGING_DIR)/basebin/appatch.entitlements
-	cp -a ../rebuildApps.sh $(THEOS_STAGING_DIR)/DEBIAN/postinst
+# 	cp -a ../rebuildApps.sh $(THEOS_STAGING_DIR)/DEBIAN/postinst
 	
 after-install::
 	install.exec "rm -rf /basebin/entitlements; mv /basebin/appatch.entitlements /basebin/entitlements"

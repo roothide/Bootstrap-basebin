@@ -28,5 +28,5 @@ clean::
 	rm -rf ./packages/*
 	
 before-package::
-	cp -a ../rebuildApps.sh $(THEOS_STAGING_DIR)/DEBIAN/postinst
+# 	cp -a ../rebuildApps.sh $(THEOS_STAGING_DIR)/DEBIAN/postinst
 	

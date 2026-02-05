@@ -6,15 +6,11 @@
 	<true/>
 	<key>platform-application</key>
 	<true/>
-	<key>com.apple.private.security.no-sandbox</key>
-	<true/>
-	<key>com.apple.security.exception.mach-lookup.global-name</key>
+	<key>com.apple.private.security.container-required</key>
+	<string>com.apple.CarPlayWallpaper</string>
+	<key>com.apple.security.exception.files.absolute-path.read-write</key>
 	<array>
-		<string>com.apple.datamigrator</string>
-		<string>com.apple.Honeybee.event-notify</string>
-		<string>com.apple.mobile.usermanagerd.xpc</string>
-		<string>com.apple.SharedWebCredentials</string>
-		<string>com.apple.osanalytics.osanalyticshelper</string>
+		<string>/Applications/CarPlayWallpaper.app/</string>
 	</array>
 	<key>com.apple.security.exception.sysctl.read-only</key>
 	<array>

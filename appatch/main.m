@@ -218,11 +218,11 @@ NSString* appMainExecutablePathForAppPath(NSString* appPath)
 
 BOOL isSameFile(NSString *path1, NSString *path2)
 {
-	struct stat sb1;
-	struct stat sb2;
-	stat(path1.fileSystemRepresentation, &sb1);
-	stat(path2.fileSystemRepresentation, &sb2);
-	return sb1.st_ino == sb2.st_ino;
+	struct stat sb1 = {0};
+	struct stat sb2 = {0};
+	if(stat(path1.fileSystemRepresentation, &sb1) != 0) return NO;
+	if(stat(path2.fileSystemRepresentation, &sb2) != 0) return NO;
+	return sb1.st_dev==sb2.st_dev && sb1.st_ino==sb2.st_ino;
 }
 
 BOOL isSubpathOf(NSString *subPath, NSString *parentPath) 
@@ -268,10 +268,21 @@ int signApp(NSString* appPath)
 
 	BOOL isAppleBundle = [appBundleID hasPrefix:@"com.apple."] && !is_apple_internal_identifier(appBundleID.UTF8String);
 
-	if([appPath containsString:@"/Applications/"]) {
-		//jailbroken apps or system apps
+	if(isSubPathOf(appPath.fileSystemRepresentation, jbroot("/"))) {
+		//jailbroken apps or re-signed system apps
 
 		baseEntitlements = [NSDictionary dictionaryWithContentsOfFile:jbroot(@"/basebin/entitlements/systemapp.entitlements")];
+
+		if([appPath containsString:@"/Applications/"] && [NSFileManager.defaultManager fileExistsAtPath:[@"/Applications/" stringByAppendingString:appPath.lastPathComponent]])
+		{
+			NSMutableDictionary* moreEntitlements = baseEntitlements.mutableCopy;
+			[moreEntitlements addEntriesFromDictionary:@{
+				@"com.apple.security.exception.files.absolute-path.read-write" : @[
+					[NSString stringWithFormat:@"/Applications/%@/", appPath.lastPathComponent]
+				]
+			}];
+			baseEntitlements = moreEntitlements.copy;
+		}
 
 	} else if(isRemovableBundlePath(appPath.fileSystemRepresentation)) {
 
@@ -285,20 +296,11 @@ int signApp(NSString* appPath)
 			baseEntitlements = @{@"get-task-allow":@YES};
 		 }
 
+	} else {
+		baseEntitlements = @{@"get-task-allow":@YES};
 	}
 
 	assert(baseEntitlements != nil);
-
-	if([NSFileManager.defaultManager fileExistsAtPath:[@"/Applications/" stringByAppendingString:appPath.lastPathComponent]])
-	{
-		NSMutableDictionary* moreEntitlements = baseEntitlements.mutableCopy;
-		[moreEntitlements addEntriesFromDictionary:@{
-			@"com.apple.security.exception.files.absolute-path.read-write" : @[
-				[NSString stringWithFormat:@"/Applications/%@/", appPath.lastPathComponent]
-			]
-		}];
-		baseEntitlements = moreEntitlements.copy;
-	}
 
 	NSString* mainExecutablePath = appMainExecutablePathForAppPath(appPath);
 	if(!mainExecutablePath) return 176;
@@ -353,7 +355,7 @@ int signApp(NSString* appPath)
 
 			if (isAppleBundle && [packageType isEqualToString:@"XPC!"] && ![InjectAppPlugins containsObject:bundleId])
 			{
-				// Skip re-signing system apps' XPCServices/PlugIns
+				// Skip re-signing system apps' XPCServices/Extensions/PlugIns
 				[blockedBundlePaths addObject:[filePath stringByDeletingLastPathComponent]];
 				continue;
 			}
@@ -427,7 +429,7 @@ int signApp(NSString* appPath)
 			if([NSFileManager.defaultManager fileExistsAtPath:stripEntitlementsPath])
 				stripEntitlements = [NSString stringWithContentsOfFile:stripEntitlementsPath encoding:NSUTF8StringEncoding error:nil];
 
-			assert(realstore(bundleMainExecutablePath.UTF8String, extraEntitlementsString.UTF8String, stripEntitlements.UTF8String, appTeamID.UTF8String) == 0);
+			assert(realstore(bundleMainExecutablePath.fileSystemRepresentation, extraEntitlementsString.UTF8String, stripEntitlements.UTF8String, appTeamID.UTF8String) == 0);
 			[signedMainExecutables addObject:bundleMainExecutablePath];
 		}
 	}
@@ -469,7 +471,7 @@ int signApp(NSString* appPath)
 		NSData *entitlementsXML = [NSPropertyListSerialization dataWithPropertyList:baseEntitlements format:NSPropertyListXMLFormat_v1_0 options:0 error:nil];
 		NSString* entitlementsString = [[NSString alloc] initWithData:entitlementsXML encoding:NSUTF8StringEncoding];
 
-		assert(realstore(fileURL.path.UTF8String, entitlementsString.UTF8String, NULL, appTeamID.UTF8String) == 0);
+		assert(realstore(fileURL.path.fileSystemRepresentation, entitlementsString.UTF8String, NULL, appTeamID.UTF8String) == 0);
 	}
 
 	return 0;

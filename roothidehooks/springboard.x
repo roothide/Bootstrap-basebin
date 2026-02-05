@@ -90,13 +90,13 @@ static const void *kDenyQueryTagKey = &kDenyQueryTagKey;
 %hook FBSystemService
 -(void*)openApplication:(NSString*)bundleIdentifier withOptions:(id)options originator:(id)originator requestID:(void*)requestID completion:(void*)completion
 {
-	NSLog(@"openApplication %@ withOptions:%p originator:%p requestID:%p completion:%p", bundleIdentifier, options, originator, requestID, completion);
+	NSLog(@"openApplication %@ withOptions:%@ originator:%@ requestID:%@ completion:%p", bundleIdentifier, options, originator, requestID, completion);
 
 	id currentContext = [NSClassFromString(@"BSServiceConnection") performSelector:@selector(currentContext)];
 	id remoteProcess = [currentContext performSelector:@selector(remoteProcess)]; //BSProcessHandle
 
 	NSNumber* _pid = [remoteProcess valueForKey:@"_pid"];
-	NSString* _bundleID = [remoteProcess valueForKey:@"_bundleID"];
+	NSString* _bundleID = [remoteProcess valueForKey:@"_bundleID"]; //may be nil
 
 	pid_t pid = _pid.intValue;
 

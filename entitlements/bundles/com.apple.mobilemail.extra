@@ -6,10 +6,6 @@
 	<true/>
 	<key>platform-application</key>
 	<true/>
-	<key>com.apple.private.security.storage.AppBundles</key>
-	<true/>
-	<key>com.apple.private.security.storage.AppDataContainers</key>
-	<true/>
 	<key>com.apple.private.security.container-required</key>
 	<string>com.apple.mobilemail</string>
 	<key>com.apple.runningboard.process-state</key>

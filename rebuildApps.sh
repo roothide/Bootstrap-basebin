@@ -10,6 +10,15 @@ done
 
 date || true;
 
+ls -d /.sysroot/Applications/*.app/.jbroot | while read file; do
+    bundle=$(dirname "$file")
+    echo "--$bundle--"
+
+    uicache -p "$bundle" || true
+done
+
+date || true;
+
 ls -d /rootfs/var/containers/Bundle/Application/*/*.app/.jbroot | while read file; do
     bundle=$(dirname "$file")
     echo "--$bundle--"

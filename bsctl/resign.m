@@ -15,10 +15,27 @@ int ResignSystemExecutables()
         LOG("Unable to load resign list\n");
         return -1;
     }
-    
+    //*
     if([fm fileExistsAtPath:RESIGNED_SYSROOT_PATH]) {
         ASSERT([fm removeItemAtPath:RESIGNED_SYSROOT_PATH error:nil]);
     }
+    /*/
+    for(NSString* item in [fm directoryContentsAtPath:RESIGNED_SYSROOT_PATH])
+    {
+        if([item isEqualToString:@"Applications"]) continue;
+        
+        ASSERT([fm removeItemAtPath:[RESIGNED_SYSROOT_PATH stringByAppendingPathComponent:item] error:nil]);
+    }
+    for(NSString* item in [fm directoryContentsAtPath:jbroot(@"/.sysroot/Applications")])
+    {
+        NSString* bundlePath = [jbroot(@"/.sysroot/Applications") stringByAppendingPathComponent:item];
+        NSString* InfoPlistPath = [bundlePath stringByAppendingPathComponent:@"Info.plist"];
+
+        struct stat st={0};
+        if(lstat(InfoPlistPath.fileSystemRepresentation, &st)!=0 || S_ISLNK(st.st_mode)) {
+            ASSERT([fm removeItemAtPath:bundlePath error:nil]);
+        }
+    }//*/
     
     for(NSString* sourcePath in ResignList)
     {

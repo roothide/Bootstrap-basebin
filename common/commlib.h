@@ -27,10 +27,11 @@ extern int posix_spawnattr_getmacpolicyinfo_np(const posix_spawnattr_t * __restr
 extern int posix_spawnattr_getprocesstype_np(const posix_spawnattr_t *__restrict, int *__restrict);
 extern int posix_spawnattr_setexceptionports_np(posix_spawnattr_t *__restrict, exception_mask_t, mach_port_t, exception_behavior_t, thread_state_flavor_t);
 
-int spawn(const char* path, char*const* argv, char*const* envp, void(^pid_out)(pid_t), void(^std_out)(char*,int), void(^err_out)(char*,int));
+int spawn_binary(const char* path, char*const* argv, char*const* envp, void(^pid_out)(pid_t), void(^std_out)(char*,int), void(^err_out)(char*,int));
 
 #ifdef __OBJC__
 int spawn_root(NSString* path, NSArray* args, __strong NSString** stdOut, __strong NSString** stdErr);
+int spawn_daemon(NSString* path, NSArray* args, __strong NSString** stdOut, __strong NSString** stdErr);
 int spawn_bootstrap_binary(char*const* argv, __strong NSString** stdOut, __strong NSString** stdErr);
 #endif
 
@@ -48,6 +49,7 @@ int proc_get_pidversion(pid_t pid);
 int proc_paused(pid_t pid, bool* paused);
 char* proc_get_path(pid_t pid, char buffer[PATH_MAX]);
 char* proc_get_identifier(pid_t pid, char buffer[255]);
+char* proc_get_teamid(pid_t pid, char buffer[255]);
 
 int proc_hook_dyld(pid_t pid);
 int proc_enable_jit(pid_t pid, bool suspended);
@@ -64,7 +66,7 @@ const char* generate_sandbox_extensions(bool ext);
 const char* roothide_get_sandbox_profile(pid_t pid, char buffer[255]);
 
 void killAllForBundle(const char* bundlePath);
-void killAllForExecutable(const char* path);
+void killAllForExecutable(const char* path, int signal);
 
 bool isRemovableBundlePath(const char* path);
 bool isSubPathOf(const char* parent, const char* child);
@@ -98,6 +100,8 @@ bool machoGetInfo(const char* path, bool* isMachO, bool* isLibrary);
 int roothide_config_set_blacklist_enable(bool enabled);
 
 bool checkpatchedexe(const char* executable_path);
+
+bool is_same_file(const char* path1, const char* path2);
 
 #ifdef __OBJC__
 

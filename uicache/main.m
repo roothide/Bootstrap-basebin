@@ -257,7 +257,7 @@ NSDictionary *constructGroupsContainersForEntitlements(NSDictionary *entitlement
 	return nil;
 }
 
-BOOL constructContainerizationForEntitlements(NSString* bundleId, NSString* path, NSDictionary *entitlements) {
+BOOL constructContainerizationForEntitlements(NSString* path, NSDictionary *entitlements) {
 
 	//hack way for "unsandbox but with a data container", so File Provider and Backup service can work for the jailbroken app
 	NSNumber *hackContainer = entitlements[@"uicache.data-container-required"] ?: entitlements[@"uicache.app-data-container-required"];
@@ -290,30 +290,11 @@ BOOL constructContainerizationForEntitlements(NSString* bundleId, NSString* path
 	NSNumber *noSandbox = entitlements[@"com.apple.private.security.no-sandbox"];
 	if (noSandbox && [noSandbox isKindOfClass:[NSNumber class]]) {
 		if (noSandbox.boolValue) {
-
-			if([bundleId hasPrefix:@"com.apple."]) //only hack for system apps, otherwise it may conflict with Patcher
-			{
-				NSNumber*AppDataContainers = entitlements[@"com.apple.private.security.storage.AppDataContainers"];
-				if (AppDataContainers && [AppDataContainers isKindOfClass:[NSNumber class]]) {
-					if (AppDataContainers.boolValue) return YES; //hack way
-				}
-			}
-
 			return NO;
 		}
 	}
 
-	// //app-sandbox: invalid
-	// NSNumber *appSandbox = entitlements[@"com.apple.security.app-sandbox"];
-	// if (appSandbox && [appSandbox isKindOfClass:[NSNumber class]]) {
-	//
-	// }
-
-	// executables in containers/Bundle/ are always containerized by default
-	if([path.stringByStandardizingPath hasPrefix:@"/var/containers/Bundle/"])
-		return YES;
-
-	return NO; // executables in other paths such rootfs/preboot/var will not be containerized by default
+	return YES;
 }
 
 NSString *constructTeamIdentifierForEntitlements(NSDictionary *entitlements) {
@@ -477,6 +458,25 @@ void activator(NSString* bundlePath)
 		if([fm fileExistsAtPath:pluginExecutablePath])
 			spawner(pluginExecutablePath);
 	}
+
+	NSString *extensionsPath = [bundlePath stringByAppendingPathComponent:@"Extensions"];
+	NSArray *extensions = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:extensionsPath error:nil];
+
+	for (NSString *extensionName in extensions)
+	{
+		NSString *extensionPath = [extensionsPath stringByAppendingPathComponent:extensionName];
+
+		NSDictionary *extensionInfoDict = [NSDictionary dictionaryWithContentsOfFile:[extensionPath stringByAppendingPathComponent:@"Info.plist"]];
+
+		NSString *bundleId = extensionInfoDict[@"CFBundleIdentifier"];
+		NSString *bundleExecutable = extensionInfoDict[@"CFBundleExecutable"];
+		if (!bundleId || !bundleExecutable || !bundleExecutable.length) continue;
+		if ([extensionInfoDict[@"CFBundlePackageType"] isEqualToString:@"FMWK"]) continue;
+
+		NSString* extensionExecutablePath = [extensionPath stringByAppendingPathComponent:bundleExecutable];
+		if([fm fileExistsAtPath:extensionExecutablePath])
+			spawner(extensionExecutablePath);
+	}
 }
 
 void freeplay(NSString* bundlePath)
@@ -515,7 +515,7 @@ void registerPath(NSString *path, BOOL forceSystem)
 
 	NSString* appInfoPath = [path stringByAppendingPathComponent:@"Info.plist"];
 	NSMutableDictionary *appInfoPlist = [NSMutableDictionary dictionaryWithContentsOfFile:appInfoPath];
-	NSData* appInfoData = [NSData dataWithContentsOfFile:appInfoPath];
+	NSData* appInfoDataBackup = [NSData dataWithContentsOfFile:appInfoPath];
 
 	NSString *appBundleID = [appInfoPlist objectForKey:@"CFBundleIdentifier"];
 
@@ -528,18 +528,25 @@ void registerPath(NSString *path, BOOL forceSystem)
 	NSString *appExecutablePath = [path stringByAppendingPathComponent:executableName];
 	NSString* appTeamID = getTeamIDFromBinaryAtPath(appExecutablePath);
 
-	BOOL encryptedApp = [NSFileManager.defaultManager fileExistsAtPath:[path stringByAppendingPathComponent:@"SC_Info"]];
-	NSString* backupVersion = [NSString stringWithContentsOfFile:[path.stringByDeletingLastPathComponent stringByAppendingPathComponent:@".appbackup"] encoding:NSASCIIStringEncoding error:nil];
-
 	if(@available(iOS 16.0, *))
 	{
-		if((encryptedApp || hasTrollstoreMarker(path.fileSystemRepresentation)) && backupVersion.intValue>=1)
+		if(isRemovableBundlePath(path.fileSystemRepresentation))
+		{
+			NSString* backupVersion = [NSString stringWithContentsOfFile:[path.stringByDeletingLastPathComponent stringByAppendingPathComponent:@".appbackup"] encoding:NSASCIIStringEncoding error:nil];
+			if(backupVersion.intValue>=1)
+				noregister = YES;
+		}
+		else if([path containsString:@"/Applications/"] && ![path hasPrefix:@"/Applications/"] && [NSFileManager.defaultManager fileExistsAtPath:[@"/Applications/" stringByAppendingString:path.lastPathComponent]])
+		{
+			noregister = YES;
+		}
+		else if([path containsString:@"/.sysroot/"])
 		{
 			noregister = YES;
 		}
 	}
 
-	BOOL allowURLSchemes = [NSFileManager.defaultManager fileExistsAtPath:jbroot(@"/var/mobile/.allow_url_schemes")] || [NSFileManager.defaultManager fileExistsAtPath:jbroot(@"/basebin/.launchctl_support")];
+	BOOL allowURLSchemes = launchctl_support() || [NSFileManager.defaultManager fileExistsAtPath:jbroot(@"/var/mobile/.allow_url_schemes")];
 
 	//NSLog(@"Info=%@", appInfoPlist);
 	NSMutableArray* urltypes = [appInfoPlist[@"CFBundleURLTypes"] mutableCopy];
@@ -569,7 +576,8 @@ void registerPath(NSString *path, BOOL forceSystem)
 
 	if(jbrootexists)
 	{
-		if(!isAppleBundle && !hasTrollstoreMarker(path.fileSystemRepresentation))
+		BOOL encryptedApp = [NSFileManager.defaultManager fileExistsAtPath:[path stringByAppendingPathComponent:@"SC_Info"]];
+		if(encryptedApp && isRemovableBundlePath(path.fileSystemRepresentation))
 		{
 			freeplay(path);
 		}
@@ -609,7 +617,7 @@ void registerPath(NSString *path, BOOL forceSystem)
 			
 			assert(stat(appExecutablePath.fileSystemRepresentation, &st) == 0); //update
 
-			if(noregister)
+			if(noregister && isRemovableBundlePath(path.fileSystemRepresentation))
 			{
 				if([NSFileManager.defaultManager fileExistsAtPath:appExecutableTweakedPath]) {
 					assert([NSFileManager.defaultManager removeItemAtPath:appExecutableTweakedPath error:nil]);
@@ -676,21 +684,12 @@ void registerPath(NSString *path, BOOL forceSystem)
 		unlink([path stringByAppendingPathComponent:@".preload"].fileSystemRepresentation);
 	}
 
-	if(noregister) {
-		printf("skip registering for %s\n", path.fileSystemRepresentation);
-		return;
-	}
-
-    if(!isAppleBundle) {
-        [appInfoPlist writeToFile:appInfoPath atomically:YES];
-    }
-
 	BOOL isRemovableSystemApp = [[NSFileManager defaultManager] fileExistsAtPath:[@"/System/Library/AppSignatures" stringByAppendingPathComponent:appBundleID]];
 	BOOL registerAsUser = isRemovableBundlePath(path.fileSystemRepresentation) && !isRemovableSystemApp && !forceSystem;
 
 	NSMutableDictionary *dictToRegister = [NSMutableDictionary dictionary];
 
-	// Add entitlements
+	// Get entitlements: must be after appatch
 	NSDictionary *entitlements = dumpEntitlementsFromBinaryAtPath(appExecutablePath);
 	if (entitlements) {
 		dictToRegister[@"Entitlements"] = entitlements;
@@ -703,7 +702,7 @@ void registerPath(NSString *path, BOOL forceSystem)
 	dictToRegister[@"CodeInfoIdentifier"] = appBundleID;
 	dictToRegister[@"CompatibilityState"] = @0;
 
-	BOOL appContainerized = constructContainerizationForEntitlements(appBundleID, path, entitlements);
+	BOOL appContainerized = constructContainerizationForEntitlements(path, entitlements);
 	dictToRegister[@"IsContainerized"] = @(appContainerized);
 	if (appContainerized) {
 		MCMContainer *appContainer = [NSClassFromString(@"MCMAppDataContainer") containerWithIdentifier:appBundleID createIfNecessary:YES existed:nil error:nil];
@@ -750,12 +749,12 @@ void registerPath(NSString *path, BOOL forceSystem)
 		dictToRegister[@"GroupContainers"] = groupContainers.copy;
 	}
 
+NSMutableDictionary *bundlePlugins = [NSMutableDictionary dictionary];
+void (^PlugInRegisterHandler)(NSString* dirname) = ^void(NSString* dirname) {
 	// Add plugins
-
-	NSString *pluginsPath = [path stringByAppendingPathComponent:@"PlugIns"];
+	NSString *pluginsPath = [path stringByAppendingPathComponent:dirname];
 	NSArray *plugins = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:pluginsPath error:nil];
 
-	NSMutableDictionary *bundlePlugins = [NSMutableDictionary dictionary];
 	for (NSString *pluginName in plugins) {
 		NSString *pluginPath = [pluginsPath stringByAppendingPathComponent:pluginName];
 
@@ -769,13 +768,9 @@ void registerPath(NSString *path, BOOL forceSystem)
 
 		NSMutableDictionary *pluginDict = [NSMutableDictionary dictionary];
 
-		// Add entitlements
-
 		NSString *pluginExecutablePath = [pluginPath stringByAppendingPathComponent:pluginInfoPlist[@"CFBundleExecutable"]];
-		NSDictionary *pluginEntitlements = dumpEntitlementsFromBinaryAtPath(pluginExecutablePath);
-		if (pluginEntitlements) {
-			pluginDict[@"Entitlements"] = pluginEntitlements;
-		}
+
+		if(!pluginExecutablePath || pluginExecutablePath.length==0) continue;
 
 		//try
 		unlink([pluginPath stringByAppendingPathComponent:@".jbroot"].fileSystemRepresentation);
@@ -790,12 +785,15 @@ void registerPath(NSString *path, BOOL forceSystem)
 			if([NSFileManager.defaultManager fileExistsAtPath:stockPluginPath])
 			{
 				pluginRegisterPath = stockPluginPath;
-				// assert([NSFileManager.defaultManager removeItemAtPath:pluginPath error:nil]);
-				// assert([NSFileManager.defaultManager createSymbolicLinkAtPath:pluginPath withDestinationPath:stockPluginPath error:nil]);
+				assert([NSFileManager.defaultManager removeItemAtPath:pluginPath error:nil]);
+				assert([NSFileManager.defaultManager createSymbolicLinkAtPath:pluginPath withDestinationPath:stockPluginPath error:nil]);
 			}
 		}
 
-		if(jbrootexists && [InjectAppPlugins containsObject:pluginBundleID] && pluginExecutablePath && pluginExecutablePath.length)
+		struct stat pluginst={0};
+		assert(stat(pluginPath.fileSystemRepresentation, &pluginst) == 0);
+
+		if(jbrootexists && S_ISDIR(pluginst.st_mode) && [InjectAppPlugins containsObject:pluginBundleID])
 		{
 			assert([NSFileManager.defaultManager createSymbolicLinkAtPath:[pluginPath stringByAppendingPathComponent:@".jbroot"] withDestinationPath:jbrootpath error:nil]);
 
@@ -867,6 +865,12 @@ void registerPath(NSString *path, BOOL forceSystem)
 			unlink([pluginPath stringByAppendingPathComponent:@".preload"].fileSystemRepresentation);
 		}
 
+		// Get entitlements: must be after appatch
+		NSDictionary *pluginEntitlements = dumpEntitlementsFromBinaryAtPath(pluginExecutablePath);
+		if (pluginEntitlements) {
+			pluginDict[@"Entitlements"] = pluginEntitlements;
+		}
+		
 		// Misc
 
 		pluginDict[@"ApplicationType"] = @"PluginKitPlugin";
@@ -911,10 +915,24 @@ void registerPath(NSString *path, BOOL forceSystem)
 
 		[bundlePlugins setObject:pluginDict forKey:pluginBundleID];
 	}
+};
+
+	PlugInRegisterHandler(@"PlugIns");
+	PlugInRegisterHandler(@"Extensions");
+
 	[dictToRegister setObject:bundlePlugins forKey:@"_LSBundlePlugins"];
+
+	if(noregister) {
+		printf("skip registering for %s\n", path.fileSystemRepresentation);
+		return;
+	}
 
 	if (verbose) {
 		printf("Registering dictionary: %s\n", dictToRegister.description.UTF8String);
+	}
+
+	if(!isAppleBundle) {
+		[appInfoPlist writeToFile:appInfoPath atomically:YES];
 	}
 
 	if ([workspace registerApplicationDictionary:dictToRegister])
@@ -932,7 +950,7 @@ void registerPath(NSString *path, BOOL forceSystem)
 	}
 
     if(!isAppleBundle) {
-        [appInfoData writeToFile:appInfoPath atomically:YES];
+        [appInfoDataBackup writeToFile:appInfoPath atomically:YES];
     }
 }
 

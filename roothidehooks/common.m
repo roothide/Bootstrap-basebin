@@ -32,5 +32,14 @@ bool isJailbreakBundlePath(const char* path)
 		}
 	}
 
+	//Bootstrap 2
+	const char* strippedPath = rootfs(path);
+	if(string_has_prefix(strippedPath, "/.sysroot/")) {
+		return false;
+	}
+	else if(string_has_prefix(strippedPath, "/Applications/") && access(strippedPath, F_OK)==0) {
+		return false;
+	}
+
 	return true;
 }
