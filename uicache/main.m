@@ -536,9 +536,12 @@ void registerPath(NSString *path, BOOL forceSystem)
 			if(backupVersion.intValue>=1)
 				noregister = YES;
 		}
-		else if([path containsString:@"/Applications/"] && ![path hasPrefix:@"/Applications/"] && [NSFileManager.defaultManager fileExistsAtPath:[@"/Applications/" stringByAppendingString:path.lastPathComponent]])
+		else if(![path hasPrefix:@"/Applications/"] && [path containsString:@"/Applications/"] && [NSFileManager.defaultManager fileExistsAtPath:[@"/Applications/" stringByAppendingString:path.lastPathComponent]])
 		{
-			noregister = YES;
+			//check if a system app was registered/tweaked before beta4
+			LSApplicationProxy *app = [LSApplicationProxy applicationProxyForIdentifier:appBundleID];
+			if(app && [app.bundleURL.path hasPrefix:@"/Applications/"])
+				noregister = YES;
 		}
 		else if([path containsString:@"/.sysroot/"])
 		{
