@@ -224,6 +224,7 @@ void os_thread_self_restrict_tpro_to_ro(void)
 }
 #endif
 
+extern char** _NSGetProgname();
 extern char*** _NSGetArgv(void);
 extern char** _CFGetProcessPath();
 
@@ -252,10 +253,17 @@ void init_process_path_hook()
         (*_NSGetArgv())[0] = (char*)g_fixed_executable_path;
         *_CFGetProcessPath() = (char*)g_fixed_executable_path;
 
-        char args_buffer[4096] = {0};
-        size_t args_buffer_size = sizeof(args_buffer);
+        static int maxArgumentSize = 0;
+        size_t size = sizeof(maxArgumentSize);
+        if (sysctl((int[]){ CTL_KERN, KERN_ARGMAX }, 2, &maxArgumentSize, &size, NULL, 0) == -1) {
+            maxArgumentSize = 4096; // Default
+        }
+        char* args_buffer = malloc(maxArgumentSize);
+        size_t args_buffer_size = maxArgumentSize;
         ASSERT(sysctl((int[]){ CTL_KERN, KERN_PROCARGS2, getpid() }, 3, args_buffer, &args_buffer_size, NULL, 0)==0);
         SYSLOG("KERN_PROCARGS2: size=%d, argc=%d executable_path=%s", args_buffer_size, *(int*)args_buffer, args_buffer + sizeof(int));
+        free((void*)args_buffer);
+        args_buffer = NULL;
 
         uint64_t usrstack=0;
         size_t len = sizeof(usrstack);
@@ -268,6 +276,7 @@ void init_process_path_hook()
         ASSERT(is_same_file(arg_addr, g_executable_path));
         memset(arg_addr, 0, executable_path_length);
         strcpy((char*)arg_addr, (char*)g_fixed_executable_path);
+        *_NSGetProgname() = strrchr(arg_addr, '/') + 1;
         char* arg0 = arg_addr + executable_path_length+1;
         while (*arg0 == 0) arg0++;
         SYSLOG("arg0 = %s", arg0);
@@ -315,6 +324,7 @@ void init_process_path_hook()
         *__initedMainBundle = 0; // force re-init main bundle
     }
 
+    SYSLOG("getprogname=%s", getprogname());
     SYSLOG("NXArgv[0] = %s", NXArgv[0]);
     SYSLOG("_NSGetArgv()[0] = %s", (*_NSGetArgv())[0]);
     SYSLOG("_CFGetProcessPath = %s", *_CFGetProcessPath());

@@ -90,7 +90,7 @@ static void __attribute__((__constructor__)) preload()
     
 	if(!found) 
 	{
-		if(check_executable_encrypted())
+		if(strcmp(proc_get_teamid(getpid(),NULL), "T8ALTGMVXN") != 0)
 		{
 			ASSERT(requireJIT()==0);
 

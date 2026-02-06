@@ -926,7 +926,7 @@ void (^PlugInRegisterHandler)(NSString* dirname) = ^void(NSString* dirname) {
 	[dictToRegister setObject:bundlePlugins forKey:@"_LSBundlePlugins"];
 
 	if(noregister) {
-		printf("skip registering for %s\n", path.fileSystemRepresentation);
+		if(verbose) printf("skip registering for %s\n", path.fileSystemRepresentation);
 		return;
 	}
 
