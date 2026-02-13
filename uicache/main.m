@@ -343,10 +343,6 @@ NSArray* blockedAppPlugins = @[
 	@"com.opa334.CraneApplication.CraneShortcuts",
 ];
 
-NSArray* InjectAppPlugins = @[
-
-];
-
 //sometimes launching the app may lose those environment variables(if not being containerized in lsd registry?)
 NSDictionary *constructEnvironmentVariablesForContainerPath(NSString *mainBundleIdentifier, NSString *mainBundlePath, NSString *containerPath, BOOL isContainerized) 
 {
@@ -500,6 +496,8 @@ void freeplay(NSString* bundlePath)
 	activator(bundlePath);
 }
 
+int patch_app_exe(const char* file);
+
 void registerPath(NSString *path, BOOL forceSystem)
 {
 	const char* __sbtoken = bsd_getsbtoken();
@@ -533,7 +531,7 @@ void registerPath(NSString *path, BOOL forceSystem)
 		if(isRemovableBundlePath(path.fileSystemRepresentation))
 		{
 			NSString* backupVersion = [NSString stringWithContentsOfFile:[path.stringByDeletingLastPathComponent stringByAppendingPathComponent:@".appbackup"] encoding:NSASCIIStringEncoding error:nil];
-			if(backupVersion.intValue>=1)
+			if(backupVersion.intValue >= 1)
 				noregister = YES;
 		}
 		else if(![path hasPrefix:@"/Applications/"] && [path containsString:@"/Applications/"] && [NSFileManager.defaultManager fileExistsAtPath:[@"/Applications/" stringByAppendingString:path.lastPathComponent]])
@@ -611,7 +609,6 @@ void registerPath(NSString *path, BOOL forceSystem)
 			printf("resign app: %s\n", path.fileSystemRepresentation);
 
 			if(!noregister) {
-				int patch_app_exe(const char* file);
 				assert(patch_app_exe(appExecutablePath.fileSystemRepresentation)==0);
 			}
 
@@ -662,7 +659,9 @@ void registerPath(NSString *path, BOOL forceSystem)
 			assert(execBinary(jbroot(argv[0]), argv) == 0);
 		}
 
-		NSDictionary* rebuildStatusNew = @{
+		NSMutableDictionary* rebuildStatusNew = rebuildStatus.mutableCopy ?: [NSMutableDictionary new];
+
+		[rebuildStatusNew addEntriesFromDictionary:@{
 			@"st_dev":@(st.st_dev), 
 			@"st_ino":@(st.st_ino), 
 			@"st_mtime":@(st.st_mtimespec.tv_sec), 
@@ -674,11 +673,12 @@ void registerPath(NSString *path, BOOL forceSystem)
 			@"sb_token":sbtoken,
 			@"jbrand": @(jbrand()),
 			@"jbroot": @(jbroot("/")),
-		};
+		}];
 		
 		assert([rebuildStatusNew writeToFile:rebuildFilePath atomically:YES]);
 
 		appInfoPlist[@"SBAppUsesLocalNotifications"] = @1;
+		//appInfoPlist[@"SBDisableSnapshots"] = @1;
 	}
 	else
 	{
@@ -752,6 +752,7 @@ void registerPath(NSString *path, BOOL forceSystem)
 		dictToRegister[@"GroupContainers"] = groupContainers.copy;
 	}
 
+NSArray* InjectAppPlugins = [NSDictionary dictionaryWithContentsOfFile:jbroot(@"/basebin/resignList.plist")][@"plugins"];
 NSMutableDictionary *bundlePlugins = [NSMutableDictionary dictionary];
 void (^PlugInRegisterHandler)(NSString* dirname) = ^void(NSString* dirname) {
 	// Add plugins
@@ -816,15 +817,17 @@ void (^PlugInRegisterHandler)(NSString* dirname) = ^void(NSString* dirname) {
 				// , [rebuildStatus[@"st_mtime"] longValue], st.st_mtimespec.tv_sec 
 				// , [rebuildStatus[@"st_mtimensec"] longValue], st.st_mtimespec.tv_nsec);
 
-				printf("resign plugin executable: %s\n", pluginExecutablePath.fileSystemRepresentation);
+				if(!noregister)
+				{
+					printf("resign plugin executable: %s\n", pluginExecutablePath.fileSystemRepresentation);
 
-				int patch_app_exe(const char* file);
-				assert(patch_app_exe(pluginExecutablePath.fileSystemRepresentation)==0);
+					assert(patch_app_exe(pluginExecutablePath.fileSystemRepresentation)==0);
 
-				const char* argv[] = {"/basebin/appatch", pluginExecutablePath.fileSystemRepresentation, NULL};
-				assert(execBinary(jbroot(argv[0]), argv) == 0);
+					const char* argv[] = {"/basebin/appatch", pluginExecutablePath.fileSystemRepresentation, NULL};
+					assert(execBinary(jbroot(argv[0]), argv) == 0);
 
-				assert(stat(pluginExecutablePath.fileSystemRepresentation, &st) == 0); //update
+					assert(stat(pluginExecutablePath.fileSystemRepresentation, &st) == 0); //update
+				}
 			}
 
 			if(!rebuildStatus
@@ -845,7 +848,9 @@ void (^PlugInRegisterHandler)(NSString* dirname) = ^void(NSString* dirname) {
 				assert(execBinary(jbroot(argv[0]), argv) == 0);
 			}
 
-			NSDictionary* rebuildStatusNew = @{
+			NSMutableDictionary* rebuildStatusNew = rebuildStatus.mutableCopy ?: [NSMutableDictionary new];
+
+			[rebuildStatusNew addEntriesFromDictionary:@{
 				@"st_dev":@(st.st_dev), 
 				@"st_ino":@(st.st_ino), 
 				@"st_mtime":@(st.st_mtimespec.tv_sec), 
@@ -857,7 +862,7 @@ void (^PlugInRegisterHandler)(NSString* dirname) = ^void(NSString* dirname) {
 				@"sb_token":sbtoken,
 				@"jbrand": @(jbrand()),
 				@"jbroot": @(jbroot("/")),
-			};
+			}];
 			
 			assert([rebuildStatusNew writeToFile:rebuildFilePath atomically:YES]);
 		}
@@ -925,7 +930,7 @@ void (^PlugInRegisterHandler)(NSString* dirname) = ^void(NSString* dirname) {
 
 	[dictToRegister setObject:bundlePlugins forKey:@"_LSBundlePlugins"];
 
-	if(noregister) {
+	if(noregister || getenv("UICACHE_NO_REGISTER")) {
 		if(verbose) printf("skip registering for %s\n", path.fileSystemRepresentation);
 		return;
 	}

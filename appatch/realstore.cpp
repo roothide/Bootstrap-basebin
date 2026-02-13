@@ -425,7 +425,6 @@ extern "C" {
 #include <openssl/err.h>
 #include <openssl/cms.h>
 
-#define LOG(...)
 
 int update_signature_blob(CS_DecodedSuperBlob *superblob)
 {
@@ -632,7 +631,7 @@ uint32_t magicTable[] = {
 
 int reset_blob(CS_DecodedSuperBlob *decodedSuperblob, CS_DecodedBlob *realCodeDirBlob, uint32_t type, void* data, int size)
 {
-    CS_CodeDirectory realCodeDir;
+    CS_CodeDirectory realCodeDir={0};
     csd_blob_read(realCodeDirBlob, 0, sizeof(realCodeDir), &realCodeDir);
     CODE_DIRECTORY_APPLY_BYTE_ORDER(&realCodeDir, HOST_TO_BIG_APPLIER);
 
@@ -657,21 +656,36 @@ int reset_blob(CS_DecodedSuperBlob *decodedSuperblob, CS_DecodedBlob *realCodeDi
         csd_superblob_insert_blob_at_index(decodedSuperblob, blob, 0);
 
 
-        if(realCodeDir.nSpecialSlots < type) {
+        if(realCodeDir.nSpecialSlots < type)
+        {
             uint8_t hash[realCodeDir.hashSize];
             memset(hash, 0, realCodeDir.hashSize);
             for(int i=realCodeDir.nSpecialSlots; i<type; i++)
-                assert(csd_blob_insert(realCodeDirBlob, realCodeDir.hashOffset - i*sizeof(hash), sizeof(hash), hash) == 0);
+            {
+                //always insert new special slot at the beginning of hash array
+                uint32_t offsetOfBlobToInsert = realCodeDir.hashOffset - (realCodeDir.nSpecialSlots * realCodeDir.hashSize);
 
-            realCodeDir.hashOffset += sizeof(hash) * (type - realCodeDir.nSpecialSlots);
+                assert(csd_blob_insert(realCodeDirBlob, offsetOfBlobToInsert, realCodeDir.hashSize, hash) == 0);
+                
+                // Shift other offsets as needed (if we inserted data in the middle)
+                if (realCodeDir.identOffset != 0 && realCodeDir.identOffset >= offsetOfBlobToInsert) {
+                    realCodeDir.identOffset += realCodeDir.hashSize;
+                }
+                if (realCodeDir.scatterOffset != 0 && realCodeDir.scatterOffset >= offsetOfBlobToInsert) {
+                    realCodeDir.scatterOffset += realCodeDir.hashSize;
+                }
+                if (realCodeDir.teamOffset != 0 && realCodeDir.teamOffset >= offsetOfBlobToInsert) {
+                    realCodeDir.teamOffset += realCodeDir.hashSize;
+                }
+            }
+
+            realCodeDir.hashOffset += realCodeDir.hashSize * (type - realCodeDir.nSpecialSlots);
             realCodeDir.nSpecialSlots = type;
 
             uint32_t newHashOffset = HOST_TO_BIG(realCodeDir.hashOffset);
             csd_blob_write(realCodeDirBlob, offsetof(CS_CodeDirectory,hashOffset), sizeof(newHashOffset), &newHashOffset);
             uint32_t newSpecialSlots = HOST_TO_BIG(realCodeDir.nSpecialSlots);
             csd_blob_write(realCodeDirBlob, offsetof(CS_CodeDirectory,nSpecialSlots), sizeof(newSpecialSlots), &newSpecialSlots);
-
-            //update other offsets in CodeDir?
         }
     }
 

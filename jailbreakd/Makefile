@@ -13,7 +13,7 @@ TOOL_NAME = jailbreakd
 
 jailbreakd_FILES = $(wildcard *.c *.m *.mm *.cpp)
 jailbreakd_CFLAGS = -I../common -fobjc-arc -Wno-deprecated-declarations -Wno-unused-variable -Wno-unused-function -Wno-unneeded-internal-declaration
-jailbreakd_LDFLAGS = -L../common/lib -lcommon -lbsm
+jailbreakd_LDFLAGS = -L../common/lib -lcommon -dead_strip -lbsm
 jailbreakd_CODESIGN_FLAGS = -Sentitlements.plist
 jailbreakd_INSTALL_PATH = /basebin/
 

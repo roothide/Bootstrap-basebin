@@ -30,11 +30,11 @@
 
 #define DTSECURITY_WAIT_FOR_DEBUGGER 0
 
-#define IS_ARM64E_DEVICE() (*(uint32_t *)getpagesize == 0xd503237f)
-
 #ifdef __arm64e__
-// #   define xpaci(x) __asm__ volatile("xpaci %0" : "+r"(x))
+#   define IS_ARM64E_DEVICE()	1
+#   define xpaci(x) (uint64_t)ptrauth_strip((void*)x, ptrauth_key_asia)
 #else
+#   define IS_ARM64E_DEVICE() (*(uint32_t *)getpagesize == 0xd503237f)
 #   define xpaci(x) (x & ~0xFFFFFF8000000000)
 #endif
 
@@ -90,7 +90,7 @@ mach_port_t setup_fake_bootstrap_server(void);
 mach_port_t setup_exception_server(void);
 pid_t spawn_exploit_process(mach_port_t exception_port);
 
-#define __DARWIN_OPAQUE_ARM_THREAD_STATE64 0
+// #define __DARWIN_OPAQUE_ARM_THREAD_STATE64 0
 #define __DARWIN_ARM_THREAD_STATE64_FLAGS_NO_PTRAUTH 0x1
 #define __DARWIN_ARM_THREAD_STATE64_FLAGS_IB_SIGNED_LR 0x2
 #define __DARWIN_ARM_THREAD_STATE64_FLAGS_KERNEL_SIGNED_PC 0x4

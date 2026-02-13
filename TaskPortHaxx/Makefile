@@ -16,8 +16,8 @@ TaskPortHaxx_FILES = \
 	TaskPortHaxxApp/NSUserDefaults+Pref.m
 TaskPortHaxx_FRAMEWORKS = UIKit CoreGraphics CoreServices IOKit
 TaskPortHaxx_LIBRARIES = archive
-TaskPortHaxx_CFLAGS = -fobjc-arc -I./TaskPortHaxxApp/ -I../common -Wno-deprecated-declarations -Wno-unused-variable -Wno-unused-local-typedef -Wno-unused-but-set-variable -Wno-\#warnings
-TaskPortHaxx_LDFLAGS = -L../common/lib -lcommon
+TaskPortHaxx_CFLAGS = -fobjc-arc -I./TaskPortHaxxApp/ -I../common -Wno-deprecated-declarations -Wno-unused-function -Wno-unused-variable -Wno-unused-local-typedef -Wno-unused-but-set-variable -Wno-\#warnings
+TaskPortHaxx_LDFLAGS = -L../common/lib -lcommon -dead_strip -ldobby -lc++
 TaskPortHaxx_CODESIGN_FLAGS = -S./TaskPortHaxxApp/TaskPortHaxxApp.ent
 TaskPortHaxx_INSTALL_PATH = /basebin
 
@@ -34,8 +34,8 @@ prepare_FILES = \
 	TaskPortHaxxApp/fake_bootstrap_server.m \
 	TaskPortHaxxApp/NSUserDefaults+Pref.m
 prepare_FRAMEWORKS = UIKit CoreGraphics CoreServices IOKit
-prepare_CFLAGS = -fobjc-arc -I./TaskPortHaxxApp/ -I../common -Wno-deprecated-declarations -Wno-unused-variable -Wno-unused-local-typedef -Wno-unused-but-set-variable -Wno-\#warnings
-prepare_LDFLAGS = -L../common/lib -lcommon
+prepare_CFLAGS = -fobjc-arc -I./TaskPortHaxxApp/ -I../common -Wno-deprecated-declarations -Wno-unused-function -Wno-unused-variable -Wno-unused-local-typedef -Wno-unused-but-set-variable -Wno-\#warnings
+prepare_LDFLAGS = -L../common/lib -lcommon -dead_strip
 prepare_LINKAGE_TYPE = static
 include $(THEOS_MAKE_PATH)/library.mk
 

@@ -111,13 +111,24 @@ static const void *kDenyQueryTagKey = &kDenyQueryTagKey;
 }
 %end
 
-%hookf(int, XBValidateStoryboard) {
+int (*orig_XBValidateStoryboard)();
+int new_XBValidateStoryboard() {
     return 0;
 }
 
 void sbInit(void)
 {
 	NSLog(@"sbInit...");
-	// %init();
-	%init(XBValidateStoryboard=MSFindSymbol(MSGetImageByName("/System/Library/PrivateFrameworks/SplashBoard.framework/SplashBoard"), "_XBValidateStoryboard"));
+
+	%init();
+
+	// _XBValidateStoryboard does not exist on low versions ios16?
+	MSImageRef SplashBoard = MSGetImageByName("/System/Library/PrivateFrameworks/SplashBoard.framework/SplashBoard");
+	if(SplashBoard) {
+		void* XBValidateStoryboard = MSFindSymbol(SplashBoard, "_XBValidateStoryboard");
+		if(XBValidateStoryboard) {
+			MSHookFunction(XBValidateStoryboard, (void*)new_XBValidateStoryboard, (void**)&orig_XBValidateStoryboard);
+			NSLog(@"hooked XBValidateStoryboard");
+		}
+	}
 }

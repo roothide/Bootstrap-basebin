@@ -35,6 +35,12 @@ int new_csops(pid_t pid, unsigned int  ops, void * useraddr, size_t usersize)
                     return ret;
                 }
 
+                //blacklisted trollstored apps
+                if(pid!=getpid() && launchctl_support() && jbclient_blacklist_check_pid(pid)) {
+                    SYSLOG("csops: skip blacklisted pid=%d", pid);
+                	return ret;
+                }
+
                 *(uint32_t*)useraddr |= CS_VALID;
                 *(uint32_t*)useraddr |= CS_PLATFORM_BINARY;
                 *(uint32_t*)useraddr &= ~CS_PLATFORM_PATH;
@@ -74,6 +80,12 @@ int new_csops_audittoken(pid_t pid, unsigned int  ops, void * useraddr, size_t u
                     return ret;
                 }
 
+                //blacklisted trollstored apps
+                if(pid!=getpid() && launchctl_support() && jbclient_blacklist_check_pid(pid)) {
+                    SYSLOG("csops_audittoken: skip blacklisted pid=%d", pid);
+                	return ret;
+                }
+
                 *(uint32_t*)useraddr |= CS_VALID;
                 *(uint32_t*)useraddr |= CS_PLATFORM_BINARY;
                 *(uint32_t*)useraddr &= ~CS_PLATFORM_PATH;
@@ -107,7 +119,12 @@ void init_platformHook()
     // DobbyHook(os_variant_has_internal_content, new_os_variant_has_internal_content, (void**)&orig_os_variant_has_internal_content);
 }
 
-
+/*
+PROC_PIDREGIONPATH
+PROC_PIDREGIONPATHINFO
+PROC_PIDREGIONPATHINFO2
+PROC_PIDREGIONPATHINFO3
+*/
 #include <sys/proc_info.h>
 #define PROC_INFO_CALL_PIDINFO           0x2
 int __proc_info(int callnum, int pid, int flavor, uint64_t arg, void * buffer, int buffersize);
@@ -169,8 +186,13 @@ int new__NSGetExecutablePath(char* buf, uint32_t* bufsize)
 {
     if(g_fixed_executable_path) 
     {
-        *bufsize = strlcpy(buf, g_fixed_executable_path, *bufsize);
-        return 0;
+        size_t pathSize = strlen(g_fixed_executable_path) + 1;
+        if(*bufsize >= pathSize ) {
+            strcpy(buf, g_fixed_executable_path);
+            return 0;
+        }
+        *bufsize = (uint32_t)pathSize;
+        return -1;
     }
     return orig__NSGetExecutablePath(buf, bufsize);
 }
@@ -224,8 +246,8 @@ void os_thread_self_restrict_tpro_to_ro(void)
 }
 #endif
 
+extern char*** _NSGetArgv();
 extern char** _NSGetProgname();
-extern char*** _NSGetArgv(void);
 extern char** _CFGetProcessPath();
 
 void init_process_path_hook()
@@ -297,11 +319,29 @@ void init_process_path_hook()
             }
         }
 
+        // uint64_t gDyldPtr = (uint64_t)DobbySymbolResolver("/usr/lib/system/libdyld.dylib", "__ZN5dyld45gDyldE");
+        // SYSLOG("gDyld ptr: 0x%llx\n", gDyldPtr);
+        // ASSERT(gDyldPtr != 0);
+
+        // uint64_t gDyld = *(uint64_t*)gDyldPtr;
+        // SYSLOG("gDyld: 0x%llx\n", gDyld);
+        // ASSERT(gDyld != 0);
+
+        // uint64_t config = *(uint64_t*)(gDyld + 8);
+        // SYSLOG("config: 0x%llx\n", config);
+        // ASSERT(config != 0);
+
+        // mainExecutablePath is at 0x10 for iOS 15~18.3.2, 0x20 for iOS 18.4+
+        // uint64_t mainExecutablePath = *(uint64_t*)(config + 0x10);
+        // SYSLOG("mainExecutablePath: 0x%llx, %s", mainExecutablePath, mainExecutablePath);
+        // ASSERT(mainExecutablePath != 0);
+
+
         for(int i=0; i<_dyld_image_count(); i++) {
             if((void*)_dyld_get_image_header(i) == (void*)_dyld_get_prog_image_header()) {
                 const char* image_path = _dyld_get_image_name(i);
                 ASSERT(strlen(image_path) >= strlen(g_fixed_executable_path));
-		        if (!__builtin_available(iOS 16.0, *)) {
+                if (!__builtin_available(iOS 16.0, *)) {
                     ASSERT(vm_protect(mach_task_self(), (vm_address_t)image_path, strlen(image_path)+1, 0, VM_PROT_READ|VM_PROT_WRITE|VM_PROT_COPY)==KERN_SUCCESS);
                 }
                 strcpy((char*)image_path, (char*)g_fixed_executable_path);
@@ -324,6 +364,7 @@ void init_process_path_hook()
         *__initedMainBundle = 0; // force re-init main bundle
     }
 
+#if DEBUG == 1
     SYSLOG("getprogname=%s", getprogname());
     SYSLOG("NXArgv[0] = %s", NXArgv[0]);
     SYSLOG("_NSGetArgv()[0] = %s", (*_NSGetArgv())[0]);
@@ -339,6 +380,13 @@ void init_process_path_hook()
             SYSLOG("_dyld_get_image_name(%d) = %p,%s", i, _dyld_get_image_name(i), _dyld_get_image_name(i));
         }
     }
+    uint32_t bufsize = 0;
+    _NSGetExecutablePath(NULL, &bufsize);
+    char *executablePath = malloc(bufsize);
+    _NSGetExecutablePath(executablePath, &bufsize);
+    SYSLOG("_NSGetExecutablePath = %s, size: %d", executablePath, bufsize);
+    free(executablePath);
+#endif
 }
 
 #include <bootstrap.h>

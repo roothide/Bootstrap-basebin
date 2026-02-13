@@ -13,11 +13,13 @@ int jitest(int count, int time)
 
 		printf("test %d\n", i);
 
-		assert(bsd_enableJIT() == 0);
+		assert(bsd_enableJIT(getpid()) == 0);
 	}
 
 	return 0;
 }
+
+SInt32 CFUserNotificationDisplayAlert(CFTimeInterval timeout, CFOptionFlags flags, CFURLRef iconURL, CFURLRef soundURL, CFURLRef localizationURL, CFStringRef alertHeader, CFStringRef alertMessage, CFStringRef defaultButtonTitle, CFStringRef alternateButtonTitle, CFStringRef otherButtonTitle, CFOptionFlags *responseFlags) API_AVAILABLE(ios(3.0));
 
 int main(int argc, char *argv[], char *envp[])
 {
@@ -36,8 +38,20 @@ int main(int argc, char *argv[], char *envp[])
 	{
 		if(strcmp(argv[1], "startup")==0)
 		{
+			FileLogDebug("bsctl startup: checking userspace panic ...");
+			NSString* watchdogmsg = [NSString stringWithContentsOfFile:jbroot(@"/var/mobile/.watchdogmsg") encoding:NSUTF8StringEncoding error:nil];
+			if(watchdogmsg) {
+				NSString* panicMessage = [NSString stringWithFormat:@"Bootstrap has protected you from a userspace panic by temporarily disabling tweak injection and triggering a userspace reboot instead. A log is available under Analytics in the Preferences app. You can reenable tweak injection in the settings of Bootstrap app.\n\nPanic message: \n%@", watchdogmsg];
+				CFUserNotificationDisplayAlert(0, 2/*kCFUserNotificationCautionAlertLevel*/, NULL, NULL, NULL, CFSTR("Watchdog Timeout"), (__bridge CFStringRef)panicMessage, NULL, NULL, NULL, NULL);
+				ASSERT(unlink(jbroot("/var/mobile/.watchdogmsg")) == 0);
+			}
+
+			FileLogDebug("bsctl startup: bootstrapping launch daemons ...");
 			int ret1 = spawn_bootstrap_binary((char*const[]){"/usr/bin/launchctl", "bootstrap", "system", "/Library/LaunchDaemons", NULL}, NULL, NULL);
+
+			FileLogDebug("bsctl startup: refreshing jailbroken apps ...");
 			int ret2 = spawn_bootstrap_binary((char*const[]){"/usr/bin/uicache", "-a", NULL}, NULL, NULL);
+
 			return (ret1==0 && ret2==0) ? 0 : -1;
 		}
 		else if(strcmp(argv[1], "check") == 0)
@@ -50,7 +64,8 @@ int main(int argc, char *argv[], char *envp[])
 				printf("server pid=%d\n", pid);
 				if(pid > 0) {
 					result = kill(pid, 0);
-					printf("server status=%d\n", result);
+					printf("pid status=%d\n", result);
+					printf("ipc status=%d\n", bsd_checkServer());
 				}
 				fclose(fp);
 			} else {

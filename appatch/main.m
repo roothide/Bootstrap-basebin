@@ -253,10 +253,6 @@ BOOL isMachoFile(NSString* filePath)
 	return ismacho;
 }
 
-NSArray* InjectAppPlugins = @[
-
-];
-
 int signApp(NSString* appPath)
 {
 	NSDictionary* baseEntitlements = nil;
@@ -301,6 +297,8 @@ int signApp(NSString* appPath)
 	}
 
 	assert(baseEntitlements != nil);
+
+	NSArray* InjectAppPlugins = [NSDictionary dictionaryWithContentsOfFile:jbroot(@"/basebin/resignList.plist")][@"plugins"];
 
 	NSString* mainExecutablePath = appMainExecutablePathForAppPath(appPath);
 	if(!mainExecutablePath) return 176;

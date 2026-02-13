@@ -11,7 +11,7 @@ TOOL_NAME = bsctl
 
 bsctl_FILES = $(wildcard *.c *.m *.mm *.cpp)
 bsctl_CFLAGS = -I../common -fobjc-arc -Wno-deprecated-declarations -Wno-unused-variable -Wno-unused-function -Wno-unneeded-internal-declaration
-bsctl_LDFLAGS = -L../common/lib -lcommon -lbsm
+bsctl_LDFLAGS = -L../common/lib -lcommon -dead_strip
 bsctl_CODESIGN_FLAGS = -Sentitlements.plist
 bsctl_INSTALL_PATH = /basebin/
 

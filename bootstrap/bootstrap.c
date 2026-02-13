@@ -276,6 +276,9 @@ void loadPathHook()
 {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
+		if(requireJIT() != 0) {
+			return;
+		}
 		void* roothidehooks = dlopen(jbroot("/basebin/roothidehooks.dylib"), RTLD_NOW);
 		ASSERT(roothidehooks != NULL);
 		void (*pathhook)() = dlsym(roothidehooks, "pathhook");
@@ -368,8 +371,8 @@ void redirect_paths(const char* rootdir)
         redirect_path_env(rootdir);
 		
 		if(_CFCanChangeEUIDs()) {
-			// void loadPathHook();
-			// loadPathHook();
+			void loadPathHook();
+			loadPathHook();
 		}
     
         pid_t ppid = get_real_ppid();
@@ -399,8 +402,7 @@ char* remove_trailing_slash(char *path) {
 extern void runAsRoot(const char* path, char* argv[]);
 
 char* tweakDisabledProcesses[] = {
-	"/Applications/Terminal.app/Terminal",
-	"/Applications/MTerminal.app/MTerminal",
+	"/usr/libexec/watchdogd",
 };
 
 //export for PatchLoader
@@ -499,7 +501,7 @@ static void __attribute__((__constructor__)) bootstrap()
 				runAsRoot(jbroot(args[0]), args);
 			}
 
-			fprintf(stderr, "launchctl is not supported.\n");
+			fprintf(stderr, "launchctl is not supported on current system.\n");
 			exit(0);
 		}
     }
@@ -529,7 +531,22 @@ static void __attribute__((__constructor__)) bootstrap()
 		exit(0);
 	}
 	else if(string_has_suffix(exepath, "/usr/libexec/watchdogd")) {
-		//init watchdogd hook
+		int init_watchdoghook();
+		init_watchdoghook();
+	}
+	else if(string_has_suffix(exepath, "/usr/sbin/frida-server")) {
+		if(launchctl_support() && !proc_traced(1)) {
+			SYSLOG("launchd jit is not enabled(%d,%d), notifying user to enable it.");
+			char* argv[] = {
+				"/usr/bin/uialert",
+				"--body", "Please reboot userspace to activate `frida -f` support.",
+				"frida-server", //title
+				NULL
+			};
+			pid_t pid=0;
+			int spawnerr = posix_spawn_hook(&pid, jbroot(argv[0]), NULL, NULL, argv, environ);
+			SYSLOG("uialert spawn returned %d, pid=%d", spawnerr, pid);
+		}
 	}
 
 	//checkServer before loading roothidepatch
@@ -541,9 +558,6 @@ static void __attribute__((__constructor__)) bootstrap()
 			{
 				void init_platformHook();
 				init_platformHook(); //try
-				
-				void init_process_path_hook();
-				init_process_path_hook();
 			} 
 			else if(string_has_prefix(exepath, "/Applications/"))
 			{
@@ -591,8 +605,19 @@ static void __attribute__((__constructor__)) bootstrap()
 			break;
 		}
 
+		if(strcmp(exepath, "/Applications/CocoaTop.app/CocoaTop") != 0) {
+			void init_process_path_hook();
+			init_process_path_hook();
+		}
+
+		// if(!string_has_suffix(executablePath, "/usr/sbin/cfprefsd")) {
+		if(!launchctl_support()) {
+			void init_prefs_inlinehook();
+			init_prefs_inlinehook();
+		}
+
 		if(get_real_ppid() != 1) {
-			SYSLOG("Not loading tweaks for non launched job process: pid=%d ppid=%d", getpid(), get_real_ppid());
+			SYSLOG("Not loading tweaks for non launch job process: pid=%d ppid=%d", getpid(), get_real_ppid());
 			break;
 		}
 
@@ -604,7 +629,7 @@ static void __attribute__((__constructor__)) bootstrap()
 		bool blockTweaks = false;
 		for(int i=0; i<sizeof(tweakDisabledProcesses)/sizeof(tweakDisabledProcesses[0]); i++)
 		{
-			if(strcmp(exepath, tweakDisabledProcesses[i])==0) {
+			if(string_has_suffix(exepath, tweakDisabledProcesses[i])) {
 				SYSLOG("Tweaks disabled for %s", exepath);
 				blockTweaks=true;
 				break;
@@ -613,28 +638,22 @@ static void __attribute__((__constructor__)) bootstrap()
 		if(blockTweaks) {
 			break;
 		}
-
-		// if(!string_has_suffix(executablePath, "/usr/sbin/cfprefsd")) {
-		if(!launchctl_support()) {
-			void init_prefs_inlinehook();
-			init_prefs_inlinehook();
-		}
 		
 		char *tweaksDisabledEnv = getenv("DISABLE_TWEAKS");
 		if (tweaksDisabledEnv) {
-			if (!strcmp(tweaksDisabledEnv, "1")) {
+			if (strcmp(tweaksDisabledEnv, "1")==0) {
 				break;
 			}
 		}
 		const char *safeModeValue = getenv("_SafeMode");
 		if (safeModeValue) {
-			if (!strcmp(safeModeValue, "1")) {
+			if (strcmp(safeModeValue, "1")==0) {
 				break;
 			}
 		}
 		const char *msSafeModeValue = getenv("_MSSafeMode");
 		if (msSafeModeValue) {
-			if (!strcmp(msSafeModeValue, "1")) {
+			if (strcmp(msSafeModeValue, "1")==0) {
 				break;
 			}
 		}

@@ -11,7 +11,7 @@ LIBRARY_NAME = launchdhook
 
 launchdhook_FILES = $(wildcard *.c *.m *.mm *.cpp)
 launchdhook_CFLAGS = -I../common -fobjc-arc -Wno-deprecated-declarations -Wno-unused-variable -Wno-unused-function -Wno-unneeded-internal-declaration -Wno-incompatible-function-pointer-types -Wno-incompatible-pointer-types-discards-qualifiers
-launchdhook_LDFLAGS = -L../common/lib -lcommon -lbsm -ldobby -lc++
+launchdhook_LDFLAGS = -L../common/lib -lcommon -dead_strip -lbsm -ldobby -lc++
 launchdhook_INSTALL_PATH = /basebin
 
 include $(THEOS_MAKE_PATH)/library.mk

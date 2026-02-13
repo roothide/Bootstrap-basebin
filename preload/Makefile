@@ -10,7 +10,7 @@ LIBRARY_NAME = preload
 
 preload_FILES = prelib.m dyld_bypass_validation.m
 preload_CFLAGS = -fobjc-arc -Wno-unused-variable -Wno-unused-but-set-variable -I../common
-preload_LDFLAGS = -L../common/lib -lcommon -install_name preload
+preload_LDFLAGS = -L../common/lib -lcommon -dead_strip -install_name preload
 preload_INSTALL_PATH = /basebin
 
 include $(THEOS_MAKE_PATH)/library.mk

@@ -4,7 +4,7 @@
 #include <xpc/xpc.h>
 #include <stdint.h>
 
-#define JBS_DOMAIN_ROOTHIDE 5
+#define JBS_DOMAIN_ROOTHIDE 100 //Differentiate it from roothide dopamine2
 
 enum {
     JBS_ROOTHIDE_JAILBROKEN_CHECK=1,

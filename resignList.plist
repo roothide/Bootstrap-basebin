@@ -1,30 +1,69 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
-<array>
-    <!-- roothide required -->
-    <string>/sbin/launchd</string>
-    <string>/usr/libexec/xpcproxy</string>
-    <string>/System/Library/CoreServices/SpringBoard.app/SpringBoard</string>
-    <string>/usr/bin/powerlogHelperd</string>
-    <string>/usr/sbin/spindump</string>
-    <string>/usr/sbin/cfprefsd</string>
-    <string>/usr/libexec/lsd</string>
-    <string>/usr/libexec/transitd</string>
-    <!-- more daemons -->
-    <string>/usr/libexec/nfcd</string>
-    <string>/usr/libexec/replayd</string>
-    <string>/usr/libexec/audiomxd</string> <!-- ios17+only -->
-    <string>/usr/sbin/bluetoothd</string>
-    <string>/usr/sbin/mediaserverd</string>
-    <string>/usr/libexec/backboardd</string>
-    <string>/usr/libexec/runningboardd</string>
-    <string>/usr/libexec/thermalmonitord</string>
-    <string>/Applications/MediaRemoteUI.app/MediaRemoteUI</string>
-    <string>/System/Library/PrivateFrameworks/Pasteboard.framework/Support/pasted</string>
-    <string>/System/Library/PrivateFrameworks/ChronoCore.framework/Support/chronod</string>
-    <string>/System/Library/PrivateFrameworks/TelephonyUtilities.framework/callservicesd</string>
-    <!-- <string>/System/Library/CoreServices/CarPlay.app/CarPlay</string>
-    <string>/Applications/CarPlayWallpaper.app/CarPlayWallpaper</string> -->
-</array>
+<dict>
+	<key>executables</key>
+	<array>
+		<!-- roothide required -->
+		<string>/sbin/launchd</string>
+		<string>/usr/libexec/xpcproxy</string>
+		<string>/usr/sbin/spindump</string> <!-- launch constraints(parent) -->
+		<string>/usr/sbin/cfprefsd</string>
+		<string>/usr/libexec/lsd</string>
+		<string>/usr/libexec/transitd</string>
+		<string>/usr/libexec/watchdogd</string>
+		<string>/usr/bin/powerlogHelperd</string>
+		<string>/System/Library/CoreServices/SpringBoard.app/SpringBoard</string>
+		<string>/System/Library/Frameworks/CoreTelephony.framework/Support/CommCenter</string> <!-- fix cellular settings since beta4 -->
+		<!-- more daemons -->
+		<string>/usr/libexec/nfcd</string>
+		<string>/usr/libexec/replayd</string>
+		<string>/usr/libexec/audiomxd</string> <!-- ios17+ only -->
+		<string>/usr/sbin/bluetoothd</string>
+		<string>/usr/sbin/mediaserverd</string>
+		<string>/usr/libexec/backboardd</string>
+		<string>/usr/libexec/runningboardd</string>
+		<string>/usr/libexec/thermalmonitord</string>
+		<string>/System/Library/PrivateFrameworks/Pasteboard.framework/Support/pasted</string>
+		<string>/System/Library/PrivateFrameworks/ChronoCore.framework/Support/chronod</string>
+		<string>/System/Library/PrivateFrameworks/TelephonyUtilities.framework/callservicesd</string>
+		<!-- more daemons from nathan -->
+		<string>/usr/libexec/installd</string>
+		<string>/usr/libexec/sharingd</string>
+		<string>/usr/libexec/locationd</string>
+		<string>/System/Library/CoreServices/iconservicesagent</string>
+		<string>/System/Library/CoreServices/CarPlay.app/CarPlay</string> <!-- iphone only -->
+		<string>/System/Library/PrivateFrameworks/CoreParsec.framework/parsecd</string>
+		<string>/System/Library/PrivateFrameworks/NanoLeash.framework/companionfindlocallyd</string> <!-- iphone only -->
+		<string>/System/Library/PrivateFrameworks/AppStoreDaemon.framework/Support/appstored</string>
+		<string>/System/Library/PrivateFrameworks/SocialLayer.framework/sociallayerd.app/sociallayerd</string>
+	</array>
+
+	<key>bundles</key>
+	<array>
+		<string>/Applications/Preferences.app</string>
+		<string>/Applications/Camera.app</string>
+		<string>/Applications/AppStore.app</string>
+		<string>/Applications/Spotlight.app</string>
+		<string>/Applications/MobileSMS.app</string>
+		<string>/Applications/MobilePhone.app</string> <!-- iphone only -->
+		<string>/Applications/MobileSafari.app</string>
+		<string>/Applications/MobileSlideShow.app</string>
+		<string>/Applications/PosterBoard.app</string> <!-- LaunchAngel on ios16+ -->
+		<string>/Applications/MediaRemoteUI.app</string> <!-- LaunchAngel on ios16+ -->
+		<string>/Applications/ReplayKitAngel.app</string> <!-- LaunchAngel on ios16+ -->
+		<string>/Applications/CarPlayWallpaper.app</string> <!-- iphone only -->
+		<string>/Applications/SharingViewService.app</string>
+		<string>/Applications/MessagesViewService.app</string>
+		<string>/Applications/InCallService.app</string>
+		<string>/Applications/BusinessChatViewService.app</string>
+		<string>/Applications/WidgetRenderer_CarPlay.app</string> <!-- ios17+ only -->
+		<string>/Applications/WidgetRenderer_Default.app</string> <!-- ios17+ only -->
+	</array>
+
+	<key>plugins</key>
+	<array>
+		<string>com.apple.MobileSMS.MessagesNotificationExtension</string>
+	</array>
+</dict>
 </plist>

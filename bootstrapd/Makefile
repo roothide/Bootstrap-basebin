@@ -13,7 +13,7 @@ TOOL_NAME = bootstrapd
 
 bootstrapd_FILES = $(wildcard *.c *.m *.mm *.cpp)
 bootstrapd_CFLAGS = -I../common -fobjc-arc -Wno-deprecated-declarations -Wno-unused-variable -Wno-unused-function -Wno-unneeded-internal-declaration
-bootstrapd_LDFLAGS = -L../common/lib -lcommon -lbsm
+bootstrapd_LDFLAGS = -L../common/lib -lcommon -dead_strip -lbsm
 bootstrapd_CODESIGN_FLAGS = -Sentitlements.plist
 bootstrapd_INSTALL_PATH = /basebin/
 
@@ -25,7 +25,7 @@ after-all::
 	cp -a ./layout/basebin/LaunchDaemons ../.build/
 
 after-install::
-	install.exec '$(THEOS_PACKAGE_INSTALL_PREFIX)/basebin/$(TOOL_NAME)' server -f
+# 	install.exec '$(THEOS_PACKAGE_INSTALL_PREFIX)/basebin/$(TOOL_NAME)' server -f
 
 clean::
 	rm -rf ./packages/*

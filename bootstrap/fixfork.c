@@ -13,22 +13,38 @@
 #include <mach-o/dyld.h>
 #include <CoreFoundation/CoreFoundation.h>
 
+#include "ipc.h"
 #include "common.h"
 #include "libbsd.h"
-#include "ipc.h"
+#include "jailbreakd.h"
 
-//#define FORK_DEBUG
+// #define FORK_DEBUG
 
 #ifndef CPUFAMILY_ARM_PCORE_ECORE_COLL
 #define CPUFAMILY_ARM_PCORE_ECORE_COLL 0x2876f5b5
 #endif
+
+pid_t ffsys_fork(void);
+pid_t ffsys_getpid(void);
+ssize_t ffsys_read(int fildes, void *buf, size_t nbyte);
+ssize_t ffsys_write(int fildes, const void *buf, size_t nbyte);
+int ffsys_close(int fildes);
+int ffsys_fsync(int fildes);
+
+int ffsys_errno = 0;
+long ffsys_cerror(int err)
+{
+    ffsys_errno = err;
+    return -1;
+}
 
 #define printf_putchar(x) do{int l=strlen(buffer);if(l<bufsize)buffer[l]=x;}while(0)
 
 int _vsnprintf(char* buffer, int bufsize, const char * __restrict format, va_list vl) {
     bool special = false;
     
-    memset(buffer,0,bufsize);
+    for(int i=0; i<bufsize; i++)
+        buffer[i]=0;
     
     while (*format) {
         if (special) {
@@ -173,23 +189,79 @@ int _snprintf(char* buffer, int bufsize, const char * __restrict format, ...) {
 #define forklog(...)	do {\
 char buf[1024];\
 _snprintf(buf,sizeof(buf),__VA_ARGS__);\
-write(STDERR_FILENO,buf,strlen(buf));\
-write(STDERR_FILENO,"\n",1);\
-fsync(STDERR_FILENO);\
+ffsys_write(STDERR_FILENO,buf,strlen(buf));\
+ffsys_write(STDERR_FILENO,"\n",1);\
+/*ENOTSUP on ffsys_fsync(STDERR_FILENO);*/\
 } while(0)
 #else
 #define forklog(...)
 #endif
 
-
-
 bool forkfix_method_2=false;
+uint64_t* unsigned_pages=NULL;
 
-pid_t ffsys_fork(void);
-pid_t ffsys_getpid(void);
-ssize_t ffsys_read(int fildes, void *buf, size_t nbyte);
-ssize_t ffsys_write(int fildes, const void *buf, size_t nbyte);
-int ffsys_close(int fildes);
+extern void* _dyld_get_shared_cache_range(size_t* length);
+
+/* existing SM_PRIVATE pages(if inherit=true) will become SM_COW pages after each fork,
+    so we just keep them and collect new SM_PRIVATE pages */
+
+void collect_unsigned_pages()
+{
+    int new_page_count = 0;
+    int total_page_count = 0;
+
+    if(unsigned_pages) {
+        for(int i=0; unsigned_pages[i]!=0; i++) {
+            total_page_count++;
+        }
+    }
+
+#ifdef FORK_DEBUG
+    size_t dsc_length=0;
+    void* dsc_start = _dyld_get_shared_cache_range(&dsc_length);
+    forklog("dyld shared cache: %p - %p\n", dsc_start, (uint64_t)dsc_start+dsc_length);
+#endif
+
+    natural_t depth = 1;
+    vm_size_t region_size = 0;
+    vm_address_t region_base = 0;
+    
+    while(true)
+    {     
+        struct vm_region_submap_info_64 info={0};
+        mach_msg_type_number_t info_cnt = VM_REGION_SUBMAP_INFO_COUNT_64;
+        
+        kern_return_t kr = vm_region_recurse_64(mach_task_self(), &region_base, &region_size, &depth, (vm_region_info_t)&info, &info_cnt);
+        if(kr != KERN_SUCCESS) {
+            break;
+        }
+        if(info.is_submap != 0) {
+            depth++;
+        }
+        else 
+        {
+            if ((info.protection & VM_PROT_EXECUTE) != 0) {
+                // forklog(" region %p %lx [%d/%d], %x/%x, %d", (void*)region_base, region_size, info.is_submap, depth, info.protection, info.max_protection, info.share_mode);
+                if (info.share_mode == SM_PRIVATE) {
+                    forklog("found unsigned region %p %lx [%d/%d], %x/%x, %d\n", (void*)region_base, region_size, info.is_submap, depth, info.protection, info.max_protection, info.share_mode);
+                    int page_count = region_size / PAGE_SIZE;
+                    new_page_count += page_count;
+                    unsigned_pages = realloc(unsigned_pages, (total_page_count + page_count) * sizeof(uint64_t));
+                    for(int i=0; i<page_count; i++) {
+                        unsigned_pages[total_page_count++] = region_base + i * PAGE_SIZE;
+                    }
+                }
+            }
+
+            region_base += region_size;
+        }
+    }
+
+    if(new_page_count > 0) {
+        unsigned_pages = realloc(unsigned_pages, (total_page_count + 1) * sizeof(uint64_t));
+        unsigned_pages[total_page_count] = 0;
+    }
+}
 
 bool* _DisableInitializeForkSafety = NULL;
 static void (**_libSystem_atfork_prepare)(void) = 0;
@@ -251,8 +323,8 @@ atforkinit()
 #define _libSystem_atfork_parent_v2  	(*_libSystem_atfork_parent_v2)
 #define _libSystem_atfork_child_v2  	(*_libSystem_atfork_child_v2)
 
-
-
+#ifdef FORK_DEBUG
+//not safe during fork with hooked pages
 void showvm(task_port_t task, uint64_t start, uint64_t size)
 {
     vm_size_t region_size=0;
@@ -269,11 +341,11 @@ void showvm(task_port_t task, uint64_t start, uint64_t size)
                                           &depth, (vm_region_info_t)&info, &info_cnt);
         
         if(kr != KERN_SUCCESS) {
-            forklog("[%d] vm_region failed on %p, %x:%s", getpid(), (void*)region_base, kr, mach_error_string(kr));
+            forklog("[%d] showvm: vm_region failed on %p, %x:%s\n", getpid(), (void*)region_base, kr, mach_error_string(kr));
             break;
         }
         
-        forklog("[%d] found region %p %lx [%d/%d], %x/%x, %d\n", getpid(), (void*)region_base, region_size, info.is_submap, depth, info.protection, info.max_protection, info.user_tag);
+        forklog("[%d] showvm: found region %p %lx [%d/%d], %x/%x, %d\n", getpid(), (void*)region_base, region_size, info.is_submap, depth, info.protection, info.max_protection, info.user_tag);
 
         if(info.is_submap) {
             region_size=0;
@@ -283,6 +355,7 @@ void showvm(task_port_t task, uint64_t start, uint64_t size)
         
     } 
 }
+#endif
 
 __attribute__((noinline, naked)) volatile kern_return_t _mach_vm_protect(mach_port_name_t target, mach_vm_address_t address, mach_vm_size_t size, boolean_t set_maximum, vm_prot_t new_protection)
 {
@@ -337,6 +410,10 @@ void fork_abort(const char* reason) {
     sigset_t mask = __sigbits(SIGABRT);
     _sigprocmask(SIG_UNBLOCK, &mask, NULL);
 
+#ifdef FORK_DEBUG
+    forklog("fork_abort: %s", reason);
+#endif
+
     syscall__abort_with_payload(OS_REASON_DYLD, DYLD_EXIT_REASON_OTHER, NULL, 0, reason, 0);
     syscall__terminate_with_payload(ffsys_getpid(), OS_REASON_DYLD, DYLD_EXIT_REASON_OTHER, NULL, 0, reason, 0x200);
     // should never return
@@ -358,80 +435,83 @@ int _strcmp(const char *s1, const char *s2)
 
 void forkfix(const char* tag, bool flag, bool child)
 {
-	kern_return_t kr = -1;
-	mach_port_t task = _task_self_trap();//mach_port_deallocate for task_self_trap()
+    kern_return_t kr = -1;
+    mach_port_t task = _task_self_trap();
 
-    // if(flag) {
-    //     int count=0;
-    //     thread_act_array_t list;
-    //     ASSERT(task_threads(task, &list, &count) == KERN_SUCCESS);
-    //     for(int i=0; i<count; i++) {
-    //         if(list[i] != mach_thread_self()) { //mach_port_deallocate
-    //             ASSERT(thread_suspend(list[i]) == KERN_SUCCESS);
-    //         }
-    //     }
-    // }
-
-
-    static struct mach_header_64* header = NULL; //save the header for child on parent
-    if(!header) header = _dyld_get_prog_image_header(); //_NSGetMachExecuteHeader()
-    struct load_command* lc = (struct load_command*)((uint64_t)header + sizeof(*header));
-    for (uint32_t i = 0; i < header->ncmds; i++) {
-        if (lc->cmd == LC_SEGMENT_64)
-        {
-            struct segment_command_64 * seg = (struct segment_command_64 *) lc;
-            if(_strcmp(seg->segname, SEG_TEXT)==0)
-            {
-                forklog("%s-%d segment: %s file=%llx:%llx vm=%p:%llx\n", tag, flag, seg->segname, seg->fileoff, seg->filesize, (void*)seg->vmaddr, seg->vmsize);
-
-                //According to dyld, the __TEXT address is always equal to the header address
-
-#ifdef FORK_DEBUG
-                showvm(task, (uint64_t)header, seg->vmsize);
-#endif
-                if(!forkfix_method_2)
-                {
-                    kr = _mach_vm_protect(task, (vm_address_t)header, seg->vmsize, false, flag ? VM_PROT_READ : VM_PROT_READ|VM_PROT_EXECUTE);
-                    forklog("[%d] %s vm_protect.%d %d,%s\n", getpid(), tag, flag,  kr, mach_error_string(kr));
-                    fork_assert(kr == KERN_SUCCESS);
-                }
-
-				// ASSERT(*(int*)textaddr);
-
-#ifdef FORK_DEBUG
-                // showvm(task, (uint64_t)header, seg->vmsize); //stack overflow by mig_get_reply_port infinite reucrsion on child process
-#endif
-
-                break;
+    if(!child &&flag) {
+        unsigned int count=0;
+        thread_act_array_t list=NULL;
+        fork_assert(task_threads(task, &list, &count)==KERN_SUCCESS);
+        for(int i=0; i<count; i++) {
+            if(list[i] != mach_thread_self()) {
+                fork_assert(thread_suspend(list[i]) == KERN_SUCCESS);
+                fork_assert(mach_port_deallocate(task, list[i]) == KERN_SUCCESS);
             }
         }
-        lc = (struct load_command *) ((char *)lc + lc->cmdsize);
     }
 
-    // if(!flag) {
-    //     int count=0;
-    //     thread_act_array_t list;
-    //     ASSERT(task_threads(task, &list, &count) == KERN_SUCCESS);
-    //     for(int i=0; i<count; i++) {
-    //         if(list[i] != mach_thread_self()) { //mach_port_deallocate
-    //             ASSERT(thread_resume(list[i]) == KERN_SUCCESS);
-    //         }
-    //     }
-    // }   
+    static uint64_t textaddr=0, textsize=0;
+
+    if(!textaddr) {
+        struct mach_header_64* header = _dyld_get_prog_image_header();
+        struct load_command* lc = (struct load_command*)((uint64_t)header + sizeof(*header));
+        for (uint32_t i = 0; i < header->ncmds; i++) {
+            if (lc->cmd == LC_SEGMENT_64) {
+                struct segment_command_64 * seg = (struct segment_command_64 *) lc;
+                if(_strcmp(seg->segname, SEG_TEXT)==0)
+                {
+                    forklog("[%d] %s main exe segment: %s file=%llx:%llx vm=%p:%llx\n", ffsys_getpid(), tag, seg->segname, seg->fileoff, seg->filesize, (void*)seg->vmaddr, seg->vmsize);
+
+                    //According to dyld, the __TEXT address is always equal to the header address
+                    textaddr = (uint64_t)header;
+                    textsize = seg->vmsize;
+                    break;
+                }
+            }
+            lc = (struct load_command *) ((char *)lc + lc->cmdsize);
+        }
+    }
+
+    fork_assert(textaddr!=0 && textsize!=0);
+    
+#ifdef FORK_DEBUG
+    //showvm(task, (uint64_t)header, seg->vmsize);
+#endif
+    if(!forkfix_method_2)
+    {
+        kr = _mach_vm_protect(task, (vm_address_t)textaddr, textsize, false, flag ? VM_PROT_READ : VM_PROT_READ|VM_PROT_EXECUTE);
+        forklog("[%d] %s main exe vm_protect(%d): %p, kr=%x\n", ffsys_getpid(), tag, flag, (void*)textaddr, kr);
+        fork_assert(kr == KERN_SUCCESS);
+    }
+
+    // ASSERT(*(int*)textaddr);
+
+#ifdef FORK_DEBUG
+    // showvm(task, (uint64_t)header, seg->vmsize); //stack overflow by mig_get_reply_port infinite reucrsion on child process
+#endif
+
+    if(unsigned_pages)
+    {
+        for(int i=0; unsigned_pages[i]!=0; i++) {
+            uint64_t page = unsigned_pages[i];
+            kr = _mach_vm_protect(task, page, PAGE_SIZE, false, flag ? VM_PROT_READ : VM_PROT_READ|VM_PROT_EXECUTE);
+            forklog("[%d] %s unsigned page vm_protect(%d): %p, kr=%x\n", ffsys_getpid(), tag, flag, (void*)page, kr);
+            fork_assert(kr == KERN_SUCCESS);
+        }
+    }
+
+    if(!child && !flag) {
+        unsigned int count=0;
+        thread_act_array_t list=NULL;
+        fork_assert(task_threads(task, &list, &count)==KERN_SUCCESS);
+        for(int i=0; i<count; i++) {
+            if(list[i] != mach_thread_self()) {
+                fork_assert(thread_resume(list[i]) == KERN_SUCCESS);
+                fork_assert(mach_port_deallocate(task, list[i]) == KERN_SUCCESS);
+            }
+        }
+    }   
 }
-
-// struct sigaction fork_oldact = {0};
-// void forksig(int signo, siginfo_t *info, void *context)
-// {
-//     forklog("%d forksig %d %p\n", getpid(), info->si_pid, fork_oldact.sa_sigaction);
-
-//     forkfix("sig", false);
-
-//     if(fork_oldact.sa_sigaction) {
-//         fork_oldact.sa_sigaction(signo, info, context);
-//     }
-// }
-
 
 extern void _malloc_fork_prepare(void);
 extern void _malloc_fork_parent(void);
@@ -459,11 +539,19 @@ void child_fixup(void)
 {
 	// Tell parent we are waiting for fixup now
 	char msg = ' ';
-	ffsys_write(childToParentPipe[1], &msg, sizeof(msg));
+	fork_assert(ffsys_write(childToParentPipe[1], &msg, sizeof(msg)) == sizeof(msg));
+
+	ssize_t ret;
 
 	// Wait until parent completes fixup
-	while((ffsys_read(parentToChildPipe[0], &msg, sizeof(msg))<0) && errno==EINTR){}; //may be interrupted by ptrace
+	while((ret=ffsys_read(parentToChildPipe[0], &msg, sizeof(msg)))<0 && ffsys_errno==EINTR){}; //may be interrupted by ptrace
 
+	fork_assert(ret == sizeof(msg));
+}
+
+static int enableJIT(pid_t pid)
+{
+    return launchctl_support() ? jbdProcessEnableJIT(pid, false) : bsd_enableJIT(pid);
 }
 
 void parent_fixup(pid_t childPid)
@@ -476,17 +564,18 @@ void parent_fixup(pid_t childPid)
 
 	// Wait until the child is ready and waiting
 	char msg = ' ';
-	read(childToParentPipe[0], &msg, sizeof(msg));
+	fork_assert(read(childToParentPipe[0], &msg, sizeof(msg)) == sizeof(msg));
 	
 	//disable ipc log during fork()
-	bool ipclog_status = set_ipclog_enabled(false);
-	if(bsd_enableJIT2(childPid) != 0) {
-        kill(childPid, SIGKILL);
-    }
-    set_ipclog_enabled(ipclog_status);
+	bool ipclog_status = ipc_set_log_enabled(false);
+	if(enableJIT(childPid) != 0) {
+	    kill(childPid, SIGKILL);
+	    fork_abort("enableJIT");
+	}
+	ipc_set_log_enabled(ipclog_status);
 
 	// Tell child we are done, this will make it resume
-	write(parentToChildPipe[1], &msg, sizeof(msg));
+	fork_assert(write(parentToChildPipe[1], &msg, sizeof(msg)) == sizeof(msg));
 
 	// Disable system functionality related to XPC again
 	_malloc_fork_prepare();
@@ -498,16 +587,29 @@ pid_t __fork1(void)
 {
 	openPipes();
 
+	forkfix("parent", true, false);
+	forklog("[%d] forkfix prepared.\n", ffsys_getpid());
+
 	pid_t pid = ffsys_fork();
 	if (pid < 0) {
+		int err = ffsys_errno;
+		forkfix("parent", false, pid==0);
+		forklog("[%d] fork fixed parent.\n", ffsys_getpid());
 		closePipes();
+		errno = err;
 		return pid;
 	}
 
 	if (pid == 0) {
 		child_fixup();
+
+		forkfix("child", false, pid==0);
+		forklog("[%d] fork fixed child.\n", ffsys_getpid());
 	}
 	else {
+		forkfix("parent", false, pid==0);
+		forklog("[%d] fork fixed parent.\n", ffsys_getpid());
+
 		parent_fixup(pid);
 	}
 
@@ -516,9 +618,6 @@ pid_t __fork1(void)
 }
 
 #define LIBSYSTEM_ATFORK_HANDLERS_ONLY_FLAG 1
-
-#include <dlfcn.h>
-extern void* _dyld_get_shared_cache_range(size_t* length);
 
 static inline __attribute__((always_inline))
 pid_t
@@ -529,7 +628,7 @@ _do_fork(bool libsystem_atfork_handlers_only)
 	static int atforkinited=0;
 	if(atforkinited++==0) atforkinit();
 
-	forklog("atfork inited");
+	forklog("[%d] atfork inited\n", ffsys_getpid());
 
     //make sure it's not reparented to launchd (cause we cannot detect reparent from user land)
     if(forkfix_method_2 && get_real_ppid()==1 && kill(getpgrp(), 0)==0 && is_app_coalition()) {
@@ -537,45 +636,9 @@ _do_fork(bool libsystem_atfork_handlers_only)
         return -1;
     }
 
-    size_t dsc_length=0;
-    void* dsc_start = _dyld_get_shared_cache_range(&dsc_length);
-
-    natural_t depth = 1;
-    vm_size_t region_size = 0;
-    vm_address_t region_base = 0;
-    
-    while(true)
-    {     
-        struct vm_region_submap_info_64 info={0};
-        mach_msg_type_number_t info_cnt = VM_REGION_SUBMAP_INFO_COUNT_64;
-        
-        kern_return_t kr = vm_region_recurse_64(mach_task_self(), &region_base, &region_size,
-                                            &depth, (vm_region_info_t)&info, &info_cnt);
-        if(kr != KERN_SUCCESS) {
-            break;
-        }
-
-        if(info.is_submap != 0) {
-            depth++;
-        }
-        else 
-        {
-            if ((info.protection & VM_PROT_EXECUTE) != 0) {
-                if (info.share_mode == SM_PRIVATE) {
-                    if((uint64_t)region_base >= (uint64_t)dsc_start
-                     && (uint64_t)region_base < ((uint64_t)dsc_start+dsc_length))
-                    {
-                        return -1;
-                    }
-                }
-            }
-
-            region_base += region_size;
-        }
-    }
-
-
 	int ret;
+
+	collect_unsigned_pages();
 
 	int flags = libsystem_atfork_handlers_only ? LIBSYSTEM_ATFORK_HANDLERS_ONLY_FLAG : 0;
 
@@ -588,61 +651,41 @@ _do_fork(bool libsystem_atfork_handlers_only)
 	// and lives inside libsyscall. The fork syscall needs some cuddling by asm before it's
 	// allowed to see the big wide C world.
 
+	forklog("[%d] do %s()\n", ffsys_getpid(), libsystem_atfork_handlers_only?"vfork":"fork");
 
-	// struct sigaction act = {0};
-    // struct sigaction oldact = {0};
-
-	// act.sa_flags = SA_ONSTACK|SA_SIGINFO;
-    // act.sa_sigaction = forksig;
-	// sigfillset(&act.sa_mask);
-
-	// sigaction(SIGCHLD, &act, &oldact);
-    // if(oldact.sa_sigaction != forksig) fork_oldact = oldact;
-    // forklog("oldact=%x %x %p\n", oldact.sa_flags, oldact.sa_mask, oldact.sa_sigaction);
-
-	// for(int i=0; i<999; i++) sigignore(i);
-
-    forklog("do fork %d\n", getpid());
-
-    sigset_t newmask, oldmask;
-    sigfillset(&newmask);
-    sigprocmask(SIG_BLOCK, &newmask, &oldmask);
-
-    forklog("fork fix %d\n", getpid());
-    forkfix(libsystem_atfork_handlers_only?"vfork":"fork", true, false);
+	sigset_t newmask, oldmask;
+	sigfillset(&newmask);
+	sigprocmask(SIG_BLOCK, &newmask, &oldmask);
 
 	pid_t pid = ret = __fork1();
-    forklog("forked %d\n", pid);
+	forklog("[%d] forked pid=%d\n", ffsys_getpid(), pid);
 
-    forkfix(libsystem_atfork_handlers_only?"vfork":"fork", false, pid==0);
-    forklog("fork fixed %d\n", getpid());
-
-    sigprocmask(SIG_SETMASK, &oldmask, NULL);
+	sigprocmask(SIG_SETMASK, &oldmask, NULL);
 
 	if (-1 == ret)
 	{
 		// __fork already set errno for us
 		if (_libSystem_atfork_parent_v2) {
-			_libSystem_atfork_parent_v2(flags);
+		    _libSystem_atfork_parent_v2(flags);
 		} else {
-			_libSystem_atfork_parent();
+		    _libSystem_atfork_parent();
 		}
 		return ret;
 	}
 
 	if (0 == ret)
 	{
-        bool _old=*_DisableInitializeForkSafety;
-        *_DisableInitializeForkSafety = true;
+		bool _old=*_DisableInitializeForkSafety;
+		*_DisableInitializeForkSafety = true;
 
 		// We're the child in this part.
 		if (_libSystem_atfork_child_v2) {
-			_libSystem_atfork_child_v2(flags);
+		    _libSystem_atfork_child_v2(flags);
 		} else {
-			_libSystem_atfork_child();
+		    _libSystem_atfork_child();
 		}
 
-        *_DisableInitializeForkSafety = _old;
+		*_DisableInitializeForkSafety = _old;
 		return 0;
 	}
 

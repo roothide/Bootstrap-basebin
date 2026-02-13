@@ -10,7 +10,7 @@ int ResignSystemExecutables()
 {
     NSFileManager* fm = NSFileManager.defaultManager;
 
-    NSArray* ResignList = [NSArray arrayWithContentsOfFile:jbroot(@"/basebin/resignList.plist")];
+    NSArray* ResignList = [NSDictionary dictionaryWithContentsOfFile:jbroot(@"/basebin/resignList.plist")][@"executables"];
     if(!ResignList) {
         LOG("Unable to load resign list\n");
         return -1;

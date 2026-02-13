@@ -90,8 +90,12 @@ int varClean(NSString* bundleIdentifier)
 		return 0;
 	}
 
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
+	if([bundleIdentifier hasPrefix:@"com.apple."] && !is_apple_internal_identifier(bundleIdentifier.UTF8String)) {
+		return -1;
+	}
+
+	static dispatch_once_t onceToken;
+	dispatch_once(&onceToken, ^{
 		varCleanQueue = dispatch_queue_create("varClean", DISPATCH_QUEUE_SERIAL);
 		varCleanDict = [NSMutableDictionary new];
 		varCleanInit();
@@ -110,7 +114,7 @@ int varClean(NSString* bundleIdentifier)
 static void cleanSplashBoardSnapshots()
 {
 	for(NSString* item in [NSFileManager.defaultManager directoryContentsAtPath:@(SPLASHBOARD_SNAPSHOTS_DIR)])
-    {
+	{
 		if(![item hasPrefix:@"com.apple."] || is_apple_internal_identifier(item.UTF8String))
 		{
 			NSString* path = [NSString stringWithFormat:@"%s/%@", SPLASHBOARD_SNAPSHOTS_DIR, item];

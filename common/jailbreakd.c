@@ -10,9 +10,14 @@
 #include <roothide.h>
 #include <xpc_private.h>
 
-#include "common.h"
-#include "jbclient.h"
 #include "jailbreakd.h"
+#include "jbclient.h"
+#include "common.h"
+#include "ipc.h"
+
+#define dbglog(...) do { if (ipc_log_enabled) { SYSLOG(__VA_ARGS__); } } while (0)
+#define errlog(...) do { if (ipc_log_enabled) { SYSERR(__VA_ARGS__); } } while (0)
+#define perror(x)   do { if (ipc_log_enabled) { SYSERR("%s : %s", x, strerror(errno)); } } while (0)
 
 int posix_spawnattr_setspecialport_np(posix_spawnattr_t *attr, mach_port_t new_port, int which);
 int posix_spawnattr_set_registered_ports_np(posix_spawnattr_t * __restrict attr, mach_port_t portarray[], uint32_t count);
@@ -36,7 +41,7 @@ int registerServerPort()
 	mach_port_allocate(mach_task_self(), MACH_PORT_RIGHT_RECEIVE, &gJailbreakdPort);
 	mach_port_insert_right(mach_task_self(), gJailbreakdPort, gJailbreakdPort, MACH_MSG_TYPE_MAKE_SEND);
 
-	SYSLOG("jailbreakd server port: %x", gJailbreakdPort);
+	dbglog("jailbreakd server port: %x", gJailbreakdPort);
 
 #ifdef JAILBREAKD_CLIENT_PORT_FAST_GET
 	mach_port_t self_host = mach_host_self();
@@ -55,7 +60,7 @@ mach_port_t jailbreakdClientPortFastGet()
 	kern_return_t kr = host_get_special_port(self_host, HOST_LOCAL_NODE, HOST_LAUNCHCTL_PORT, &port);
 	mach_port_deallocate(mach_task_self(), self_host);
 	if(kr != KERN_SUCCESS) {
-		SYSERR("jailbreakdClientPortFastGet failed: %x,%s", kr, mach_error_string(kr));
+		errlog("jailbreakdClientPortFastGet failed: %x,%s", kr, mach_error_string(kr));
 		return MACH_PORT_NULL;
 	}
 	return port;
@@ -93,12 +98,12 @@ int spawnJailbreakd()
     dispatch_once(&onceToken, ^{
 		mach_port_allocate(mach_task_self(), MACH_PORT_RIGHT_RECEIVE, &bootstraport);
 		mach_port_insert_right(mach_task_self(), bootstraport, bootstraport, MACH_MSG_TYPE_MAKE_SEND);
-		SYSLOG("jailbreakd bootstrap port: %x", bootstraport);
+		dbglog("jailbreakd bootstrap port: %x", bootstraport);
 
 		static dispatch_source_t source; //retain the dispatch source
 		source = dispatch_source_create(DISPATCH_SOURCE_TYPE_MACH_RECV, (uintptr_t)bootstraport, 0, dispatch_get_global_queue(0,0));
 		dispatch_source_set_event_handler(source, ^{
-			SYSLOG("received message from jailbreakd");
+			dbglog("received message from jailbreakd");
 			xpc_object_t xdict = NULL;
 			int err = xpc_pipe_receive(bootstraport, &xdict);
 			if(err == 0) {
@@ -119,11 +124,11 @@ int spawnJailbreakd()
 	posix_spawnattr_destroy(&attr);
 
 	if (ret != 0) {
-		SYSERR("posix_spawn jailbreakd failed: %d\n", ret);
+		errlog("posix_spawn jailbreakd failed: %d\n", ret);
 		return ret;
 	}
 
-	SYSLOG("jailbreakd spawned, pid=%d\n", pid);
+	dbglog("jailbreakd spawned, pid=%d\n", pid);
 
 	/* here we can't wait for jailbreakd to initialize since opainject will suspend all other threads */
 	
@@ -141,7 +146,7 @@ int initJailbreakd(int(*handler)(xpc_object_t))
 	bootstrap_xpc_handler = handler;
 
 	if(registerServerPort() != 0) {
-		SYSERR("registerServerPort failed");
+		errlog("registerServerPort failed");
 		return -1;
 	}
 
@@ -191,17 +196,17 @@ mach_port_t reactiveJailbreakdPort()
 
 				// Try to restart jailbreakd
 				if(spawnJailbreakd() != 0) {
-					SYSERR("loadJailbreakd failed");
+					errlog("loadJailbreakd failed");
 				}
 			}
 			else
 			{
-				SYSERR("jailbreakdClientPort failed");
+				errlog("jailbreakdClientPort failed");
 			}
 		}
 		else
 		{
-			SYSERR("registerServerPort failed");
+			errlog("registerServerPort failed");
 		}
 	}
 
@@ -227,7 +232,7 @@ mach_port_t jailbreakdClientPort()
 		if(kr == KERN_SUCCESS) {
 			port = gJailbreakdPort;
 		} else {
-			SYSERR("jailbreakd port dead: %x,%s port=%x", kr, mach_error_string(kr), gJailbreakdPort);		
+			errlog("jailbreakd port dead: %x,%s port=%x", kr, mach_error_string(kr), gJailbreakdPort);		
 			port = reactiveJailbreakdPort();
 		}
 	}
@@ -260,7 +265,7 @@ xpc_object_t jailbreakdXpcRequest(xpc_object_t xdict)
 {
 	mach_port_t port = jailbreakdClientPort();
 	if (!MACH_PORT_VALID(port)) {
-		SYSERR("invalid jailbreakdClientPort: %x", port);
+		errlog("invalid jailbreakdClientPort: %x", port);
 		return NULL;
 	}
 	
@@ -270,13 +275,13 @@ xpc_object_t jailbreakdXpcRequest(xpc_object_t xdict)
 		int err = xpc_pipe_routine(pipe, xdict, &xreply);
 		if (err != 0) {
 			char *desc = NULL;
-			SYSERR("xpc_pipe_routine error on sending message to jailbreakd: %d / %s\n%s", err, xpc_strerror(err), (desc=xpc_copy_description(xdict)));
+			errlog("xpc_pipe_routine error on sending message to jailbreakd: %d / %s\n%s", err, xpc_strerror(err), (desc=xpc_copy_description(xdict)));
 			if(desc) free(desc);
 			if(xreply) xpc_release(xreply);
 			xreply = NULL;
 		};
 	} else {
-		SYSERR("xpc_pipe_create_from_port failed");
+		errlog("xpc_pipe_create_from_port failed");
 	}
 
 	mach_port_deallocate(mach_task_self(), port);

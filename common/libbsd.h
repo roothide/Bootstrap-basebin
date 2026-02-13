@@ -9,7 +9,6 @@ enum bootstrapReq
 	BSD_REQ_STOP_SERVER,
 	BSD_REQ_GET_SBTOKEN,
 	BSD_REQ_ENABLE_JIT,
-	BSD_REQ_ENABLE_JIT2,
 	BSD_REQ_SSH_CHECK,
 	BSD_REQ_SSH_START,
 	BSD_REQ_SSH_STOP,
@@ -19,10 +18,9 @@ enum bootstrapReq
 
 bool bsd_tick_mach_service();
 
-int bsd_enableJIT();
-int bsd_enableJIT2(pid_t pid);
-
 const char* bsd_getsbtoken();
+
+int bsd_enableJIT(pid_t pid);
 
 int bsd_opensshcheck();
 int bsd_opensshctl(bool run);

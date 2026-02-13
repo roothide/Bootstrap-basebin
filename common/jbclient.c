@@ -149,6 +149,7 @@ bool jbclient_roothide_jailbroken()
 	return jailbroken;
 }
 
+/*
 bool jbclient_palehide_present()
 {
 	bool palehide = false;
@@ -165,6 +166,7 @@ bool jbclient_palehide_present()
 
 	return palehide;
 }
+*/
 
 bool jbclient_blacklist_check_pid(pid_t pid)
 {

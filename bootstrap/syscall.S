@@ -20,7 +20,7 @@ _ffsys_fork:
 	b _ffsys_fork_end
 
 _ffsys_fork_err:
-	bl _cerror
+	bl _ffsys_cerror
 	mov w0, #-1
 
 _ffsys_fork_end:
@@ -48,7 +48,7 @@ _ffsys_read:
 #endif
 	stp x29, x30, [SP, #-0x10]!
 	mov x29, sp
-	bl _cerror
+	bl _ffsys_cerror
 	mov sp, x29
 	ldp x29, x30, [SP],#0x10
 #ifdef __arm64e__
@@ -70,7 +70,7 @@ _ffsys_write:
 #endif
 	stp x29, x30, [SP, #-0x10]!
 	mov x29, sp
-	bl _cerror
+	bl _ffsys_cerror
 	mov sp, x29
 	ldp x29, x30, [SP],#0x10
 #ifdef __arm64e__
@@ -92,7 +92,7 @@ _ffsys_close:
 #endif
 	stp x29, x30, [SP, #-0x10]!
 	mov x29, sp
-	bl _cerror
+	bl _ffsys_cerror
 	mov sp, x29
 	ldp x29, x30, [SP],#0x10
 #ifdef __arm64e__
@@ -102,4 +102,26 @@ _ffsys_close:
 #endif
 
 _ffsys_close_end:
+	ret
+
+.global _ffsys_fsync
+_ffsys_fsync:
+	mov x16, #95
+	svc 0x80
+	b.cc _ffsys_fsync_end
+#ifdef __arm64e__
+	pacibsp
+#endif
+	stp x29, x30, [SP, #-0x10]!
+	mov x29, sp
+	bl _ffsys_cerror
+	mov sp, x29
+	ldp x29, x30, [SP],#0x10
+#ifdef __arm64e__
+	retab
+#else
+    ret
+#endif
+
+_ffsys_fsync_end:
 	ret

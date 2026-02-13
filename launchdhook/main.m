@@ -41,6 +41,11 @@ int new_csops(pid_t pid, unsigned int  ops, void * useraddr, size_t usersize)
 		{
 			if((csflags & CS_PLATFORM_BINARY) == 0)
 			{
+				//blacklisted trollstored apps
+				if(isBlacklistedPid(pid)) {
+					return ret;
+				}
+
 				char teamid[255]={0};
 				if(!proc_get_teamid(pid, teamid) || strcmp(teamid, "T8ALTGMVXN")!=0) {
 					return ret;
@@ -71,6 +76,11 @@ int new_csops_audittoken(pid_t pid, unsigned int  ops, void * useraddr, size_t u
 		{
 			if((csflags & CS_PLATFORM_BINARY) == 0)
 			{
+				//blacklisted trollstored apps
+				if(isBlacklistedToken(token)) {
+					return ret;
+				}
+
 				char teamid[255]={0};
 				if(!proc_get_teamid(pid, teamid) || strcmp(teamid, "T8ALTGMVXN")!=0) {
 					return ret;
@@ -271,7 +281,11 @@ int new_posix_spawn(pid_t *restrict pidp, const char *restrict path, const posix
 		return ENOENT;
 	}
 	if(string_has_suffix(path, "/Dopamine.app/Dopamine")) {
-		return ENOENT;
+		char roothidefile[PATH_MAX];
+		snprintf(roothidefile, sizeof(roothidefile), "%s.roothide", path);
+		if(access(roothidefile, F_OK) != 0) {
+			return ENOENT;
+		}
 	}
 
 	char **envc = envbuf_mutcopy(envp);

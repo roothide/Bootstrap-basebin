@@ -9,7 +9,7 @@ TOOL_NAME = appatch
 appatch_FILES = $(wildcard *.c *.m *.mm *.cpp)
 appatch_CFLAGS = -fobjc-arc -I../common $(shell pkg-config --cflags libcrypto) $(shell pkg-config --cflags libplist-2.0)  -Wno-deprecated-declarations -Wno-unused-variable -Wno-unused-function -Wno-unneeded-internal-declaration
 appatch_CCFLAGS = -std=c++11
-appatch_LDFLAGS = -L../common/lib -lcommon -lchoma -lcrypto -lplist-2.0
+appatch_LDFLAGS = -L../common/lib -lcommon -dead_strip -lchoma -lcrypto -lplist-2.0
 appatch_CODESIGN_FLAGS = -Sentitlements.plist
 appatch_INSTALL_PATH = /basebin/
 

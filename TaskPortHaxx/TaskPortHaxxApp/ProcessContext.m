@@ -207,18 +207,18 @@ void DumpRegisters(const arm_thread_state64_internal *old_state) {
     
     memcpy(&_newState->__x[0], args, argCount * sizeof(uint64_t));
     
-    printf("[%s] Calling function %p %s(", self.name, (void*)pc, name);
+    printf("[%s] Calling function %p/%p %s(", self.name, (void*)pc, (void*)xpaci(pc), name);
     for(int i = 0; i < argCount; i++) {
         printf("0x%llx%s", args[i], (i + 1 < argCount) ? ", " : "");
     }
     printf(")\n");
     
     if(IS_ARM64E_DEVICE() && (_newState->__flags & __DARWIN_ARM_THREAD_STATE64_FLAGS_NO_PTRAUTH)==0) {
-        _newState->__x[8] = pc;
+        _newState->__x[8] = xpaci(pc);
         _newState->__pc = brX8Address;
         _newState->__flags &= ~__DARWIN_ARM_THREAD_STATE64_FLAGS_KERNEL_SIGNED_PC;
     } else {
-        _newState->__pc = pc;
+        _newState->__pc = xpaci(pc);
     }
     
     [self resume];

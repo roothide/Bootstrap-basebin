@@ -103,6 +103,8 @@ bool checkpatchedexe(const char* executable_path);
 
 bool is_same_file(const char* path1, const char* path2);
 
+bool otherJailbreakActived();
+
 #ifdef __OBJC__
 
 void hook_class_method(Class clazz, SEL selector, void* replacement, void** old_ptr);

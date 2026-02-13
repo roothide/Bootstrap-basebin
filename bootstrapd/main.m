@@ -9,7 +9,7 @@
 const char* g_sandbox_extensions = NULL;
 const char* g_sandbox_extensions_ext = NULL;
 
-int handleRequest(int conn, pid_t pid, int reqId, NSDictionary* msg)
+int handleRequest(ipc_handle* handle, pid_t pid, int reqId, NSDictionary* msg)
 {
     SYSLOG("handleRequest %d from %d : %s", reqId, pid, msg.debugDescription.UTF8String);
 
@@ -18,64 +18,58 @@ int handleRequest(int conn, pid_t pid, int reqId, NSDictionary* msg)
 		case BSD_REQ_ENABLE_JIT:
 		{
 			int result = 0;
-			if(pid > 0) {
-				result = proc_enable_jit(pid, false);
-			} else {
-				result = -1;
-			}
-
-			reply(conn, @{@"result": @(result)});
-		} break;
-
-		case BSD_REQ_ENABLE_JIT2:
-		{
-			int result = 0;
 			pid_t _pid = [msg[@"pid"] intValue];
-			SYSLOG("BSD_REQ_ENABLE_JIT2 %d -> %d", pid, _pid);
-			if(_pid > 0) {
-				result = proc_enable_jit(_pid, false);
+			pid_t _ppid = proc_get_ppid(_pid);
+			SYSLOG("BSD_REQ_ENABLE_JIT %d -> %d", pid, _pid);
+			if(_pid==pid || _ppid==pid) {
+				if(_pid > 0) {
+					result = proc_enable_jit(_pid, false);
+				} else {
+					result = -1;
+				}
 			} else {
+				SYSLOG("deny process(%d) enable jit for process(%d), parent=%d", pid, _pid, _ppid);
 				result = -1;
 			}
 
-			reply(conn, @{@"result": @(result)});
+			handle->reply(handle, @{@"result": @(result)});
 		} break;
 
 		case BSD_REQ_GET_SBTOKEN:
 		{
-			reply(conn, @{@"result": @(0), @"sbtoken":@(g_sandbox_extensions)});
+			handle->reply(handle, @{@"result": @(0), @"sbtoken":@(g_sandbox_extensions)});
 		} break;
 
 		case BSD_REQ_CHECK_SERVER:
 		{
-			reply(conn, @{@"result": @(0)});
+			handle->reply(handle, @{@"result": @(0)});
 		} break;
 
 		case BSD_REQ_STOP_SERVER:
 		{
-			int result = set_stop_server();
-			reply(conn, @{@"result": @(result)});
+			int result = ipc_set_stop_server();
+			handle->reply(handle, @{@"result": @(result)});
 		} break;
 
 		case BSD_REQ_SSH_START:
 		{
 			int openssh_start();
 			int result = openssh_start();
-			reply(conn, @{@"result": @(result)});
+			handle->reply(handle, @{@"result": @(result)});
 		} break;
 
 		case BSD_REQ_SSH_CHECK:
 		{
 			int openssh_check();
 			int result = openssh_check();
-			reply(conn, @{@"result": @(result)});
+			handle->reply(handle, @{@"result": @(result)});
 		} break;
 
 		case BSD_REQ_SSH_STOP:
 		{
 			int openssh_stop();
 			int result = openssh_stop();
-			reply(conn, @{@"result": @(result)});
+			handle->reply(handle, @{@"result": @(result)});
 		} break;
 
 		case BSD_REQ_VAR_CLEAN:
@@ -84,13 +78,12 @@ int handleRequest(int conn, pid_t pid, int reqId, NSDictionary* msg)
 			int varClean(NSString* bundleIdentifier);
 			int result = varClean(bundleIdentifier);
 
-			reply(conn, @{@"result": @(result)});
+			handle->reply(handle, @{@"result": @(result)});
 		} break;
 
 		default:
-			SYSLOG("unknow request!");
-			reply(conn, nil);
-			abort();
+			handle->reply(handle, nil);
+			ABORT("bootstrapd: unknow request: %d", reqId);
 			break;
 
 	}
@@ -168,7 +161,7 @@ int start_run_server()
 	g_sandbox_extensions = generate_sandbox_extensions(false);
 	g_sandbox_extensions_ext = generate_sandbox_extensions(true);
 
-	int ret = run_ipc_server(handleRequest);
+	int ret = ipc_run_server(handleRequest);
 	SYSLOG("server return");
 	unlink(BSD_PID_PATH);
 

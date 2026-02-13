@@ -22,5 +22,8 @@
 
 	<key>com.apple.private.persona-mgmt</key>
 	<true/>
+
+	<key>com.apple.springboard.CFUserNotification</key>
+	<true/>
 </dict>
 </plist>

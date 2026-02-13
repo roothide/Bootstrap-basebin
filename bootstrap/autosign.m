@@ -30,10 +30,10 @@ bool g_sign_failed = false;
 extern void _exit(int code);
 
 
-int execBinary(const char* path, char** argv)
+int execBinary(const char* path, char** argv, char** envp)
 {
 	pid_t pid=0;
-	int ret = posix_spawn(&pid, path, NULL, NULL, (char* const*)argv, /*environ* ignore preload lib*/ NULL);
+	int ret = posix_spawn(&pid, path, NULL, NULL, (char* const*)argv, /*environ* ignore preload lib*/ envp);
 	if(ret != 0) {
 		return -1;
 	}
@@ -56,8 +56,9 @@ void sign_apps() {
 	SYSLOG("app sign %s", gUpdatedAppBundles.description.UTF8String);
 	for(NSString* appbundle in gUpdatedAppBundles)
 	{
-		char* args[] = {"/basebin/appatch", (char*)jbroot(appbundle.fileSystemRepresentation), NULL};
-		int status = execBinary(jbroot(args[0]), args);
+		//reinstalling/upgrading sileo with other packages on ios15 reuiqres uicache -p to reinject preload
+		char* args[] = {"/basebin/uicache", "-p", (char*)appbundle.fileSystemRepresentation, NULL};
+		int status = execBinary(jbroot(args[0]), args, (char*[]){"UICACHE_NO_REGISTER=1",NULL});
 		if(status != 0) {
 			fprintf(stderr, "signapp %s failed: %d\n", appbundle.fileSystemRepresentation, status);
 			g_sign_failed = true;
@@ -156,7 +157,7 @@ int autosign(char* path)
 
 				//note: only basebin/ldid -M supports deep merge
                 char* args[] = {"/basebin/ldid", "-M", sent, path, NULL};
-				int status = execBinary(jbroot(args[0]), args);
+				int status = execBinary(jbroot(args[0]), args, NULL);
 				if(status != 0) {
 					fprintf(stderr, "ldid %s failed: %d\n", jbpath, status);
 					g_sign_failed = true;
@@ -166,7 +167,7 @@ int autosign(char* path)
 			{
 				//since RootHidePatcher always re-sign with entitlements for all mach-o files....
                 char* args[] = {"/basebin/ldid", "-S", path, NULL};
-				int status = execBinary(jbroot(args[0]), args);
+				int status = execBinary(jbroot(args[0]), args, NULL);
 				if(status != 0) {
 					fprintf(stderr, "ldid %s failed: %d\n", jbpath, status);
 					g_sign_failed = true;
@@ -185,7 +186,7 @@ int autosign(char* path)
 				}
 			} else {
 				char* args[] = {"fastPathSign", path, NULL};
-				int status = execBinary(jbroot("/basebin/fastPathSign"), args);
+				int status = execBinary(jbroot("/basebin/fastPathSign"), args, NULL);
 				if(status != 0) {
 					fprintf(stderr, "sign %s failed: %d\n", jbpath, status);
 					g_sign_failed = true;

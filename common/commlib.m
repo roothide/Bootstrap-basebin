@@ -5,6 +5,7 @@
 #include <sys/sysctl.h>
 #include <mach-o/dyld.h>
 #include <sys/proc_info.h>
+#include <bootstrap.h>
 #include "common.h"
 #include "ipc.h"
 #include "libbsd.h"
@@ -485,8 +486,8 @@ int spawn_bootstrap_binary(char*const* argv, __strong NSString** stdOut, __stron
     
     char **envc = envbuf_mutcopy(environ);
     
+    envbuf_setenv(&envc, "DISABLE_TWEAKS", "1", 1);
     envbuf_setenv(&envc, "DYLD_INSERT_LIBRARIES", jbroot(@"/basebin/bootstrap.dylib").fileSystemRepresentation, 1);
-    
     
     __block NSMutableString* outString=nil;
     __block NSMutableString* errString=nil;
@@ -638,7 +639,7 @@ int requireJIT()
         if(launchctl_support()) {
             result = jbdProcessEnableJIT(getpid(), false);
         } else {
-		    result = bsd_enableJIT();
+		    result = bsd_enableJIT(getpid());
         }
 	});
 	return result;
@@ -1277,4 +1278,52 @@ bool is_same_file(const char* path1, const char* path2)
 	if(stat(path1, &sb1) != 0) return false;
 	if(stat(path2, &sb2) != 0) return false;
 	return sb1.st_dev==sb2.st_dev && sb1.st_ino==sb2.st_ino;
+}
+
+bool otherJailbreakActived()
+{
+    // // may be palehide
+    // uint32_t csFlags = 0;
+    // csops(getpid(), CS_OPS_STATUS, &csFlags, sizeof(csFlags));
+    // if(csFlags & CS_PLATFORM_BINARY)
+    // {
+    //     if(!builtint_palehide_test()) {
+    //         return true;
+    //     }
+    // }
+
+    char pathbuf[PATH_MAX] = {0};
+    int ret = proc_pidpath(1, pathbuf, sizeof(pathbuf));
+    if(ret <= 0) {
+    	SYSERR("proc_pidpath failed for pid 1: %d", ret);
+    	return true;
+    }
+
+    if(strcmp(pathbuf, "/sbin/launchd") != 0) {
+    	return true;
+    }
+
+    mach_port_t port = MACH_PORT_NULL;
+    kern_return_t kr = bootstrap_look_up(bootstrap_port, "com.opa334.jailbreakd", &port);
+    if(kr == KERN_SUCCESS) {
+        return true; // roothide dopamine 1.x
+    }
+
+    if(access("/dev/md0", F_OK)==0) {
+        return true;
+    }
+
+    if(access("/dev/rmd0", F_OK)==0) {
+        return true;
+    }
+
+    struct statfs fs;
+    int sfsret = statfs("/usr/lib", &fs);
+    if (sfsret == 0) {
+        if(strcmp(fs.f_mntonname, "/usr/lib")==0) {
+            return true;
+        }
+    }
+
+    return false;
 }
