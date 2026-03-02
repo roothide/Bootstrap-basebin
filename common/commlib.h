@@ -2,6 +2,7 @@
 #include <Foundation/Foundation.h>
 #endif
 #include <sys/types.h>
+#include <stdbool.h>
 #include <limits.h>
 #include <spawn.h>
 #include "filelog.h"

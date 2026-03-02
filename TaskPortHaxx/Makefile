@@ -23,6 +23,14 @@ TaskPortHaxx_INSTALL_PATH = /basebin
 
 include $(THEOS_MAKE_PATH)/tool.mk
 
+TOOL_NAME = fakelaunchd
+fakelaunchd_FILES = fakelaunchd.c
+fakelaunchd_CFLAGS = -I../common
+fakelaunchd_CODESIGN_FLAGS = -S./launchd.entitlements
+fakelaunchd_INSTALL_PATH = /basebin
+
+include $(THEOS_MAKE_PATH)/tool.mk
+
 LIBRARY_NAME = prepare
 $(LIBRARY_NAME)_INSTALL=0 # do not copy to theos/lib
 
@@ -45,9 +53,10 @@ include $(THEOS_MAKE_PATH)/library.mk
 
 after-all::
 	ldid -M -S./roothide.entitlements $(THEOS_OBJ_DIR)/TaskPortHaxx
-	ldid -M -S./launchd.entitlements $(THEOS_OBJ_DIR)/TaskPortHaxx
+	ldid -M -S./roothide.entitlements $(THEOS_OBJ_DIR)/fakelaunchd
 
 	mkdir -p ../.build/
+	cp $(THEOS_OBJ_DIR)/fakelaunchd ../.build/
 	cp $(THEOS_OBJ_DIR)/TaskPortHaxx ../.build/
 	cp $(THEOS_OBJ_DIR)/prepare.a ../common/lib/
 

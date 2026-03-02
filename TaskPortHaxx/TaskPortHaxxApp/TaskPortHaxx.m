@@ -63,10 +63,6 @@ const char* createLaunchdSymlink()
 {
     static char buffer[255];
 
-    uint32_t execPathSize = PATH_MAX;
-    char executablePath[execPathSize];
-	_NSGetExecutablePath(executablePath, &execPathSize);
-
     NSString *characterSet = @"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
     NSUInteger stringLen = sizeof("/sbin/launchd")-sizeof("/tmp/.");
     NSMutableString *randomString = [NSMutableString stringWithCapacity:stringLen];
@@ -77,7 +73,7 @@ const char* createLaunchdSymlink()
     }
     
     NSString* launchdSymlink = [@"/tmp/." stringByAppendingString:randomString];
-    assert([NSFileManager.defaultManager createSymbolicLinkAtPath:launchdSymlink withDestinationPath:@(executablePath) error:nil]);
+    assert([NSFileManager.defaultManager createSymbolicLinkAtPath:launchdSymlink withDestinationPath:jbroot(@"/basebin/fakelaunchd") error:nil]);
     strncpy(buffer, launchdSymlink.fileSystemRepresentation, sizeof(buffer));
     return buffer;
 }

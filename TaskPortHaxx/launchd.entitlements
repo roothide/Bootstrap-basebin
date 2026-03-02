@@ -12,12 +12,12 @@
 	<true/>
 	<key>com.apple.private.persona-mgmt</key>
 	<true/>
-	<!-- <key>com.apple.private.pmap.load-trust-cache</key>
+	<key>com.apple.private.pmap.load-trust-cache</key>
 	<array>
 		<string>cryptex1.boot.os</string>
 		<string>cryptex1.boot.app</string>
 		<string>cryptex1.safari-downlevel</string>
-	</array> -->
+	</array>
 	<key>com.apple.private.record_system_event</key>
 	<true/>
 	<key>com.apple.private.roots-installed-read-write</key>

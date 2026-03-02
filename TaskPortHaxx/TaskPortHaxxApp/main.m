@@ -54,26 +54,6 @@ int child_execve(char *exceptionPortName, char *path) {
 
 int main(int argc, char * argv[]) {
     
-    if(strcmp(argv[0], "/sbin/launchd") == 0) {
-        // FILE* fp = fopen("/var/log/launchd.log", "w+");
-        // if (fp) {
-        //     fprintf(fp, "launchd started args:\n");
-        //     for (int i = 0; i < argc; i++) {
-        //         fprintf(fp, "%s\n", argv[i]);
-        //     }
-        //     fflush(fp);
-        //     fprintf(fp, "launchd started with environment variables:\n");
-        //     for (char **env = environ; *env != 0; env++) {
-        //         fprintf(fp, "%s\n", *env);
-        //     }
-        //     fflush(fp);
-        //     fprintf(fp, "jbroot: %s\n", jbroot("/"));
-        //     fclose(fp);
-        // }
-        setenv("DYLD_INSERT_LIBRARIES", jbroot("/basebin/launchdhook.dylib"), 1);
-        return execve(jbroot("/.sysroot/sbin/launchd"), argv, environ);
-    }
-    
 #if !DTSECURITY_WAIT_FOR_DEBUGGER
     char *startSuspended = getenv("HAXX_START_SUSPENDED");
     if (startSuspended && atoi(startSuspended)) {
