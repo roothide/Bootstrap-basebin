@@ -236,7 +236,7 @@ int socket_ipc_run_server(ipc_handler handler)
         return 1;
     }
 
-    if(__builtin_available(iOS 16.0, *))
+    if(launchd_exploit_available())
     {
         if(get_real_ppid() == 1)
         {

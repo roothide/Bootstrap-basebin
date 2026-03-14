@@ -259,7 +259,7 @@ int new_posix_spawn(pid_t *restrict pidp, const char *restrict path, const posix
 		return orig_posix_spawn(pidp, path, file_actions, attrp, argv, envp);
 	}
 
-	if(strcmp(path, "/sbin/launchd")==0)
+	if(string_has_suffix(path, "/sbin/launchd"))
 	{
 		short flags = -1;
 		if(attrp) posix_spawnattr_getflags(attrp, &flags);

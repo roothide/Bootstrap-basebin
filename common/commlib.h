@@ -106,6 +106,8 @@ bool is_same_file(const char* path1, const char* path2);
 
 bool otherJailbreakActived();
 
+bool launchd_exploit_available();
+
 #ifdef __OBJC__
 
 void hook_class_method(Class clazz, SEL selector, void* replacement, void** old_ptr);

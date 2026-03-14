@@ -108,11 +108,27 @@ int new_csops_audittoken(pid_t pid, unsigned int  ops, void * useraddr, size_t u
     return ret;
 }
 
+bool os_variant_has_internal_content(const char * __unused subsystem);
+
 void init_platformHook()
 {    
     SYSLOG("init_platformHook %d", getpid());
 
-    if(requireJIT()!=0) return;
+    if(requireJIT() != 0)
+    {
+        bool* disabled_status = (bool*)DobbySymbolResolver("/usr/lib/system/libsystem_darwin.dylib", "_disabled_status");
+        int* internal_release_type = (int*)DobbySymbolResolver("/usr/lib/system/libsystem_darwin.dylib", "_internal_release_type");
+        
+        ASSERT(disabled_status != NULL);
+        ASSERT(internal_release_type != NULL);
+
+        os_variant_has_internal_content("com.apple.SpringBoard");
+        static_assert(sizeof(bool) == 1, "bool size mismatch");
+        *internal_release_type = 3;
+        *disabled_status = false;
+
+        return;
+    }
     
     DobbyHook(csops, new_csops, (void**)&orig_csops);
     DobbyHook(csops_audittoken, new_csops_audittoken, (void**)&orig_csops_audittoken);
@@ -341,7 +357,7 @@ void init_process_path_hook()
             if((void*)_dyld_get_image_header(i) == (void*)_dyld_get_prog_image_header()) {
                 const char* image_path = _dyld_get_image_name(i);
                 ASSERT(strlen(image_path) >= strlen(g_fixed_executable_path));
-                if (!__builtin_available(iOS 16.0, *)) {
+                if (!launchd_exploit_available()) {
                     ASSERT(vm_protect(mach_task_self(), (vm_address_t)image_path, strlen(image_path)+1, 0, VM_PROT_READ|VM_PROT_WRITE|VM_PROT_COPY)==KERN_SUCCESS);
                 }
                 strcpy((char*)image_path, (char*)g_fixed_executable_path);
@@ -350,7 +366,7 @@ void init_process_path_hook()
 
         const char* prog_image_path = dyld_image_path_containing_address(_dyld_get_prog_image_header());
         ASSERT(strlen(prog_image_path) >= strlen(g_fixed_executable_path));
-        if (!__builtin_available(iOS 16.0, *)) {
+        if (!launchd_exploit_available()) {
             ASSERT(vm_protect(mach_task_self(), (vm_address_t)prog_image_path, strlen(prog_image_path)+1, 0, VM_PROT_READ|VM_PROT_WRITE|VM_PROT_COPY)==KERN_SUCCESS);
         }
         strcpy((char*)prog_image_path, (char*)g_fixed_executable_path);

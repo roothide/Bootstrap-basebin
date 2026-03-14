@@ -1327,3 +1327,19 @@ bool otherJailbreakActived()
 
     return false;
 }
+
+bool launchd_exploit_available()
+{
+    if(__builtin_available(iOS 16.0, *)) {
+        return true;
+    }
+
+    if(__builtin_available(iOS 15.8, *)) {
+        cpu_subtype_t cpusubtype = 0;
+        size_t len = sizeof(cpusubtype);
+        assert(sysctlbyname("hw.cpusubtype", &cpusubtype, &len, NULL, 0) == 0);
+        return (cpusubtype & ~CPU_SUBTYPE_MASK) != CPU_SUBTYPE_ARM64E;
+    }
+
+    return false;
+}

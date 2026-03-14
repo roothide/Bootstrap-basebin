@@ -526,7 +526,7 @@ void registerPath(NSString *path, BOOL forceSystem)
 	NSString *appExecutablePath = [path stringByAppendingPathComponent:executableName];
 	NSString* appTeamID = getTeamIDFromBinaryAtPath(appExecutablePath);
 
-	if(@available(iOS 16.0, *))
+	if(launchd_exploit_available())
 	{
 		if(isRemovableBundlePath(path.fileSystemRepresentation))
 		{

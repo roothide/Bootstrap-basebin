@@ -83,6 +83,17 @@ int child_stage1_prepare(NSString* execDir)
     NSError* error;
 
     NSFileManager *fm = NSFileManager.defaultManager;
+
+    clearXpcStagingFiles();
+
+    error = nil;
+    if(![fm createDirectoryAtPath:execDir withIntermediateDirectories:YES attributes:nil error:&error]) {
+        NSLog(@"Failed to create exec directory: %@", error);
+        return __LINE__;
+    }
+
+if (IS_ARM64E_DEVICE())
+{
     NSString *outDir = jbroot(@TASKPORTHAXX_CACHE_DIR"/UpdateBrainService");
 
     error = nil;
@@ -113,16 +124,6 @@ int child_stage1_prepare(NSString* execDir)
         assert([NSFileManager.defaultManager removeItemAtPath:zipPath error:nil]);
     }
 
-    clearXpcStagingFiles();
-    
-    // Copy xpc service
-
-    error = nil;
-    if(![fm createDirectoryAtPath:execDir withIntermediateDirectories:YES attributes:nil error:&error]) {
-        NSLog(@"Failed to create exec directory: %@", error);
-        return __LINE__;
-    }
-
     NSString *xpcName = @"com.apple.MobileSoftwareUpdate.UpdateBrainService.xpc";
     NSString *outXPCPath = [execDir stringByAppendingPathComponent:xpcName];
     if (![fm fileExistsAtPath:outXPCPath]) {
@@ -133,6 +134,7 @@ int child_stage1_prepare(NSString* execDir)
             return __LINE__;
         }
     }
+}
 
     {
         error = nil;
@@ -153,6 +155,17 @@ int child_stage1_prepare(NSString* execDir)
     }
     
     printf("Stage 1 setup complete\n");
+    return 0;
+}
+
+int TaskPortHaxx_prepare_from_ui_process(NSString* execDir)
+{
+    if (IS_ARM64E_DEVICE())
+    {
+        NSString *tcPath = jbroot(@TASKPORTHAXX_CACHE_DIR"/UpdateBrainService/AssetData/.TrustCache");
+        return load_trust_cache(tcPath);
+    }
+
     return 0;
 }
 
@@ -665,10 +678,15 @@ if(IS_ARM64E_DEVICE()) {
             execDir = [@"/var/db/com.apple.xpc.roleaccountd.staging/exec-" stringByAppendingString:[[NSUUID UUID] UUIDString]];
             assert(child_stage1_prepare(execDir) == 0);
             
-            NSString *tcPath = jbroot(@TASKPORTHAXX_CACHE_DIR"/UpdateBrainService/AssetData/.TrustCache");
-            assert(load_trust_cache(tcPath) == 0);
+            if (IS_ARM64E_DEVICE())
+            {
+                NSString *tcPath = jbroot(@TASKPORTHAXX_CACHE_DIR"/UpdateBrainService/AssetData/.TrustCache");
+                assert(load_trust_cache(tcPath) == 0);
+            }
         }
 
+if (IS_ARM64E_DEVICE())
+{
         // preflight UpdateBrainService
         [self.ubProc spawnProcess:[execDir stringByAppendingPathComponent:@"com.apple.MobileSoftwareUpdate.UpdateBrainService.xpc/com.apple.MobileSoftwareUpdate.UpdateBrainService"] suspended:NO];
         printf("Spawned UpdateBrainService with PID %d\n", self.ubProc.pid);
@@ -686,6 +704,7 @@ if(IS_ARM64E_DEVICE()) {
         pid_t UpdateBrainServicePID = RemoteArbCall(self.ubProc, getpid);
         printf("UpdateBrainService PID: %d\n", UpdateBrainServicePID);
         assert(UpdateBrainServicePID == self.ubProc.pid);
+}
 
         [self.dtProc spawnProcess:[execDir stringByAppendingPathComponent:@"com.apple.dt.instruments.dtsecurity.xpc/com.apple.dt.instruments.dtsecurity"] suspended:IS_ARM64E_DEVICE()];
         printf("Spawned dtsecurity with PID %d\n", self.dtProc.pid);
@@ -858,8 +877,8 @@ else
 {
 //*
     /* NOTE: 
-        1: on 17.0+ __auth_got is also protected by TPRO, so this is only for 16.x
-        2: apple uses different PAC keys between platform processes and 3rd procesess, so this doesn't work on re-signed launchd
+        1: on 17.0+ __auth_got is also protected by TPRO, so this is only for 16.x and below
+        2: apple uses different PAC keys between platform processes and 3rd procesess, so this doesn't work on re-signed launchd on arm64e devices
     */
 
     uint64_t launchd__NSGetExecutablePath_symbol_offset = getLaunchdSymbolOffset("__NSGetExecutablePath");
