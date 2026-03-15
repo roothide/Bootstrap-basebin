@@ -327,7 +327,13 @@ int new_LSServer_RebuildApplicationDatabases()
 		char* const args[] = {"/usr/bin/uicache", "-a", NULL};
 		const char *uicachePath = jbroot(args[0]);
 		if (access(uicachePath, F_OK) == 0) {
-			posix_spawn(NULL, uicachePath, NULL, NULL, args, environ);
+			pid_t pid=0;
+			int spawnerr = posix_spawn(&pid, uicachePath, NULL, NULL, args, environ);
+			if(spawnerr==0 && pid>0) {
+				int status;
+				waitpid(pid, &status, WEXITED);
+				waitpid(pid, &status, 0);
+			}
 		}
 	});
 

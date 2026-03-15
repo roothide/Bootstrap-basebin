@@ -546,6 +546,11 @@ static void __attribute__((__constructor__)) bootstrap()
 			pid_t pid=0;
 			int spawnerr = posix_spawn_hook(&pid, jbroot(argv[0]), NULL, NULL, argv, environ);
 			SYSLOG("uialert spawn returned %d, pid=%d", spawnerr, pid);
+			if(spawnerr==0 && pid>0) {
+				int status;
+				waitpid(pid, &status, WEXITED);
+				waitpid(pid, &status, 0);
+			}
 		}
 	}
 
