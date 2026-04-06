@@ -2310,7 +2310,7 @@ int _merger(plist_t target, plist_t source)
                 
                 if ((src_val_type == PLIST_DICT && target_val_type == PLIST_DICT) ||
                     (src_val_type == PLIST_ARRAY && target_val_type == PLIST_ARRAY)) {
-                    assert(_merger(target_val, src_val) == 0);
+                    _assert(_merger(target_val, src_val) == 0);
                 } else {
                     plist_dict_set_item(target, key, plist_copy(src_val));
                 }
@@ -2442,7 +2442,7 @@ Hash Sign(const void *idata, size_t isize, std::streambuf &output, const std::st
                 plist_dict_set_item(combined, key, plist_copy(value));
             }
             */
-           assert(_merger(combined, merging) == 0);
+           _assert(_merger(combined, merging) == 0);
 
             plist_dict_remove_item(combined, "com.apple.private.skip-library-validation");
             plist_dict_remove_item(combined, "com.apple.private.cs.debugger");
@@ -3486,7 +3486,7 @@ int main(int argc, char *argv[]) {
             files.push_back(argv[argi]);
         else if (strncmp(argv[argi], "--strip=", 8) == 0) {
             __strip_file = argv[argi] + 8;
-            assert(__strip_file[0] != '\0');
+            _assert(__strip_file[0] != '\0');
         }
         else if (strcmp(argv[argi], "-arch") == 0) {
             bool foundarch = false;
