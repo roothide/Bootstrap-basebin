@@ -315,18 +315,6 @@ int new_posix_spawn(pid_t *restrict pidp, const char *restrict path, const posix
 	const char* newpath = NULL;
 	const char* insertlib = NULL;
 
-	// if(strcmp(path, "/usr/libexec/debugserver") == 0)
-	// {
-	// 	const char* mypath = jbroot("/usr/bin/xcodeanydebug/debugserver");
-	// 	if(access(mypath, F_OK)==0) {
-	// 		newpath = strdup(mypath);
-
-	// 		if (__builtin_available(iOS 16.0, *)) {
-	// 			posix_spawnattr_set_launch_type_np(attrp, 0);
-	// 		}
-	// 	}
-	// }
-
 	if(isRemovableBundlePath(path))
 	{
 		is_app_path = true;

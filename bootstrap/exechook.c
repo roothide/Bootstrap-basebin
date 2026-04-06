@@ -17,6 +17,33 @@
 #include "envbuf.h"
 #include "jailbreakd.h"
 
+
+typedef struct { const char *name; const char *value; int min_level; } opt_entry;
+
+static const opt_entry kOptions[] = {
+    // Level 1: core hardening
+	// { "alwaysHaveABadTime", "true",  1 },  // eliminate DoubleShape → no addrof/fakeobj
+    { "forceGCSlowPaths",  "true",  1 },   // GC slow path → more safety checks
+    { "useConcurrentGC",   "false", 1 },   // no GC races (CVE-2025-43529)
+    // Level 2: disable JIT speculation
+    { "useDFGJIT",         "false", 2 },   // no speculative opt (CVE-2025-31277)
+    { "useFTLJIT",         "false", 2 },   // disable most aggressive JIT tier
+    { "useGenerationalGC", "false", 2 },   // simplify GC
+    // Level 3: full JIT lockdown
+    { "useLLInt",          "true",  3 },
+    { "useLLIntICs",       "false", 3 },    // no interpreter inline caches
+    { "useBaselineJIT",    "false", 3 },
+    { "useBBQJIT",         "false", 3 },
+    { "useOMGJIT",         "false", 3 },
+    { "useDOMJIT",         "false", 3 },
+    { "useRegExpJIT",      "false", 3 },
+    { "useJITCage",        "false", 3 },
+    { "useConcurrentJIT",  "false", 3 },
+    { NULL, NULL, 0 }
+};
+
+static int g_WebContent_level = 2;
+
 int posix_spawn_hook(pid_t *restrict pidp, const char *restrict path, const posix_spawn_file_actions_t *restrict file_actions, posix_spawnattr_t *restrict attrp, char *const argv[restrict], char *const envp[restrict])
 {
 	SYSLOG("posix_spawn_hook: %s\n", path);
@@ -160,6 +187,19 @@ int posix_spawn_hook(pid_t *restrict pidp, const char *restrict path, const posi
 				//restore flags
 				posix_spawnattr_setflags(attrp, flags);
 				return 201;
+			}
+		}
+	}
+
+	if(string_has_suffix(path, "/System/Library/Frameworks/WebKit.framework/XPCServices/com.apple.WebKit.WebContent.xpc/com.apple.WebKit.WebContent"))
+	{
+		if(access(jbroot("/Library/MobileSubstrate/DynamicLibraries/lockdown.dylib"), F_OK)==0)
+		{
+			char envname[64];
+			for (const opt_entry *o = kOptions; o->name; o++) {
+				if (o->min_level > g_WebContent_level) continue;
+				snprintf(envname, sizeof(envname), "JSC_%s", o->name);
+				envbuf_setenv(&envc, envname, o->value, 1);
 			}
 		}
 	}
