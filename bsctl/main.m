@@ -49,8 +49,11 @@ int main(int argc, char *argv[], char *envp[])
 			FileLogDebug("bsctl startup: bootstrapping launch daemons ...");
 			int ret1 = spawn_bootstrap_binary((char*const[]){"/usr/bin/launchctl", "bootstrap", "system", "/Library/LaunchDaemons", NULL}, NULL, NULL);
 
-			FileLogDebug("bsctl startup: refreshing jailbroken apps ...");
-			int ret2 = spawn_bootstrap_binary((char*const[]){"/usr/bin/uicache", "-a", NULL}, NULL, NULL);
+			int ret2 = 0;
+			if(access(jbroot("/.disable_auto_uicache"), F_OK) != 0) {
+				FileLogDebug("bsctl startup: refreshing jailbroken apps ...");
+				 ret2 = spawn_bootstrap_binary((char*const[]){"/usr/bin/uicache", "-a", NULL}, NULL, NULL);
+			}
 
 			return (ret1==0 && ret2==0) ? 0 : -1;
 		}
