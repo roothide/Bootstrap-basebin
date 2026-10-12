@@ -10,12 +10,13 @@ TWEAK_NAME = roothidehooks
 
 roothidehooks_FILES = $(wildcard *.x) $(wildcard *.c) $(wildcard *.m)
 roothidehooks_CFLAGS = -Werror -fobjc-arc -I../common
-roothidehooks_LDFLAGS = -rpath @loader_path/.jbroot/Library/Frameworks -rpath @loader_path/fallback -L../common/lib -lcommon -dead_strip
+roothidehooks_LDFLAGS = -rpath @loader_path/present -rpath @loader_path/fallback -L../common/lib -lcommon -dead_strip -lbsm
 roothidehooks_INSTALL_PATH = /basebin
 
 include $(THEOS_MAKE_PATH)/tweak.mk
 
 after-all::
+	install_name_tool -delete_rpath @loader_path/.jbroot/Library/Frameworks $(THEOS_OBJ_DIR)/roothidehooks.dylib || true
 	install_name_tool -change @loader_path/.jbroot/usr/lib/libsubstrate.dylib @rpath/CydiaSubstrate.framework/CydiaSubstrate $(THEOS_OBJ_DIR)/roothidehooks.dylib
 	ldid -S $(THEOS_OBJ_DIR)/roothidehooks.dylib
 

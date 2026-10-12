@@ -1353,3 +1353,12 @@ int wait_for_exit(pid_t pid)
         }
     }
 }
+
+int setBasebinDependency(bool present)
+{
+    if(present) {
+        return symlink(jbroot("/Library/Frameworks"), jbroot("/var/mobile/.present"));
+    } else {
+        return unlink(jbroot("/var/mobile/.present"));
+    }
+}

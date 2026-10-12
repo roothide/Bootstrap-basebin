@@ -50,6 +50,8 @@ kern_return_t IOConnectCallStructMethod_hook(mach_port_t connection, uint32_t se
 				ASSERT(unlink(jbroot("/var/mobile/.tweakenabled")) == 0);
 			}
 
+			setBasebinDependency(false);
+
 			reboot3(RB2_USERREBOOT);
 
 			return 0;

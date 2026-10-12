@@ -84,7 +84,10 @@ extern const uint32_t SANDBOX_EXTENSION_NO_STORAGE_CLASS;
 extern const uint32_t SANDBOX_EXTENSION_PREFIXMATCH;
 extern const uint32_t SANDBOX_EXTENSION_UNRESOLVED;
 
-#define SANDBOX_NAMED		0x0001
+#define SANDBOX_STRING  0x0000
+#define SANDBOX_NAMED   0x0001
+#define SANDBOX_BUILTIN 0x0002
+#define SANDBOX_FILE    0x0003
 
 int sandbox_init(const char *profile, uint64_t flags, char **errorbuf);
 int sandbox_init_with_parameters(const char *profile, uint64_t flags, const char *const parameters[], char **errorbuf);

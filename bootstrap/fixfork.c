@@ -438,15 +438,20 @@ void forkfix(const char* tag, bool flag, bool child)
     kern_return_t kr = -1;
     mach_port_t task = _task_self_trap();
 
-    if(!child &&flag) {
+    if(!child && flag) {
         unsigned int count=0;
         thread_act_array_t list=NULL;
         fork_assert(task_threads(task, &list, &count)==KERN_SUCCESS);
+        mach_port_t thread_self_port = mach_thread_self();
         for(int i=0; i<count; i++) {
-            if(list[i] != mach_thread_self()) {
+            if(list[i] != thread_self_port) {
                 fork_assert(thread_suspend(list[i]) == KERN_SUCCESS);
                 fork_assert(mach_port_deallocate(task, list[i]) == KERN_SUCCESS);
             }
+        }
+        fork_assert(mach_port_deallocate(task, thread_self_port) == KERN_SUCCESS);
+        if(list) {
+            fork_assert(vm_deallocate(task, (mach_vm_address_t)list, count*sizeof(list[0])) == KERN_SUCCESS);
         }
     }
 
@@ -504,11 +509,16 @@ void forkfix(const char* tag, bool flag, bool child)
         unsigned int count=0;
         thread_act_array_t list=NULL;
         fork_assert(task_threads(task, &list, &count)==KERN_SUCCESS);
+        mach_port_t thread_self_port = mach_thread_self();
         for(int i=0; i<count; i++) {
-            if(list[i] != mach_thread_self()) {
+            if(list[i] != thread_self_port) {
                 fork_assert(thread_resume(list[i]) == KERN_SUCCESS);
                 fork_assert(mach_port_deallocate(task, list[i]) == KERN_SUCCESS);
             }
+        }
+        fork_assert(mach_port_deallocate(task, thread_self_port) == KERN_SUCCESS);
+        if(list) {
+            fork_assert(vm_deallocate(task, (mach_vm_address_t)list, count*sizeof(list[0])) == KERN_SUCCESS);
         }
     }   
 }

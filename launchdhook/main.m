@@ -6,6 +6,7 @@
 #include <sys/stat.h>
 #include <sys/mman.h>
 #include <xpc/xpc.h>
+#include <xpc_private.h>
 #include <sandbox.h>
 #include <libgen.h>
 #include <spawn.h>
@@ -305,6 +306,7 @@ int new_posix_spawn(pid_t *restrict pidp, const char *restrict path, const posix
 			}
 			if ((sb.st_mode & (S_ISGID))) {
 				posix_spawnattr_set_persona_gid_np(attrp, sb.st_gid);
+				posix_spawnattr_set_persona_groups_np(attrp, 1, &sb.st_gid, KAUTH_UID_NONE);
 			}
 		}
 	}

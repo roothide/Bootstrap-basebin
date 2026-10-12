@@ -20,6 +20,12 @@ void enableCommLog(void* debugLog, void* errorLog);
 extern int posix_spawnattr_set_persona_np(const posix_spawnattr_t* __restrict, uid_t, uint32_t);
 extern int posix_spawnattr_set_persona_uid_np(const posix_spawnattr_t* __restrict, uid_t);
 extern int posix_spawnattr_set_persona_gid_np(const posix_spawnattr_t* __restrict, uid_t);
+extern int posix_spawnattr_set_persona_groups_np(const posix_spawnattr_t * __restrict, int, gid_t * __restrict, uid_t);
+
+int     posix_spawnattr_set_uid_np(const posix_spawnattr_t * __restrict, uid_t) __API_AVAILABLE(macos(10.15), ios(13.0), tvos(13.0), watchos(6.0));
+int     posix_spawnattr_set_gid_np(const posix_spawnattr_t * __restrict, gid_t) __API_AVAILABLE(macos(10.15), ios(13.0), tvos(13.0), watchos(6.0));
+int     posix_spawnattr_set_groups_np(const posix_spawnattr_t * __restrict, int, gid_t * __restrict, uid_t) __API_AVAILABLE(macos(10.15), ios(13.0), tvos(13.0), watchos(6.0));
+int     posix_spawnattr_set_login_np(const posix_spawnattr_t * __restrict, const char * __restrict) __API_AVAILABLE(macos(10.15), ios(13.0), tvos(13.0), watchos(6.0));
 
 extern int posix_spawnattr_set_launch_type_np(const posix_spawnattr_t *attr, uint8_t launch_type) __API_AVAILABLE(macos(13.0), ios(16.0), tvos(16.0), watchos(9.0));
 extern int posix_spawnattr_getmacpolicyinfo_np(const posix_spawnattr_t * __restrict attr, const char *policyname, void **datap, size_t *datalenp);
@@ -109,6 +115,8 @@ bool is_same_file(const char* path1, const char* path2);
 bool otherJailbreakActived();
 
 bool launchd_exploit_available();
+
+int setBasebinDependency(bool present);
 
 #ifdef __OBJC__
 
