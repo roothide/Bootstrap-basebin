@@ -234,7 +234,8 @@ int orig_posix_spawn_wrapper(pid_t *restrict pidp, const char *restrict path, co
 	if (argv) for (int i = 0; argv[i]; i++) FileLogDebug("\targs[%d] = %s", i, argv[i]);
 	if (envp) for (int i = 0; envp[i]; i++) FileLogDebug("\tenvp[%d] = %s", i, envp[i]);
 
-	pid_t pid = 0;
+	pid_t pidval = 0;
+	if (!pidp) pidp = &pidval;
 
 	posix_spawnattr_t attr=NULL;
 	if(!attrp) {
@@ -244,8 +245,10 @@ int orig_posix_spawn_wrapper(pid_t *restrict pidp, const char *restrict path, co
 	
 	posix_spawnattr_setexceptionports_np(attrp, EXC_MASK_ALL, MACH_PORT_NULL, 0, 0);
 	// int key = crashreporter_pause();
-	int ret = orig_posix_spawn(&pid, path, file_actions, attrp, argv, envp);
+	int ret = orig_posix_spawn(pidp, path, file_actions, attrp, argv, envp);
 	// crashreporter_resume(key);
+
+	pid_t pid = *pidp;
 
 	if(ret == 0) {
 		register_job(pid);
@@ -255,7 +258,6 @@ int orig_posix_spawn_wrapper(pid_t *restrict pidp, const char *restrict path, co
 
 	if(attr) posix_spawnattr_destroy(&attr);
 
-	if(pidp) *pidp = pid;
 	return ret;
 }
 
@@ -430,8 +432,8 @@ int new_posix_spawn(pid_t *restrict pidp, const char *restrict path, const posix
 		}
 	}
 
-	pid_t pid = 0;
-	if(!pidp) pidp = &pid;
+	pid_t pidval = 0;
+	if (!pidp) pidp = &pidval;
 
 	volatile pid_t* old_pidp = pidp;
 	volatile pid_t* blacklistedPidp = NULL;
@@ -538,8 +540,10 @@ int __posix_spawn(pid_t *restrict pid, const char *restrict path, struct _posix_
 int (*__posix_spawn_hook_orig)(pid_t *restrict pidp, const char *restrict path, struct _posix_spawn_args_desc *desc, char *const argv[restrict], char *const envp[restrict]);
 int __posix_spawn_hook(pid_t *restrict pidp, const char *restrict path, struct _posix_spawn_args_desc *desc, char *const argv[restrict], char *const envp[restrict])
 {
-	pid_t pid = 0;
-	int ret = __posix_spawn_hook_orig(&pid, path, desc, argv, envp);
+	pid_t pidval = 0;
+	if (!pidp) pidp = &pidval;
+	int ret = __posix_spawn_hook_orig(pidp, path, desc, argv, envp);
+	pid_t pid = *pidp;
 
 	if(ret==0 && pid>0 && desc) 
 	{
@@ -559,7 +563,6 @@ int __posix_spawn_hook(pid_t *restrict pidp, const char *restrict path, struct _
 		}
 	}
 
-	if(pidp) *pidp = pid;
 	return ret;
 }
 
