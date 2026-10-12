@@ -7,6 +7,7 @@
 #define dispatch_release(x)
 
 #include <bootstrap.h>
+#include <xpc_private.h>
 #include <xpc/xpc.h>
 #include "common.h"
 #include "ipc.h"

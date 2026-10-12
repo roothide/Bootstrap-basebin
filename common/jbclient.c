@@ -1,5 +1,6 @@
 
 #include "jbclient.h"
+#include <xpc_private.h>
 
 #define OS_ALLOC_ONCE_KEY_MAX    100
 

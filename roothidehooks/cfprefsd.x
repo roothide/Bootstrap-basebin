@@ -1,6 +1,8 @@
-#import <Foundation/Foundation.h>
+#include <private/bsm/audit.h>
+#include <Foundation/Foundation.h>
 #include <substrate.h>
 #include <roothide.h>
+#include <xpc_private.h>
 #include <xpc/xpc.h>
 #include "common.h"
 
@@ -104,8 +106,10 @@ void* DISPATCH_orig__CFPrefsDaemon_handleMessage_fromPeer_replyHandler__(id self
 }
 void* new__CFPrefsDaemon_handleMessage_fromPeer_replyHandler__(id self, xpc_object_t message, xpc_connection_t connection, void* replyHandler)
 {
-    uid_t clientUid = xpc_connection_get_euid(connection);
-    pid_t clientPid = xpc_connection_get_pid(connection);
+	audit_token_t token = { 0 };
+	xpc_dictionary_get_audit_token(message, &token);
+    uid_t clientUid = audit_token_to_euid(token);
+    pid_t clientPid = audit_token_to_pid(token);
 
 	NSLog(@"CFPrefsDaemon: handleMessage %p/%d pid=%d uid=%d proc=%s", message, xpc_get_type(message)==XPC_TYPE_DICTIONARY, clientPid, clientUid, proc_get_path(clientPid,NULL));
 

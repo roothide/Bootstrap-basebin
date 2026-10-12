@@ -13,7 +13,7 @@ LIBRARY_NAME = libcommon
 $(LIBRARY_NAME)_INSTALL=0 # do not copy to theos/lib
 
 libcommon_FILES = $(wildcard *.c *.m *.mm *.cpp)
-libcommon_CFLAGS = -fvisibility=hidden -I. -DFISHHOOK_EXPORT -fobjc-arc -Wno-unused-variable -Wno-unused-but-set-variable -Wno-deprecated-declarations
+libcommon_CFLAGS = -fvisibility=hidden -I. -DFISHHOOK_EXPORT -fobjc-arc -Wno-unused-variable -Wno-unused-but-set-variable -Wno-deprecated-declarations -Wno-module-import-in-extern-c
 libcommon_CCFLAGS = -fvisibility=hidden -std=c++11
 libcommon_LFGLAGS = -L.
 libcommon_LINKAGE_TYPE = static

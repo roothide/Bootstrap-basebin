@@ -8,6 +8,7 @@
 #include <sandbox.h>
 #include <libproc.h>
 #include <xpc/xpc.h>
+#include <xpc_private.h>
 #include <sys/proc.h>
 // #include <sys/proc_info.h>
 

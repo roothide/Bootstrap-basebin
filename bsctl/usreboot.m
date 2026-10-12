@@ -1,5 +1,6 @@
 #include <CoreFoundation/CoreFoundation.h>
 #include <mach/machine/kern_return.h>
+#include <xpc_private.h>
 #include <xpc/xpc.h>
 #include <xpc/connection.h>
 #include <bootstrap.h>

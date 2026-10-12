@@ -8,6 +8,7 @@
 @import Darwin;
 #include <crt_externs.h>
 #include <xpc/xpc.h>
+#include <xpc_private.h>
 #include "commlib.h"
 
 #undef abort

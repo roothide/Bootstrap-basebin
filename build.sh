@@ -9,6 +9,11 @@ cd "$WORK_DIR"
 rm -rf .build
 mkdir .build
 
+if [ -f "$(xcrun --sdk iphoneos --show-sdk-path)/usr/include/xpc.modulemap" ] && [ -d "$WORK_DIR/common/xpc" ]; then
+	echo "**** SDK provides xpc.modulemap, ignoring vendored $XPC_MODULE ****"
+	rm -rf "$WORK_DIR/common/xpc"
+fi
+
 cd ChOma-main
 make clean-all && make TARGET=ios
 cd -

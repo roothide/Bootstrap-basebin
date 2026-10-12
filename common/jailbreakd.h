@@ -3,6 +3,7 @@
 
 #include <unistd.h>
 #include <xpc/xpc.h>
+#include <xpc_private.h>
 
 typedef enum {
 	JBD_MSG_TEST_CALL = 101,

@@ -6,7 +6,7 @@
 #include <limits.h>
 #include <spawn.h>
 #include "filelog.h"
-#include "_ASSERT.h"
+#include "commassert.h"
 
 extern char*const* environ;
 
