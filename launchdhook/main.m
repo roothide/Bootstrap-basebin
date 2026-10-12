@@ -247,6 +247,10 @@ int orig_posix_spawn_wrapper(pid_t *restrict pidp, const char *restrict path, co
 	int ret = orig_posix_spawn(&pid, path, file_actions, attrp, argv, envp);
 	// crashreporter_resume(key);
 
+	if(ret == 0) {
+		register_job(pid);
+	}
+
 	FileLogDebug("posix_spawn(%s) ret=%d pid=%d", path, ret, pid);
 
 	if(attr) posix_spawnattr_destroy(&attr);

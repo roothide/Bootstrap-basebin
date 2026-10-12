@@ -48,6 +48,8 @@ pid_t get_real_ppid();
 
 bool launchctl_support();
 
+void launchd_panic(const char* fmt, ...);
+
 int wait_for_exit(pid_t pid);
 
 bool proc_traced(pid_t pid);
@@ -55,6 +57,7 @@ bool proc_debugged(pid_t pid);
 int proc_get_status(int pid);
 pid_t proc_get_ppid(pid_t pid);
 int proc_get_pidversion(pid_t pid);
+uint64_t proc_get_uniqueid(pid_t pid);
 int proc_paused(pid_t pid, bool* paused);
 char* proc_get_path(pid_t pid, char buffer[PATH_MAX]);
 char* proc_get_identifier(pid_t pid, char buffer[255]);
@@ -78,7 +81,7 @@ void killAllForBundle(const char* bundlePath);
 void killAllForExecutable(const char* path, int signal);
 
 bool isRemovableBundlePath(const char* path);
-bool isSubPathOf(const char* parent, const char* child);
+bool isSubPathOf(const char* parent, const char* child); //not work for jbroot:/var/...
 
 bool string_has_prefix(const char *str, const char* prefix);
 bool string_has_suffix(const char* str, const char* suffix);
@@ -97,6 +100,9 @@ bool isBlacklistedPid(pid_t pid);
 
 pid_t* allocBlacklistProcessId();
 void commitBlacklistProcessId(pid_t* pidp);
+
+void register_job(pid_t pid);
+uint64_t get_job_cache(pid_t pid);
 
 void loadAppStoredIdentifiers();
 
